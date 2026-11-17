@@ -246,7 +246,12 @@ private fun CinemaApp() {
                         isFavourite = movie.url in favourites,
                         onToggleFavourite = { toggleFavourite(movie.url) },
                         onBack = { page = movieBack },
-                        onWatch = { url ->
+                        savedVoice = local.playbackSelection(movie.url)?.voice.orEmpty(),
+                        onWatch = { url, voice ->
+                            if (voice.isNotBlank()) {
+                                val previous = local.playbackSelection(url) ?: PlaybackSelection()
+                                local.savePlaybackSelection(url, previous.copy(voice = voice))
+                            }
                             browsingSource = url
                             page = Page.FILM_PLAYER
                         },

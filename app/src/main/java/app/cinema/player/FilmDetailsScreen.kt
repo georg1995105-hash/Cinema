@@ -419,6 +419,7 @@ internal object FilmPageParser {
     }.getOrNull()
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun FilmDetails(
     movie: CatalogMovie,
@@ -426,13 +427,21 @@ internal fun FilmDetails(
     isFavourite: Boolean,
     onToggleFavourite: () -> Unit,
     onBack: () -> Unit,
-    onWatch: (String) -> Unit,
+    savedVoice: String,
+    onWatch: (String, String) -> Unit,
     onRelated: (CatalogMovie) -> Unit,
     onPerson: (FilmPerson) -> Unit
 ) {
     val context = LocalContext.current
     var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
     var loadDone by remember(movie.url) { mutableStateOf(info?.franchiseResolved == true) }
+    var showWatchMenu by remember(movie.url) { mutableStateOf(false) }
+    var voiceId by remember(movie.url) { mutableStateOf(savedVoice) }
+    LaunchedEffect(info?.voices) {
+        val available = info?.voices.orEmpty()
+        if (available.isNotEmpty() && available.none { it.id == voiceId })
+            voiceId = available.first().id
+    }
     val webView = if (!loadDone) remember(context, movie.url) {
         val handler = Handler(Looper.getMainLooper())
         WebView(context).apply {
@@ -539,61 +548,47 @@ internal fun FilmDetails(
                 }
             }
             item {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Column(Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(11.dp)) {
                     if (!wide) {
-                        Box(Modifier.width(142.dp).aspectRatio(.70f)
+                        Box(Modifier.fillMaxWidth().height(360.dp)
                             .clip(RoundedCornerShape(16.dp)).background(appCard),
                             contentAlignment = Alignment.Center) {
                             if (movie.poster.isNotBlank()) {
                                 AsyncImage(
                                     model = ImageRequest.Builder(context).data(movie.poster)
                                         .addHeader("Referer", source).build(),
-                                    contentDescription = movie.title,
-                                    contentScale = ContentScale.Crop,
+                                    contentDescription = movie.title, contentScale = ContentScale.Fit,
                                     modifier = Modifier.fillMaxSize()
                                 )
-                            } else {
-                                Icon(Icons.Outlined.Movie, contentDescription = null,
-                                    modifier = Modifier.size(42.dp), tint = appMuted)
-                            }
+                            } else Icon(Icons.Outlined.Movie, contentDescription = null,
+                                tint = appMuted, modifier = Modifier.size(44.dp))
                         }
-                        Spacer(Modifier.width(16.dp))
                     }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                        Text(movie.title, style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold)
-                        if (!info?.originalTitle.isNullOrBlank()) {
-                            Text(info!!.originalTitle, style = MaterialTheme.typography.bodyMedium,
-                                color = appMuted)
-                        }
-                        if (info?.rating?.isNotBlank() == true) {
-                            Text(info!!.rating, color = appBlue,
-                                style = MaterialTheme.typography.bodyMedium)
-                        }
-                        if (movie.details.isNotBlank()) {
-                            Text(movie.details, color = appMuted, style = MaterialTheme.typography.bodyMedium)
-                        }
-                        Spacer(Modifier.height(3.dp))
-                        Button(
-                            onClick = { onWatch(movie.url) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
+                    Text(movie.title, style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold)
+                    if (!info?.originalTitle.isNullOrBlank())
+                        Text(info!!.originalTitle, color = appMuted,
+                            style = MaterialTheme.typography.bodyMedium)
+                    if (info?.rating?.isNotBlank() == true)
+                        Text(info!!.rating, color = appBlue,
+                            style = MaterialTheme.typography.bodyMedium)
+                    if (movie.details.isNotBlank())
+                        Text(movie.details, color = appMuted,
+                            style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = { showWatchMenu = true },
+                            modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) {
                             Icon(Icons.Outlined.PlayArrow, contentDescription = null)
-                            Spacer(Modifier.width(5.dp))
+                            Spacer(Modifier.width(7.dp))
                             Text("Смотреть")
                         }
-                        OutlinedButton(
-                            onClick = onToggleFavourite,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Icon(
-                                if (isFavourite) Icons.Outlined.BookmarkAdded else Icons.Outlined.BookmarkAdd,
-                                contentDescription = null
-                            )
-                            Spacer(Modifier.width(5.dp))
-                            Text(if (isFavourite) "Сохранено" else "В избранное")
+                        OutlinedIconButton(onClick = onToggleFavourite) {
+                            Icon(if (isFavourite) Icons.Outlined.BookmarkAdded
+                                else Icons.Outlined.BookmarkAdd,
+                                contentDescription = if (isFavourite) "Удалить из избранного"
+                                    else "В избранное", tint = appBlue)
                         }
                     }
                 }
@@ -656,9 +651,31 @@ internal fun FilmDetails(
                     }
                 }
             }
+            if (info?.directors?.isNotEmpty() == true) {
+                item {
+                    Text("Режиссёры", style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(9.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(info!!.directors, key = { it.name }) { director ->
+                            Column(Modifier.width(92.dp).clickable { onPerson(director) }) {
+                                Box(Modifier.fillMaxWidth().aspectRatio(.80f)
+                                    .clip(RoundedCornerShape(12.dp)).background(appCard),
+                                    contentAlignment = Alignment.Center) {
+                                    ActorPortrait(director, source, Modifier.fillMaxSize())
+                                }
+                                Spacer(Modifier.height(5.dp))
+                                Text(director.name, color = appBlue,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
             if (info?.franchise?.isNotEmpty() == true) {
                 item {
-                    Text("Все части франшизы", style = MaterialTheme.typography.titleMedium,
+                    Text("Связанные фильмы и части франшизы", style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
                     info!!.franchise.forEach { part ->
@@ -711,6 +728,63 @@ internal fun FilmDetails(
                 item {
                     Text("Подробные сведения на выбранном зеркале сейчас недоступны.",
                         color = appMuted)
+                }
+            }
+        }
+        if (showWatchMenu) {
+            ModalBottomSheet(
+                onDismissRequest = { showWatchMenu = false },
+                containerColor = appPanel,
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+            ) {
+                Column(Modifier.fillMaxWidth().heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Просмотр", style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold)
+                    Text("Источник", color = appMuted,
+                        style = MaterialTheme.typography.labelLarge)
+                    Surface(color = appCard, shape = RoundedCornerShape(12.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Public, contentDescription = null, tint = appBlue)
+                            Spacer(Modifier.width(9.dp))
+                            Text(runCatching { URI(source).host }.getOrDefault("Выбранное зеркало"),
+                                style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    if (info?.voices?.isNotEmpty() == true) {
+                        Text("Озвучка", color = appMuted,
+                            style = MaterialTheme.typography.labelLarge)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(1.dp)
+                        ) {
+                            info!!.voices.forEach { voice ->
+                                FilterChip(
+                                    selected = voiceId == voice.id,
+                                    onClick = { voiceId = voice.id },
+                                    label = { Text(voice.name) },
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        Text("Озвучку можно выбрать внутри плеера после загрузки фильма.",
+                            color = appMuted, style = MaterialTheme.typography.bodySmall)
+                    }
+                    HorizontalDivider(color = appMuted.copy(alpha = .15f))
+                    Button(onClick = {
+                        showWatchMenu = false
+                        onWatch(movie.url,voiceId)
+                    }, modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)) {
+                        Icon(Icons.Outlined.PlayArrow, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Смотреть")
+                    }
+                    Spacer(Modifier.height(7.dp))
                 }
             }
         }
