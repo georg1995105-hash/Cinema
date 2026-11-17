@@ -106,8 +106,9 @@ class LocalStore(context: Context) {
         val items = JSONArray()
         items.put(JSONObject()
             .put("url",movie.url)
-            .put("title",movie.title.take(130))
-            .put("poster",movie.poster.takeIf(SourceRules::isValidHttpsUrl).orEmpty())
+            .put("title",CatalogTitleCleaner.clean(movie.title, movie.details).take(130))
+            .put("poster",movie.poster.takeIf(MirrorPoster::isPhoto).orEmpty())
+            .put("posters", JSONArray(movie.posterAlternatives.filter(MirrorPoster::isPhoto).take(7)))
             .put("details",movie.details.take(110)))
         for (i in 0 until all.length()) {
             if (items.length() >= 160) break
@@ -122,12 +123,13 @@ class LocalStore(context: Context) {
         val item = (0 until array.length())
             .mapNotNull(array::optJSONObject)
             .firstOrNull { it.optString("url") == url } ?: return@runCatching null
-        val title = item.optString("title")
+        val title = CatalogTitleCleaner.clean(item.optString("title"), item.optString("details"))
         if (title.isBlank()) return@runCatching null
         CatalogMovie(
             url = url, title = title,
-            poster = item.optString("poster").takeIf(SourceRules::isValidHttpsUrl).orEmpty(),
-            details = item.optString("details")
+            poster = item.optString("poster").takeIf(MirrorPoster::isPhoto).orEmpty(),
+            details = item.optString("details"),
+            posterAlternatives = MirrorCatalog.readPosters(item).filter { it != item.optString("poster") }
         )
     }.getOrNull()
 

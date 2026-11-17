@@ -22,38 +22,49 @@ class MirrorMediaParserTest {
         assertEquals("12",page?.voices?.single()?.id)
     }
 
-    @Test fun sharedVoiceDiscoveryReadsExplicitSourceNodesOnly() {
-        val js = MirrorVoiceDiscovery.javascript
-        assertTrue(js.contains("select[name*="))
-        assertTrue(js.contains("data-translator_id"))
-        assertTrue(js.contains("return {voices:found"))
+    @Test fun aScriptIdCanPlayWithoutInventingAVoiceName() {
+        val page = MirrorMediaParser.pageFromWebView(
+            """{"id":"41","defaultVoice":"0","flags":{"isCamrip":1}}""")
+        assertEquals("0", page?.defaultVoice)
+        assertTrue(page?.voices.orEmpty().isEmpty())
+        assertEquals("1", MirrorPlaybackRequest.stream(requireNotNull(page), "0")["is_camrip"])
     }
 
-    @Test fun retryablePageWithoutPostIdHasClearReason() {
-        val raw = org.json.JSONObject.quote("""{"id":"","pageState":"missing-metadata"}""")
-        assertNull(MirrorMediaParser.pageFromWebView(raw))
-        assertTrue(MirrorMediaParser.pageFailureReason(raw).contains("не предоставила"))
+    @Test fun rejectsChallengePageOrWrongFilmEvenWithAValidLookingUrl() {
+        val url = "https://example.org/films/41-film.html"
+        assertNull(MirrorMediaParser.pageFromWebView("""{"id":"42","defaultVoice":"5"}""", url))
+        assertNull(MirrorMediaParser.pageFromWebView("""{"pageState":"protected","defaultVoice":"5"}""", url))
+        assertNull(MirrorMediaParser.pageFromWebView("""{"id":"41","voices":[]}""", url))
     }
 
-    @Test fun legitimatePageWithIdGetsVoiceFallback() {
-        val raw = org.json.JSONObject.quote("""{"id":"12345","series":false,"voice":"4","pageState":"ready"}""")
-        val page = MirrorMediaParser.pageFromWebView(raw)
-        assertEquals("12345",page?.id)
-        assertEquals("4",page?.voices?.singleOrNull()?.id)
+    @Test fun mapsSourceFailuresWithoutOfferingMedia() {
+        val cases = mapOf(
+            """{"__kinoStatus":401}""" to PlaybackFailure.AUTH_REQUIRED,
+            """{"__kinoStatus":403}""" to PlaybackFailure.BLOCKED,
+            """{"__kinoFailure":"timeout"}""" to PlaybackFailure.TIMEOUT,
+            """{"__kinoFailure":"network"}""" to PlaybackFailure.NETWORK,
+            """{"__kinoStatus":404}""" to PlaybackFailure.UNAVAILABLE,
+            """{"success":0,"code":"premium_only"}""" to PlaybackFailure.PREMIUM,
+            """{"success":0,"code":"drm_required","message":"DRM is required"}""" to PlaybackFailure.DRM,
+            "<html>unexpected</html>" to PlaybackFailure.INVALID_RESPONSE
+        )
+        cases.forEach { (response, expected) ->
+            val parsed = MirrorMediaParser.parseStreamInfo(response)
+            assertEquals(response, expected, parsed.failure)
+            assertTrue(parsed.qualities.isEmpty())
+        }
     }
 
-    @Test fun neverInventsDefaultVoiceForMissingIds() {
-        assertTrue(MirrorMediaParser.parseVoices(null, "").isEmpty())
-        assertTrue(MirrorMediaParser.parseVoices(org.json.JSONArray(), "").isEmpty())
-        assertEquals("9", MirrorMediaParser.parseVoices(null, "9").single().id)
+    @Test fun directPremiumAndPromoLinksAreRejected() {
+        assertTrue(MirrorMediaParser.parseQualityList("https://cdn.example/promo/demo.mp4").isEmpty())
+        assertTrue(MirrorMediaParser.parseQualityList("https://cdn.example/premium/full.mp4").isEmpty())
     }
-    @Test fun rejectsPrematureInventedVoiceZero() {
-        val early = org.json.JSONObject.quote("""{"id":"40","voice":"0","voices":[]}""")
-        assertFalse(MirrorMediaParser.hasRealVoiceMetadata(early))
-        val ready = org.json.JSONObject.quote("""{"id":"40","voice":"0","voiceFromScript":true,"voices":[]}""")
-        assertTrue(MirrorMediaParser.hasRealVoiceMetadata(ready))
-        val list = org.json.JSONObject.quote("""{"id":"40","voice":"0","voices":[{"id":"0","name":"Оригинал"}]}""")
-        assertTrue(MirrorMediaParser.hasRealVoiceMetadata(list))
+
+    @Test fun duplicateLabelsRetainAlternativeExactHlsPaths() {
+        val a = "https://cdn.example/a.mp4:hls:manifest.m3u8"
+        val result = MirrorMediaParser.parseQualityList("[720p]$a,[720p]https://cdn.example/b.m3u8").single()
+        assertEquals(a, result.url)
+        assertEquals(listOf("https://cdn.example/b.m3u8"), result.alternatives)
     }
 
     @Test fun acceptsNumericSuccessfulVideoResponses() {

@@ -4,7 +4,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.net.URI
-import java.util.Base64
 
 internal data class MirrorVoice(
     val id: String, val name: String,
@@ -13,15 +12,32 @@ internal data class MirrorVoice(
 internal data class MirrorEpisode(val season: String, val id: String, val label: String)
 internal data class MirrorQuality(val label: String, val url: String, val alternatives: List<String> = emptyList())
 internal data class MirrorSubtitle(val title: String, val url: String, val language: String)
+internal enum class PlaybackFailure(val text: String) {
+    NETWORK("Не удалось связаться с зеркалом."),
+    TIMEOUT("Зеркало вовремя не ответило на запрос потока."),
+    BLOCKED("Зеркало ограничило доступ или запросило проверку."),
+    AUTH_REQUIRED("Для просмотра войдите в аккаунт выбранного зеркала."),
+    PREMIUM("Источник требует платную подписку."),
+    DRM("Источник требует DRM."),
+    UNAVAILABLE("Источник не предоставил поток для этой озвучки и серии."),
+    INVALID_RESPONSE("Формат ответа плеера не распознан."),
+    REDIRECT("Запрос плеера перенаправлен на другой адрес.")
+}
+
 internal data class MirrorStreamInfo(
-    val qualities: List<MirrorQuality>, val subtitles: List<MirrorSubtitle>, val error: String
+    val qualities: List<MirrorQuality>,
+    val subtitles: List<MirrorSubtitle> = emptyList(),
+    val failure: PlaybackFailure? = null
 )
+
 internal data class MirrorMoviePage(
     val id: String,
     val isSeries: Boolean,
     val voices: List<MirrorVoice>,
     val episodes: List<MirrorEpisode>,
-    val favs: String = ""
+    val favs: String = "",
+    val defaultVoice: String = "",
+    val defaultFlags: MirrorVoice? = null
 )
 
 /**
@@ -40,64 +56,49 @@ internal object MirrorMediaParser {
     fun pageFailureReason(raw: String): String {
         val metadata = objectFromWebView(raw)
         return when (metadata?.optString("pageState")) {
-            "protected" -> "Зеркало открыло страницу проверки доступа вместо страницы фильма."
-            "missing-metadata" -> "Страница фильма открылась, но не предоставила данные плеера."
-            else -> "Не удалось получить данные плеера с выбранного зеркала."
+            "protected" -> PlaybackFailure.BLOCKED.text
+            "login" -> PlaybackFailure.AUTH_REQUIRED.text
+            "premium" -> PlaybackFailure.PREMIUM.text
+            "missing-metadata" -> "Страница фильма открылась без необходимых сведений плеера."
+            else -> "Не удалось прочитать сведения плеера на странице фильма."
         }
-    }
-
-    /** A post ID is not proof that the site has loaded its real translator list. */
-    fun hasRealVoiceMetadata(raw: String): Boolean {
-        val json = objectFromWebView(raw) ?: return false
-        val voices = json.optJSONArray("voices")
-        if (voices != null) for (i in 0 until minOf(voices.length(), 80)) {
-            val item = voices.optJSONObject(i) ?: continue
-            if (item.optString("id").matches(Regex("[0-9]{1,12}")) &&
-                item.optString("name").isNotBlank()) return true
-        }
-        val fallback = json.optString("voice")
-        return fallback.matches(Regex("[0-9]{1,12}")) &&
-            (json.optBoolean("voiceFromScript") || fallback != "0")
     }
 
     fun pageFromWebView(raw: String, pageUrl: String? = null): MirrorMoviePage? {
         val json = objectFromWebView(raw) ?: return null
-        val id = json.optString("id").trim().ifBlank {
-            pageUrl?.let(MirrorPostId::fromUrl).orEmpty()
-        }
-        if (!id.matches(Regex("[0-9]{1,12}"))) return null
-        val voices = parseVoices(json.optJSONArray("voices"), json.optString("voice"))
+        if (json.optString("pageState") in setOf("protected", "login", "premium")) return null
+        val urlId = pageUrl?.let(MirrorPostId::fromUrl)
+        val pageId = json.optString("id").trim().takeIf { it.matches(numericId) }
+        if (urlId != null && pageId != null && pageId != urlId) return null
+        val id = pageId ?: urlId ?: return null
+        val voices = parseVoices(json.optJSONArray("voices"))
+        val defaultVoice = json.optString("defaultVoice").takeIf { it.matches(numericId) }.orEmpty()
+        if (voices.isEmpty() && defaultVoice.isEmpty()) return null
+        val flags = json.optJSONObject("flags")
         return MirrorMoviePage(
-            id,
-            json.optBoolean("series"),
-            voices,
+            id, json.optBoolean("series"), voices,
             parseEpisodes(json.optJSONArray("episodes")),
-            json.optString("favs").takeIf {
-                it.matches(Regex("[A-Za-z0-9_+=/-]{1,256}"))
-            }.orEmpty()
+            json.optString("favs").takeIf { it.matches(Regex("[A-Za-z0-9_+=/-]{1,256}")) }.orEmpty(),
+            defaultVoice,
+            flags?.let { voiceWithFlags(defaultVoice, "", it) }
         )
     }
 
-    fun parseVoices(input: JSONArray?, fallback: String): List<MirrorVoice> {
-        val list = mutableListOf<MirrorVoice>()
+    private val numericId = Regex("[0-9]{1,12}")
+
+    private fun voiceWithFlags(id: String, name: String, item: JSONObject): MirrorVoice =
+        MirrorVoice(id, name, item.optInt("isCamrip").coerceIn(0, 1),
+            item.optInt("isAds").coerceIn(0, 1), item.optInt("isDirector").coerceIn(0, 1))
+
+    fun parseVoices(input: JSONArray?): List<MirrorVoice> = buildList {
         if (input != null) for (index in 0 until minOf(input.length(), 80)) {
             val item = input.optJSONObject(index) ?: continue
             val id = item.optString("id").trim()
             val name = item.optString("name").trim().take(75)
-            if (id.matches(Regex("[0-9]{1,12}")) && name.isNotBlank() &&
-                list.none { it.id == id }) {
-                fun flag(key: String) = item.optInt(key, 0).coerceIn(0, 1)
-                list += MirrorVoice(id, name, flag("isCamrip"),
-                    flag("isAds"), flag("isDirector"))
+            if (id.matches(numericId) && name.isNotBlank() && none { it.id == id }) {
+                add(voiceWithFlags(id, name, item))
             }
         }
-        // Do not fabricate translator 0. A fallback is allowed only when the
-        // selected mirror explicitly published its numeric translator ID.
-        if (list.isEmpty()) {
-            val id = fallback.trim().takeIf { it.matches(Regex("[0-9]{1,12}")) }
-            if (id != null) list += MirrorVoice(id, "Перевод $id")
-        }
-        return list
     }
 
     fun parseEpisodes(json: JSONArray?): List<MirrorEpisode> {
@@ -117,52 +118,63 @@ internal object MirrorMediaParser {
     }
 
     fun parseStreamResponse(raw: String): Pair<List<MirrorQuality>, String> {
-        val json = objectFromWebView(raw) ?: return emptyList<MirrorQuality>() to "Ответ сервера не распознан"
-        // The source uses both boolean true and numeric 1. JSONObject.optBoolean
-        // does not reliably interpret numeric successes, so do not reject valid streams.
-        val rawError = json.opt("error")
-        val hasError = when (rawError) {
-            null, JSONObject.NULL -> false
-            is Boolean -> rawError
-            is Number -> rawError.toInt() != 0
-            is String -> rawError.isNotBlank() &&
-                rawError != "0" && !rawError.equals("false", ignoreCase = true)
-            else -> true
+        val result = parseStreamInfo(raw)
+        return result.qualities to result.failure?.text.orEmpty()
+    }
+
+    fun responseFailure(json: JSONObject): PlaybackFailure? {
+        when (json.optString("__kinoFailure")) {
+            "network" -> return PlaybackFailure.NETWORK
+            "timeout" -> return PlaybackFailure.TIMEOUT
+            "redirect" -> return PlaybackFailure.REDIRECT
+            "invalid" -> return PlaybackFailure.INVALID_RESPONSE
+            "blocked" -> return PlaybackFailure.BLOCKED
         }
-        val rawSuccess = json.opt("success")
-        val hasFailure = if (!json.has("success") || rawSuccess == JSONObject.NULL) false
-            else when (rawSuccess) {
-                is Boolean -> !rawSuccess
-                is Number -> rawSuccess.toInt() == 0
-                is String -> rawSuccess != "1" &&
-                    !rawSuccess.equals("true", ignoreCase = true)
-                else -> true
-            }
-        if (hasError || hasFailure) {
-            val reason = json.optString("message").trim().take(180)
-            return emptyList<MirrorQuality>() to
-                (reason.ifBlank { "Источник не предоставил видеопоток" })
+        val status = json.optInt("__kinoStatus")
+        val code = listOf("code", "error", "message").joinToString(" ") { json.optString(it) }
+        return when {
+            status == 401 || contains(code, "auth_required|login_required|авторизуй|войдите|войти в аккаунт") ->
+                PlaybackFailure.AUTH_REQUIRED
+            status == 402 || contains(code, "premium|премиум|платн.{0,8} подписк") -> PlaybackFailure.PREMIUM
+            contains(code, "\\bdrm\\b") -> PlaybackFailure.DRM
+            status in setOf(403, 429, 451) || contains(code, "captcha|access.denied|доступ запрещ[её]н") ->
+                PlaybackFailure.BLOCKED
+            status == 404 || status == 410 -> PlaybackFailure.UNAVAILABLE
+            status >= 400 || json.optString("error").equals("network", true) -> PlaybackFailure.NETWORK
+            else -> null
+        }
+    }
+
+    private fun contains(text: String, pattern: String) =
+        Regex(pattern, RegexOption.IGNORE_CASE).containsMatchIn(text)
+
+    fun parseStreamInfo(raw: String): MirrorStreamInfo {
+        val json = objectFromWebView(raw)
+            ?: return MirrorStreamInfo(emptyList(), failure = PlaybackFailure.INVALID_RESPONSE)
+        responseFailure(json)?.let { return MirrorStreamInfo(emptyList(), failure = it) }
+        val error = json.optString("error").trim()
+        val success = json.optString("success").trim()
+        if ((error.isNotEmpty() && error !in setOf("false", "0", "null")) ||
+            (success.isNotEmpty() && success !in setOf("true", "1", "null"))) {
+            return MirrorStreamInfo(emptyList(), failure = PlaybackFailure.UNAVAILABLE)
         }
         val streamText = when (val url = json.opt("url")) {
             is String -> url
             is JSONObject -> url.optString("url")
             else -> json.optString("streams")
         }
-        val parsed = parseQualityList(streamText)
-        return if (parsed.isEmpty()) {
-            emptyList<MirrorQuality>() to "Доступный видеопоток не найден для выбранной озвучки и серии"
-        } else parsed to ""
-    }
-
-    fun parseStreamInfo(raw: String): MirrorStreamInfo {
-        val (qualities, error) = parseStreamResponse(raw)
-        val json = objectFromWebView(raw)
-        val subtitles = parseSubtitleList(
-            json?.optString("subtitle").orEmpty().ifBlank {
-                json?.optString("subtitles").orEmpty()
+        val qualities = parseQualityList(streamText)
+        if (qualities.isEmpty()) {
+            val failure = when {
+                contains(streamText, "prem-quality|prem-icon|/premium/|premium-promo|premium_ad") -> PlaybackFailure.PREMIUM
+                streamText.isBlank() -> PlaybackFailure.UNAVAILABLE
+                else -> PlaybackFailure.INVALID_RESPONSE
             }
-        )
-        return MirrorStreamInfo(qualities, subtitles, error)
+            return MirrorStreamInfo(emptyList(), failure = failure)
+        }
+        return MirrorStreamInfo(qualities, parseSubtitleList(
+            json.optString("subtitle").ifBlank { json.optString("subtitles") }
+        ))
     }
 
     /** Regular, already accessible subtitle URLs from a site's stream response. */
@@ -195,53 +207,37 @@ internal object MirrorMediaParser {
         val expanded = MirrorTransportDecoder.decode(data.trim())
         if (expanded.isBlank()) return emptyList()
         val matches = Regex("""\[([^\]]{1,180})\]([^\[]+)""").findAll(expanded)
-        val output = mutableListOf<MirrorQuality>()
+        val qualities = linkedMapOf<String, MutableList<String>>()
         for (match in matches) {
             val tag = match.groupValues[1]
-            // Premium trial/placeholder labels must never be treated as ordinary video.
-            if (tag.contains("prem-quality", true) || tag.contains("prem-icon", true)) continue
-            val label = tag.replace(Regex("<[^>]+>"), "")
-                .replace(Regex("\\s+"), " ").trim().take(40)
+            if (contains(tag, "prem-quality|prem-icon|premium|премиум")) continue
+            val label = tag.replace(Regex("<[^>]+>"), "").replace(Regex("""\s+"""), " ").trim().take(40)
             if (label.isBlank()) continue
-            val alternatives = match.groupValues[2].trim().trimEnd(',')
-                .split(" or ", ignoreCase = true)
-            // Prefer a normal MP4 link where available. Media3 also accepts real HLS URLs.
-            val candidates = alternatives.mapNotNull { normalizeMediaUrl(it) }.filterNot {
-                val lower = it.lowercase()
-                listOf("/premium/", "/promo/", "/preroll/", "/advert/", "premium-promo",
-                    "ad-preview", "premium_ad").any(lower::contains)
-            }
-            val ordered = candidates.distinct().sortedBy { source ->
+            val candidates = match.groupValues[2].trim().trimEnd(',').split(Regex("""\s+or\s+""", RegexOption.IGNORE_CASE))
+                .mapNotNull(::normalizeMediaUrl)
+            if (candidates.isNotEmpty()) qualities.getOrPut(label) { mutableListOf() }.addAll(candidates)
+        }
+        if (qualities.isEmpty()) normalizeMediaUrl(expanded)?.let { qualities["Исходное"] = mutableListOf(it) }
+        return qualities.map { (label, candidates) ->
+            val ordered = candidates.distinct().sortedBy {
                 when {
-                    source.endsWith(".mp4", true) || ".mp4?" in source.lowercase() -> 0
-                    ".m3u8" in source.lowercase() -> 1
+                    it.substringBefore('?').endsWith(".mp4", true) -> 0
+                    it.substringBefore('?').endsWith(".m3u8", true) -> 1
                     else -> 2
                 }
             }
-            val chosen = ordered.firstOrNull()
-            if (chosen != null && output.none { it.label == label }) {
-                output += MirrorQuality(label, chosen, ordered.drop(1))
-            }
-        }
-        if (output.isEmpty()) {
-            normalizeMediaUrl(expanded)?.let { output += MirrorQuality("Авто", it) }
-        }
-        return output.sortedByDescending {
-            Regex("""(\d{3,4})""").find(it.label)?.value?.toIntOrNull() ?: 0
-        }
+            MirrorQuality(label, ordered.first(), ordered.drop(1))
+        }.sortedByDescending { Regex("""(\d{3,4})""").find(it.label)?.value?.toIntOrNull() ?: 0 }
     }
 
     private fun normalizeMediaUrl(raw: String): String? {
         var url = raw.trim().trimEnd(',', ';').trim()
         if (url.startsWith("//") && !url.startsWith("///"))
             url = "https:" + url
-        if (url.endsWith(":hls:manifest.m3u8")) {
-            // CDN's variant suffix is not a valid HLS file path; the base URL is MP4.
-            url = url.removeSuffix(":hls:manifest.m3u8")
-        }
+        if (contains(url.substringBefore('?'), "/(?:premium|promo|preroll|advert)/|premium-promo|ad-preview|premium_ad")) return null
         return runCatching {
             val parsed = URI(url)
-            if (parsed.scheme != "https" || parsed.host.isNullOrBlank() ||
+            if (!parsed.scheme.equals("https", true) || parsed.host.isNullOrBlank() ||
                 parsed.userInfo != null || parsed.fragment != null) null else url
         }.getOrNull()
     }

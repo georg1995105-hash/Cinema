@@ -48,7 +48,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -60,123 +61,103 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-import java.net.URI
 import kotlin.coroutines.resume
 
 private val playerMetaJs = """
 (function(){
-    function clean(s){return(s||'').replace(/\s+/g,' ').trim();}
     ${MirrorVoiceDiscovery.javascript}
-    var js=Array.from(document.scripts).map(function(x){return x.textContent||'';}).join('\n');
-    var init=js.match(/initCDN(Series|Movies)Events\s*\(\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?(\d{1,12})/i);
-    var flags=js.match(/initCDN(?:Series|Movies)Events\s*\(\s*['"]?\d{1,12}['"]?\s*,\s*['"]?\d{1,12}['"]?\s*,\s*([01])\s*,\s*([01])(?:\s*,\s*([01]))?/i);
-    var defaultCamrip=flags?Number(flags[1]):0;
-    var defaultAds=flags?Number(flags[2]):0;
-    var defaultDirector=flags&&flags[3]?Number(flags[3]):0;
-    var scriptId=(js.match(/(?:post_id|news_id|postId)\s*[:=]\s*['"]?(\d{1,12})/i)||[])[1]||'';
-    var numeric=function(v){var x=String(v||'').trim();return /^\d{1,12}$/.test(x)?x:'';};
-    var idCandidates=[
-       document.querySelector('input[name="post_id"]')?.value,
-       document.querySelector('#post_id')?.value,
-       document.querySelector('#post_id')?.getAttribute('data-post-id'),
-       document.querySelector('[data-post_id]')?.getAttribute('data-post_id'),
-       document.querySelector('[data-post-id]')?.getAttribute('data-post-id'),
-       document.querySelector('.b-userset__fav_holder')?.getAttribute('data-post_id'),
-       (document.querySelector('.b-post')?.id||'').replace(/^post-/,''),
-       init?init[2]:'',
-       scriptId,
-       window.post_id,window.postId
-    ];
-    var id=idCandidates.map(numeric).find(Boolean)||'';
-    var discovered=kinoDiscoverVoices();
-    var voices=discovered.voices.map(function(v){
-      return Object.assign({},v,{
-        isCamrip:v.isCamrip===null?defaultCamrip:v.isCamrip,
-        isAds:v.isAds===null?defaultAds:v.isAds,
-        isDirector:v.isDirector===null?defaultDirector:v.isDirector
-      });
-    });
-    var activeVoice=discovered.selected;
-    var initVoice=numeric(init?init[3]:'');
-    var defaultVoice=activeVoice||initVoice||(voices.length===1?voices[0].id:'');
-    if(voices.length===0 && defaultVoice){
-      var translation=Array.from(document.querySelectorAll(
-        '.b-post__infotable tr, .b-post__info tr'
-      )).map(function(row){
-        var cells=row.querySelectorAll('td');
-        if(cells.length<2 || !/в переводе|озвучк/i.test(clean(cells[0].textContent)))return '';
-        return clean(cells[1].textContent);
-      }).find(Boolean)||'';
-      voices.push({id:defaultVoice,name:(translation||('Перевод '+defaultVoice)).slice(0,75),
-        isCamrip:defaultCamrip,isAds:defaultAds,isDirector:defaultDirector});
-    }
-    var episodes=Array.from(document.querySelectorAll('.b-simple_episode__item[data-episode_id]')).map(
-      function(x){return{season:x.getAttribute('data-season_id')||x.closest('ul[id^="simple-episodes-list-"]')?.id.replace('simple-episodes-list-','')||'1',episode:x.getAttribute('data-episode_id'),label:clean(x.textContent)}}
-    );
-    var favs=(document.querySelector('[data-favs]')?.getAttribute('data-favs')||'').trim();
-    if(!/^[A-Za-z0-9_+=\/-]{1,256}$/.test(favs))favs='';
-    return JSON.stringify({
-      id:String(id),series:!!((init&&init[1]==='Series')||document.querySelector('#simple-episodes-tabs')),
-      voice:defaultVoice,voiceFromScript:!!init,voices:voices,episodes:episodes,favs:favs,
-      pageState:id?'ready':
-        /captcha|checking your browser|access denied|verify you are human|anubis|cloudflare/i
-          .test((document.title||'')+' '+(document.body?.innerText||'').slice(0,600))
-        ?'protected':'missing-metadata'
-    });
+    ${MirrorVoiceDiscovery.episodesJavascript}
+    var data = kinoPlayerMetadata();
+    var blocked = /captcha|checking your browser|access denied|verify you are human|just a moment/i
+      .test(document.title || '') || !!document.querySelector('#challenge-form, .cf-turnstile');
+    var root = document.querySelector('#cdnplayer, #cdnplayer-container, .b-post__player');
+    var gate = root?.querySelector('.b-player__premium, [data-access="premium"], [data-access="login"]');
+    data.pageState = blocked ? 'protected' : gate?.getAttribute('data-access') === 'login' ? 'login' :
+        gate ? 'premium' : data.defaultVoice || data.voices.length ? 'ready' : 'missing-metadata';
+    data.episodes = kinoEpisodes(document);
+    data.favs = (document.querySelector('#favs, input[name="favs"]')?.value ||
+        document.querySelector('[data-favs]')?.getAttribute('data-favs') || '').trim();
+    return JSON.stringify(data);
 })()
 """.trimIndent()
 
-private suspend fun mirrorAjax(
-    web: WebView, payload: Map<String,String>, anonymous: Boolean = false
-): String? =
-    withTimeoutOrNull(16000L) {
+private suspend fun mirrorAjax(web: WebView, pageUrl: String, payload: Map<String, String>): String? =
+    withTimeoutOrNull(14500L) {
         suspendCancellableCoroutine { continuation ->
-            val handler=Handler(Looper.getMainLooper())
-            val marker="__kino_" + System.nanoTime().toString().replace("-","")
-            val body=JSONObject(payload).toString()
-            val script="""
+            val handler = Handler(Looper.getMainLooper())
+            val marker = "__kinoRequest" + System.nanoTime().toString().replace("-", "")
+            val body = JSONObject(payload).toString()
+            val script = """
             (function(){
-               window['$marker']=null;
-               fetch('/ajax/get_cdn_series/?t='+Date.now(),{
-                 method:'POST',credentials:'${if (anonymous) "omit" else "same-origin"}',
+               if (location.href !== ${JSONObject.quote(pageUrl)}) return 'changed';
+               ${MirrorVoiceDiscovery.episodesJavascript}
+               var key = '$marker';
+               var controller = new AbortController();
+               var entry = window[key] = {abort:function(){controller.abort()}, result:null};
+               var timer = setTimeout(entry.abort, 12500);
+               fetch('/ajax/get_cdn_series/?t='+Date.now(), {
+                 method:'POST', credentials:'same-origin', redirect:'manual', signal:controller.signal,
                  headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
-                   'X-Requested-With':'XMLHttpRequest'},
+                   'X-Requested-With':'XMLHttpRequest','Accept':'application/json, text/plain, */*'},
                  body:new URLSearchParams($body).toString()
-               }).then(function(response){if(!response.ok)throw Error('http');return response.json()})
-                 .then(function(data){
-                    if(data.episodes){
-                      var holder=document.createElement('div');
-                      holder.innerHTML=(data.episodes||'')+(data.seasons||'');
-                      data.__kinoEpisodes=Array.from(holder.querySelectorAll('.b-simple_episode__item[data-episode_id]'))
-                        .map(function(x){
-                           var season=x.getAttribute('data-season_id') ||
-                               x.closest('ul[id^="simple-episodes-list-"]')?.id.replace('simple-episodes-list-','') ||
-                               x.closest('[data-season_id]')?.getAttribute('data-season_id') || '1';
-                           return {season:String(season),episode:x.getAttribute('data-episode_id'),
-                                   label:(x.textContent||'').trim()};
-                        });
-                    }
-                    window['$marker']=JSON.stringify(data);
-                 }).catch(function(){window['$marker']=JSON.stringify({error:'network'});});
+               }).then(async function(response) {
+                 if (response.type === 'opaqueredirect') return {__kinoFailure:'redirect'};
+                 var text = await response.text();
+                 var data;
+                 try {
+                   data = JSON.parse(text);
+                   if (typeof data === 'string') data = JSON.parse(data);
+                 } catch(e) {
+                   if (!response.ok) return {__kinoStatus:response.status};
+                   return {__kinoFailure:/captcha|checking your browser|access denied|verify you are human/i.test(text.slice(0,4000)) ? 'blocked' : 'invalid'};
+                 }
+                 if (!data || typeof data !== 'object' || Array.isArray(data)) {
+                   return {__kinoFailure:'invalid'};
+                 }
+                 data.__kinoStatus = response.status;
+                 if (typeof data.episodes === 'string') {
+                   var doc = new DOMParser().parseFromString(data.episodes +
+                       (typeof data.seasons === 'string' ? data.seasons : ''), 'text/html');
+                   data.__kinoEpisodes = kinoEpisodes(doc);
+                 }
+                 return data;
+               }).then(function(data) {
+                 entry.result = JSON.stringify(data);
+               }).catch(function(error) {
+                 entry.result = JSON.stringify({__kinoFailure:error.name === 'AbortError' ? 'timeout' : 'network'});
+               }).finally(function(){clearTimeout(timer)});
                return 'started';
             })();
             """.trimIndent()
-            var polls=0
             fun check() {
-                if(!continuation.isActive)return
-                if(polls++>60){continuation.resume(null);return}
-                web.evaluateJavascript("window['$marker'] || null") { result ->
-                    if(!continuation.isActive)return@evaluateJavascript
-                    if(result=="null" || result.isNullOrBlank()) {
-                        handler.postDelayed({check()},230)
+                if (!continuation.isActive) return
+                if (web.url != pageUrl) {
+                    continuation.resume(JSONObject().put("__kinoFailure", "redirect").toString())
+                    return
+                }
+                web.evaluateJavascript("window['$marker']?.result || null") { result ->
+                    if (!continuation.isActive) return@evaluateJavascript
+                    if (result == "null" || result.isNullOrBlank()) {
+                        handler.postDelayed({ check() }, 180)
                     } else {
-                        web.evaluateJavascript("delete window['$marker']"){}
+                        web.evaluateJavascript("delete window['$marker']") {}
                         continuation.resume(result)
                     }
                 }
             }
-            web.evaluateJavascript(script){handler.postDelayed({check()},130)}
-            continuation.invokeOnCancellation {handler.removeCallbacksAndMessages(null)}
+            web.evaluateJavascript(script) {
+                if (!continuation.isActive) return@evaluateJavascript
+                if (it == "\"started\"") check()
+                else continuation.resume(JSONObject().put("__kinoFailure", "redirect").toString())
+            }
+            continuation.invokeOnCancellation {
+                handler.removeCallbacksAndMessages(null)
+                handler.post {
+                    if (web.url == pageUrl) web.evaluateJavascript(
+                        "window['$marker']?.abort(); delete window['$marker'];"
+                    ) {}
+                }
+            }
         }
     }
 
@@ -200,7 +181,7 @@ internal fun MirrorNativePlayer(
         return
     }
     val context=LocalContext.current
-    val host=remember(filmUrl){URI(filmUrl).host.lowercase()}
+    var pageUrl by remember(filmUrl) { mutableStateOf(filmUrl) }
     var movie by remember(filmUrl){mutableStateOf<MirrorMoviePage?>(null)}
     var message by remember(filmUrl){mutableStateOf("Получаем данные фильма")}
     var error by remember(filmUrl){mutableStateOf("")}
@@ -213,10 +194,6 @@ internal fun MirrorNativePlayer(
     var subtitleOptions by remember(filmUrl){mutableStateOf<List<MirrorSubtitle>>(emptyList())}
     var subtitleIndex by remember(filmUrl){mutableIntStateOf(-1)}
     var quality by remember(filmUrl){mutableStateOf("")}
-    // One bounded attempt to use the mirror's publicly accessible guest response.
-    // This never forges a premium account or bypasses a server-side entitlement check.
-    var anonymousRequest by remember(filmUrl) { mutableStateOf(false) }
-    var anonymousTried by remember(filmUrl) { mutableStateOf(false) }
     var resumeMs by remember(filmUrl){mutableLongStateOf(startPositionMs)}
     var endedCounter by remember(filmUrl) { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
@@ -258,55 +235,73 @@ internal fun MirrorNativePlayer(
             settings.mixedContentMode=WebSettings.MIXED_CONTENT_NEVER_ALLOW
             if(android.os.Build.VERSION.SDK_INT>=26)settings.safeBrowsingEnabled=true
             CookieManager.getInstance().setAcceptThirdPartyCookies(this,false)
-            webViewClient=object:WebViewClient(){
-                override fun shouldOverrideUrlLoading(view:WebView,req:WebResourceRequest):Boolean{
-                    if(!req.isForMainFrame)return false
-                    val h=req.url.host?.lowercase()?:return true
-                    return req.url.scheme!="https"||(h!=host&&!h.endsWith(".$host"))
+            webViewClient = object : WebViewClient() {
+                private var scanningUrl: String? = null
+                private var failed = false
+
+                private fun fail(reason: String) {
+                    failed = true
+                    message = ""
+                    error = reason
                 }
-                override fun onPageFinished(view:WebView,url:String){
-                    val responseHost=runCatching { URI(url).host?.lowercase() }.getOrNull()
-                    if (responseHost!=host && responseHost?.endsWith(".$host")!=true) return
-                    message="Определяем доступный плеер"
-                    // onPageFinished is not the same as completion of deferred site JavaScript.
-                    // Re-query briefly instead of treating one early null as a permanent failure.
-                    val delays=listOf(350L,950L,1800L,3300L,5700L)
-                    delays.forEachIndexed { index, waitMs ->
+
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    if (!request.isForMainFrame) return false
+                    val url = request.url.toString()
+                    if (MirrorPostId.isSameFilm(filmUrl, url)) return false
+                    fail(if (SourceRules.sameOrigin(filmUrl, url) && request.url.path.orEmpty().contains("login", true))
+                        PlaybackFailure.AUTH_REQUIRED.text else PlaybackFailure.REDIRECT.text)
+                    return true
+                }
+
+                private fun scan(view: WebView, url: String) {
+                    if (failed || scanningUrl == url || !MirrorPostId.isSameFilm(filmUrl, url)) return
+                    scanningUrl = url
+                    message = "Определяем доступный плеер"
+                    val timings = listOf(150L, 500L, 1250L, 2400L, 4100L, 6500L)
+                    timings.forEachIndexed { index, wait ->
                         metadataHandler.postDelayed({
-                            if (view.url!=url || movie!=null) return@postDelayed
-                            view.evaluateJavascript(playerMetaJs){ raw ->
-                                if (view.url!=url || movie!=null) return@evaluateJavascript
-                                val parsed=MirrorMediaParser.pageFromWebView(raw, url)
-                                if (parsed!=null && MirrorMediaParser.hasRealVoiceMetadata(raw)) {
-                                    movie=parsed
-                                    message=""
-                                    error=""
-                                    voice=parsed.voices.firstOrNull { it.id == savedSelection?.voice }?.id
-                                        ?: parsed.voices.first().id
-                                    episodes=parsed.episodes
-                                    val chosen=parsed.episodes.firstOrNull {
-                                        it.season == savedSelection?.season &&
-                                            it.id == savedSelection?.episode
-                                    } ?: parsed.episodes.firstOrNull()
-                                    season=chosen?.season.orEmpty()
-                                    episode=chosen?.id.orEmpty()
+                            if (failed || view.url != url || movie != null) return@postDelayed
+                            view.evaluateJavascript(playerMetaJs) { result ->
+                                if (failed || view.url != url || movie != null) return@evaluateJavascript
+                                val parsed = MirrorMediaParser.pageFromWebView(result, url)
+                                if (parsed != null && (parsed.voices.isNotEmpty() || index >= 2)) {
+                                    pageUrl = url
+                                    movie = parsed
+                                    voice = savedSelection?.voice?.takeIf { saved ->
+                                        saved == parsed.defaultVoice || parsed.voices.any { it.id == saved }
+                                    } ?: parsed.defaultVoice.ifBlank { parsed.voices.first().id }
+                                    if (voice == parsed.defaultVoice || parsed.voices.size == 1) episodes = parsed.episodes
+                                    val chosen = episodes.firstOrNull {
+                                        it.season == savedSelection?.season && it.id == savedSelection?.episode
+                                    } ?: episodes.firstOrNull()
+                                    if (chosen != null && savedSelection?.season?.isNotBlank() == true &&
+                                        (chosen.season != savedSelection.season || chosen.id != savedSelection.episode)) resumeMs = 0L
+                                    season = chosen?.season.orEmpty()
+                                    episode = chosen?.id.orEmpty()
                                     metadataHandler.removeCallbacksAndMessages(null)
-                                } else if (index==delays.lastIndex) {
-                                    message=""
-                                    error=if(parsed!=null)
-                                        "Сайт не предоставил идентификаторы озвучек. Выберите другое зеркало."
-                                    else MirrorMediaParser.pageFailureReason(raw)
+                                } else if (index == timings.lastIndex) {
+                                    fail(MirrorMediaParser.pageFailureReason(result))
                                 }
                             }
-                        },waitMs)
+                        }, wait)
                     }
                 }
-                override fun onReceivedError(view:WebView,req:WebResourceRequest,
-                                             issue:android.webkit.WebResourceError){
-                    if(req.isForMainFrame){
-                        message=""
-                        error="Не удалось открыть страницу фильма. Проверьте VPN."
+
+                override fun onPageCommitVisible(view: WebView, url: String) = scan(view, url)
+                override fun onPageFinished(view: WebView, url: String) = scan(view, url)
+
+                override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: android.webkit.WebResourceResponse) {
+                    if (request.isForMainFrame) {
+                        val failure = MirrorMediaParser.responseFailure(
+                            JSONObject().put("__kinoStatus", response.statusCode)
+                        )
+                        fail(failure?.text ?: "Страница фильма вернула HTTP ${response.statusCode}.")
                     }
+                }
+
+                override fun onReceivedError(view: WebView, request: WebResourceRequest, issue: android.webkit.WebResourceError) {
+                    if (request.isForMainFrame) fail("Не удалось открыть страницу фильма. Проверьте соединение.")
                 }
             }
             loadUrl(filmUrl)
@@ -329,14 +324,14 @@ internal fun MirrorNativePlayer(
     // Attempt distinct source-provided translators in a bounded sequence.
     // No guessed translation IDs, proxy impersonation or paid stream unlocking.
     val triedVoices=remember(filmUrl, movie?.id){ mutableStateListOf<String>() }
-    val verifiedVoices=remember(filmUrl){ mutableStateListOf<String>() }
+    val voiceAvailability = remember(filmUrl) { mutableStateMapOf<Triple<String, String, String>, Boolean>() }
+    fun voiceKey(id: String) = Triple(season, episode, id)
     fun tryNextVoice(): Boolean {
         val available=movie?.voices.orEmpty()
         val next=AutoVoicePolicy.next(available,voice,triedVoices)?:return false
         if(voice.isNotBlank() && voice !in triedVoices)triedVoices.add(voice)
         voice=next.id
         readyVoice=""
-        anonymousRequest=false
         resumeMs=0L
         options=emptyList()
         subtitleOptions=emptyList()
@@ -345,69 +340,71 @@ internal fun MirrorNativePlayer(
         message="Проверяем озвучку: "+next.name
         return true
     }
-    fun tryPublicGuestStream(): Boolean {
-        if (anonymousTried || anonymousRequest) return false
-        anonymousTried = true
-        anonymousRequest = true
-        resumeMs = 0L
+    LaunchedEffect(movie, voice) {
+        val item = movie ?: return@LaunchedEffect
+        if (!item.isSeries || voice.isBlank()) return@LaunchedEffect
         options = emptyList()
+        error = ""
+        message = "Загружаем список серий"
+        val raw = mirrorAjax(web, pageUrl, mapOf(
+            "action" to "get_episodes", "id" to item.id, "translator_id" to voice
+        ))
+        val response = raw?.let(MirrorMediaParser::objectFromWebView)
+        val failure = response?.let(MirrorMediaParser::responseFailure)
+        val incoming = MirrorMediaParser.parseEpisodes(response?.optJSONArray("__kinoEpisodes"))
+        val listed = when {
+            failure != null -> emptyList()
+            incoming.isNotEmpty() -> incoming
+            voice == item.defaultVoice || item.voices.size == 1 -> item.episodes
+            else -> emptyList()
+        }
+        if (listed.isEmpty()) {
+            episodes = emptyList()
+            message = ""
+            error = failure?.text ?: if (raw == null) PlaybackFailure.TIMEOUT.text
+                else "Источник не предоставил серии для этой озвучки."
+            return@LaunchedEffect
+        }
+        val chosen = listed.firstOrNull { it.season == season && it.id == episode }
+            ?: listed.firstOrNull { it.season == savedSelection?.season && it.id == savedSelection?.episode }
+            ?: listed.first()
+        if (season.isNotEmpty() && (chosen.season != season || chosen.id != episode) ||
+            season.isEmpty() && savedSelection?.season?.isNotBlank() == true &&
+            (chosen.season != savedSelection.season || chosen.id != savedSelection.episode)) resumeMs = 0L
+        episodes = listed
+        season = chosen.season
+        episode = chosen.id
+        readyVoice = voice
+    }
+    LaunchedEffect(movie, voice, readyVoice, season, episode) {
+        val item = movie ?: return@LaunchedEffect
+        if (voice.isBlank() || (item.isSeries && (readyVoice != voice || season.isBlank() || episode.isBlank()))) {
+            return@LaunchedEffect
+        }
+        val desiredQuality = quality.ifBlank { savedSelection?.quality.orEmpty() }
+        options = emptyList()
+        subtitleOptions = emptyList()
         quality = ""
         error = ""
-        message = "Проверяем открытый гостевой поток"
-        return true
-    }
-    LaunchedEffect(movie,voice){
-        val item=movie?:return@LaunchedEffect
-        if(!item.isSeries||voice.isBlank())return@LaunchedEffect
-        options=emptyList()
-        message="Загружаем список серий"
-        val raw=mirrorAjax(web,mapOf("action" to "get_episodes",
-            "id" to item.id,"translator_id" to voice))
-        val response=raw?.let(MirrorMediaParser::objectFromWebView)
-        val incoming=MirrorMediaParser.parseEpisodes(response?.optJSONArray("__kinoEpisodes"))
-        if(incoming.isNotEmpty()){
-            val chosen=incoming.firstOrNull { it.season == season && it.id == episode }
-                ?: incoming.firstOrNull { it.season == savedSelection?.season && it.id == savedSelection?.episode }
-                ?: incoming.first()
-            episodes=incoming
-            season=chosen.season
-            episode=chosen.id
-        }else if(episodes.isEmpty()){
-            season="1";episode="1"
-        }
-        readyVoice=voice
-    }
-    LaunchedEffect(movie,voice,readyVoice,season,episode,anonymousRequest){
-        val item=movie?:return@LaunchedEffect
-        if(voice.isBlank()||(item.isSeries&&(readyVoice!=voice||season.isBlank()||episode.isBlank())))return@LaunchedEffect
-        val desiredQuality = quality.ifBlank { savedSelection?.quality.orEmpty() }
-        options=emptyList();quality="";error=""
-        message="Получаем доступные видеопотоки"
-        val request=MirrorPlaybackRequest.stream(item,voice,season,episode)
-        val result=mirrorAjax(web,request,anonymous=anonymousRequest)
-        if(result==null){
-            if(!tryNextVoice() && !tryPublicGuestStream()){
-                message=""
-                error="Зеркало не ответило на запрос потоков."
+        message = "Получаем доступные видеопотоки"
+        val request = MirrorPlaybackRequest.stream(item, voice, season, episode)
+        val result = mirrorAjax(web, pageUrl, request)
+        val streams = result?.let(MirrorMediaParser::parseStreamInfo)
+            ?: MirrorStreamInfo(emptyList(), failure = PlaybackFailure.TIMEOUT)
+        if (streams.qualities.isEmpty()) {
+            if (streams.failure in setOf(PlaybackFailure.UNAVAILABLE, PlaybackFailure.PREMIUM, PlaybackFailure.DRM)) {
+                voiceAvailability[voiceKey(voice)] = false
             }
-        } else {
-            val streams=MirrorMediaParser.parseStreamInfo(result)
-            val available=streams.qualities
-            if(available.isEmpty()){
-                if(!tryNextVoice() && !tryPublicGuestStream()){
-                    message=""
-                    error=streams.error.ifBlank { "Доступного потока не обнаружено." }
-                }
-            } else {
-                subtitleOptions=streams.subtitles
-                subtitleIndex=-1
-                options=available
-                quality=available.firstOrNull { it.label == desiredQuality }?.label
-                    ?: available.firstOrNull()?.label.orEmpty()
-                error=""
-                message=""
-            }
+            if (streams.failure == PlaybackFailure.UNAVAILABLE && tryNextVoice()) return@LaunchedEffect
+            message = ""
+            error = streams.failure?.text ?: PlaybackFailure.UNAVAILABLE.text
+            return@LaunchedEffect
         }
+        subtitleOptions = streams.subtitles
+        subtitleIndex = -1
+        options = streams.qualities
+        quality = options.firstOrNull { it.label == desiredQuality }?.label ?: options.first().label
+        message = ""
     }
     val selected=options.firstOrNull {it.label==quality}?:options.firstOrNull()
     val availableUrls = selected?.let { listOf(it.url) + it.alternatives } ?: emptyList()
@@ -427,26 +424,15 @@ internal fun MirrorNativePlayer(
     fun tryAnotherAvailableQuality(): Boolean {
         val next = options.dropWhile { it.label != quality }.drop(1).firstOrNull()
             ?: return false
-        resumeMs = 0L
         quality = next.label
         message = "Пробуем доступное качество " + next.label
         return true
     }
     val player=remember(currentUrl, subtitleOptions, episodeKey){
         currentUrl?.let {streamUrl ->
-            val headers = mutableMapOf("Referer" to filmUrl)
-            // Only the same-host source can receive its own site session.
-            // Do not leak account cookies to externally hosted video/CDN domains.
-            if (!anonymousRequest && runCatching {
-                    URI(streamUrl).host.equals(URI(filmUrl).host, ignoreCase = true)
-                }.getOrDefault(false)) {
-                CookieManager.getInstance().getCookie(filmUrl)?.let {
-                    if (it.isNotBlank()) headers["Cookie"] = it
-                }
-            }
-            val http=DefaultHttpDataSource.Factory()
+            val http = OkHttpDataSource.Factory(MirrorHttp.client)
                 .setUserAgent(WebSettings.getDefaultUserAgent(context))
-                .setDefaultRequestProperties(headers)
+                .setDefaultRequestProperties(mapOf("Referer" to pageUrl))
             val data=DefaultDataSource.Factory(context,http)
             ExoPlayer.Builder(context,DefaultRenderersFactory(context).setEnableDecoderFallback(true))
                 .setMediaSourceFactory(DefaultMediaSourceFactory(data))
@@ -455,41 +441,34 @@ internal fun MirrorNativePlayer(
                         override fun onPlaybackStateChanged(state:Int){
                             playbackState=state
                             if (state == Player.STATE_READY) {
-                                val length=duration
-                                if (length > 150_000L && voice !in verifiedVoices) {
-                                    verifiedVoices.add(voice)
-                                }
-                                if (PublicStreamRetryPolicy.isShortPreview(length)) {
-                                    if (alternativeIndex < availableUrls.lastIndex) {
-                                        alternativeIndex++
-                                        message="Проверяем другой доступный сервер"
-                                    } else if (!tryAnotherAvailableQuality() &&
-                                        !tryNextVoice() && !tryPublicGuestStream()) {
-                                        playerIssue="Источник вернул короткий ролик. Открытого полного видео здесь нет."
-                                        pause()
-                                    }
-                                }
+                                voiceAvailability[voiceKey(voice)] = true
                             }
-                            if (state == Player.STATE_ENDED) {
-                                if (PublicStreamRetryPolicy.isShortPreview(currentPosition)) {
-                                    if (alternativeIndex < availableUrls.lastIndex) {
-                                        alternativeIndex++
-                                    } else if (!tryAnotherAvailableQuality() &&
-                                        !tryNextVoice() && !tryPublicGuestStream()) {
-                                        playerIssue="Короткий ролик завершён. Полного доступного потока нет."
-                                    }
-                                } else {
-                                    endedCounter++
-                                }
-                            }
+                            if (state == Player.STATE_ENDED) endedCounter++
                         }
-                        override fun onPlayerError(failure:PlaybackException){
-                            if (alternativeIndex < availableUrls.lastIndex) {
+
+                        override fun onPlayerError(failure: PlaybackException) {
+                            val httpError = failure.cause as? HttpDataSource.InvalidResponseCodeException
+                            val reason = httpError?.let {
+                                MirrorMediaParser.responseFailure(JSONObject().put("__kinoStatus", it.responseCode))
+                            } ?: when (failure.errorCode) {
+                                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> PlaybackFailure.NETWORK
+                                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> PlaybackFailure.TIMEOUT
+                                in 6000..6999 -> PlaybackFailure.DRM
+                                else -> null
+                            }
+                            if (reason in setOf(PlaybackFailure.AUTH_REQUIRED, PlaybackFailure.BLOCKED,
+                                    PlaybackFailure.PREMIUM, PlaybackFailure.DRM)) {
+                                if (reason == PlaybackFailure.PREMIUM || reason == PlaybackFailure.DRM) {
+                                    voiceAvailability[voiceKey(voice)] = false
+                                }
+                                playerIssue = requireNotNull(reason).text
+                            } else if (alternativeIndex < availableUrls.lastIndex) {
+                                resumeMs = currentPosition.coerceAtLeast(resumeMs)
                                 alternativeIndex++
-                                message="Пробуем другой доступный видеосервер"
-                            } else if (!tryAnotherAvailableQuality() &&
-                                !tryNextVoice() && !tryPublicGuestStream()) {
-                                playerIssue="Ошибка воспроизведения: "+failure.errorCodeName
+                                message = "Пробуем другой доступный видеосервер"
+                            } else if (!tryAnotherAvailableQuality()) {
+                                if (reason == PlaybackFailure.UNAVAILABLE) voiceAvailability[voiceKey(voice)] = false
+                                playerIssue = reason?.text ?: "Не удалось воспроизвести поток: " + failure.errorCodeName
                             }
                         }
                         override fun onIsPlayingChanged(isPlaying:Boolean){paused=!isPlaying}
@@ -518,7 +497,7 @@ internal fun MirrorNativePlayer(
             if (player != null) {
                 val ms=player.currentPosition.coerceAtLeast(0)
                 // Do not overwrite the next episode's position with the previous episode's end.
-                if (PublicStreamRetryPolicy.shouldSaveProgress(player.duration, ms) &&
+                if (player.duration > 0 && ms > 0 &&
                     EpisodeNavigator.canResumeDisposedStream(
                     attachedEpisode, season + "/" + episode + "/" + voice + "/" + quality)) {
                     resumeMs = ms
@@ -544,7 +523,7 @@ internal fun MirrorNativePlayer(
             while (true) {
                 position = player.currentPosition.coerceAtLeast(0)
                 total = player.duration.coerceAtLeast(0)
-                if (PublicStreamRetryPolicy.shouldSaveProgress(total, position) &&
+                if (total > 0 && position > 0 &&
                     (checkpoint < 0 ||
                         kotlin.math.abs(position - checkpoint) >= 5000L)) {
                     onSave(position)
@@ -565,10 +544,7 @@ internal fun MirrorNativePlayer(
             onSaveSelection(PlaybackSelection(season, episode, voice, quality, oldPosition))
         }
         resumeMs = 0L
-        anonymousRequest = false
-        anonymousTried = false
         triedVoices.clear()
-        verifiedVoices.clear()
         season = target.season
         episode = target.id
         options = emptyList()
@@ -899,7 +875,7 @@ internal fun MirrorNativePlayer(
                 }
                 Spacer(Modifier.height(9.dp))
                 if (settingsSection == "Настройки") {
-                    val audio = movie?.voices?.firstOrNull { it.id == voice }?.name ?: "По умолчанию"
+                    val audio = movie?.voices?.firstOrNull { it.id == voice }?.name ?: "—"
                     val menuRows = listOf(
                         "Качество" to quality.ifBlank { "Авто" },
                         "Скорость" to (speed.toString() + "×"),
@@ -982,9 +958,9 @@ internal fun MirrorNativePlayer(
                                         val newVoice = movie?.voices?.getOrNull(index)
                                         if (newVoice != null && voice != newVoice.id) {
                                             triedVoices.clear()
+                                            resumeMs = player?.currentPosition?.coerceAtLeast(0) ?: resumeMs
                                             voice = newVoice.id
-                                            anonymousRequest = false
-                                            anonymousTried = false
+                                            onSaveSelection(PlaybackSelection(season, episode, voice, quality, resumeMs))
                                             readyVoice = ""
                                             options = emptyList()
                                             message = "Меняем озвучку"
@@ -1006,10 +982,15 @@ internal fun MirrorNativePlayer(
                         ) {
                             Text(label, modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodyMedium)
-                            if (settingsSection == "Озвучка" &&
-                                movie?.voices?.getOrNull(index)?.id in verifiedVoices) {
-                                Text("Проверено",color=appBlue,
-                                    style=MaterialTheme.typography.labelSmall)
+                            if (settingsSection == "Озвучка") {
+                                val candidate = movie?.voices?.getOrNull(index)
+                                val available = candidate?.let { voiceAvailability[voiceKey(it.id)] }
+                                Text(when (available) {
+                                    true -> "Доступна"
+                                    false -> "Недоступна"
+                                    null -> "Не проверена"
+                                }, color = if (available == true) appBlue else appMuted,
+                                    style = MaterialTheme.typography.labelSmall)
                                 Spacer(Modifier.width(6.dp))
                             }
                             if (index == currentIndex) {

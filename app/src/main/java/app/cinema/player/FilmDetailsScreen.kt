@@ -7,6 +7,7 @@ import android.os.Looper
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
+import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.*
@@ -29,10 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import org.json.JSONObject
-import org.json.JSONTokener
 import java.net.URI
 import kotlinx.coroutines.delay
 
@@ -47,16 +45,25 @@ internal data class FilmInfo(
     val franchise: List<CatalogMovie> = emptyList(),
     val franchiseResolved: Boolean = false,
     val directors: List<FilmPerson> = emptyList(),
-    val voices: List<MirrorVoice> = emptyList()
+    val voices: List<MirrorVoice> = emptyList(),
+    val title: String = "",
+    val posters: List<String> = emptyList()
 )
 
 internal object FilmInfoMemory {
-    private val values = object : LinkedHashMap<String, FilmInfo>(20, .75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, FilmInfo>?): Boolean =
-            size > 20
+    private data class Entry(val info: FilmInfo, val timestamp: Long)
+    private val values = object : LinkedHashMap<String, Entry>(24, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Entry>?): Boolean =
+            size > 24
     }
     @Synchronized fun get(url: String): FilmInfo? = values[url]
-    @Synchronized fun put(url: String, info: FilmInfo) { values[url] = info }
+        ?.takeIf { android.os.SystemClock.elapsedRealtime() - it.timestamp < 5 * 60 * 1000 }
+        ?.info
+
+    @Synchronized fun put(url: String, info: FilmInfo) {
+        values[url] = Entry(info, android.os.SystemClock.elapsedRealtime())
+    }
+
 }
 
 internal object FilmPageParser {
@@ -64,6 +71,7 @@ internal object FilmPageParser {
        (function() {
          function norm(s) {return (s || '').replace(/\s+/g,' ').trim();}
          ${MirrorVoiceDiscovery.javascript}
+         ${MirrorPoster.javascript}
          function txt(s) {var e=document.querySelector(s);return e?norm(e.textContent):'';}
          function absolute(s) {try {return new URL(s,document.baseURI).href;} catch(e) {return '';}}
          var facts=[];
@@ -75,110 +83,83 @@ internal object FilmPageParser {
            if (label && value && value.length<220) facts.push([label,value]);
          });
          var descriptions=[];
-         document.querySelectorAll(
-           '.b-post__description_text, .b-post__description, [itemprop="description"]'
-         ).forEach(function(node) {
-           var value=norm(node.textContent);
-           if(value && descriptions.indexOf(value)<0)descriptions.push(value);
+         function addDescription(value) {
+           var text = norm(typeof value === 'string' ? value : '');
+           if(text && text.length <= 8000 && !descriptions.includes(text)) descriptions.push(text);
+         }
+         document.querySelectorAll('.b-post__description_text, .b-post__description [itemprop="description"]').forEach(function(node) {
+           var copy = node.cloneNode(true);
+           copy.querySelectorAll('script,style,noscript,.b-post__description_title,[data-ad],.premium-promo').forEach(function(e) {e.remove()});
+           addDescription(copy.textContent);
          });
+         if (!descriptions.length) {
+           var section = document.querySelector('.b-post__description');
+           section?.querySelectorAll('p').forEach(function(paragraph){addDescription(paragraph.textContent)});
+         }
+         var localTitle = norm(document.querySelector('.b-post__title h1, h1.b-post__title, h1[itemprop="name"], .b-post__title')?.textContent);
+         var id = function(url) { return new URL(url,location.href).pathname.match(/\/(\d{1,12})-[^/]+\.html$/i)?.[1]; };
          document.querySelectorAll('script[type="application/ld+json"]').forEach(function(script) {
            try {
-             var json=JSON.parse(script.textContent);
-             var parts=Array.isArray(json)?json:[json];
-             parts.forEach(function(entry) {
-               var rows=(entry && Array.isArray(entry['@graph']))?entry['@graph']:[entry];
-               rows.forEach(function(row) {
-                 var value=norm(typeof row?.description==='string'?row.description:'');
-                 if(value && value.length<2000 && descriptions.indexOf(value)<0)
-                   descriptions.push(value);
-               });
+             var json = JSON.parse(script.textContent);
+             (Array.isArray(json) ? json : [json]).flatMap(function(entry) {
+               return Array.isArray(entry?.['@graph']) ? entry['@graph'] : [entry];
+             }).forEach(function(row) {
+               var types = Array.isArray(row?.['@type']) ? row['@type'] : [row?.['@type']];
+               if (!types.some(function(t){return /^(Movie|TVSeries|TVSeason)$/i.test(t || '')})) return;
+               var address = row.url || row.mainEntityOfPage?.['@id'];
+               if (address) {
+                 var u = new URL(address,location.href);
+                 if(u.origin !== location.origin || !id(u.href) || id(u.href) !== id(location.href)) return;
+               } else if (!localTitle || norm(row.name).toLowerCase() !== localTitle.toLowerCase()) return;
+               addDescription(row.description);
              });
            } catch(e) {}
          });
-         document.querySelectorAll('meta[name="description"], meta[property="og:description"]')
-           .forEach(function(meta){
-             var value=norm(meta.getAttribute('content'));
-             if(value && descriptions.indexOf(value)<0)descriptions.push(value);
+         var people = [];
+         function person(anchor, role) {
+           var entry = anchor.closest('.b-post__people_item, .b-post__actors_item, .b-post__person_item, .person-name-item') || anchor;
+           var name = norm(anchor.textContent || entry.querySelector('img')?.getAttribute('alt'));
+           if (!name || name.length >= 95) return;
+           var address = anchor.getAttribute('href');
+           var url = address ? absolute(address) : '';
+           var photo = kinoPosters(entry,document.baseURI)[0] || '';
+           people.push({name:name, url:url, photo:photo, role:role});
+         }
+         document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(row) {
+           var cells = row.querySelectorAll('td');
+           if (cells.length < 2) return;
+           var label = norm(cells[0].textContent);
+           var role = /^(?:в ролях|акт[её]ры)/i.test(label) ? 'actor' : /^режисс/i.test(label) ? 'director' : '';
+           if (!role) return;
+           var links = cells[1].querySelectorAll('a[href]');
+           if (links.length) links.forEach(function(a){person(a, role)});
+           else norm(cells[1].textContent).split(/,|;/).slice(0,12).forEach(function(name) {
+             if (name.trim()) people.push({name:name.trim(),url:'',photo:'',role:role});
            });
-         var description=descriptions[0]||'';
-         var people=[];
-         document.querySelectorAll('.b-post__people_item, .b-post__actors_item, .b-post__person_item, .persons-list-holder .person-name-item').forEach(function(e){
-           var img=e.querySelector('img');
-           var n=norm(e.querySelector('a')?.textContent || img?.getAttribute('alt') || e.textContent);
-           var photo=img ? absolute(img.getAttribute('data-src') || img.getAttribute('data-original') ||
-                                   img.getAttribute('data-lazy-src') || img.getAttribute('data-image') ||
-                                   img.getAttribute('src') || img.currentSrc) : '';
-           if(!photo) {
-             var visual=e.querySelector('[style*="background-image"]');
-             var css=visual?.getAttribute('style') || '';
-             var found=css.match(/url\((['"]?)(.*?)\1\)/);
-             if(found) photo=absolute(found[2]);
-           }
-           var anchor=e.matches('a[href]')?e:(e.querySelector('a[href]')||e.closest('a[href]'));
-           var href=anchor?.getAttribute('href') || e.getAttribute('data-href') ||
-                    e.getAttribute('data-url') || '';
-           var personUrl=href?absolute(href):'';
-           if(!photo && personUrl && window.__kinoActorPhotos) {
-             photo = window.__kinoActorPhotos[personUrl] || '';
-           }
-           var group=e.closest('.b-post__actors, .b-post__directors, [data-role], .persons-list-holder');
-           var label=((group?.className||'')+' '+(group?.getAttribute('data-role')||'')).toLowerCase();
-           var role=e.matches('.b-post__actors_item') || /actor|акт[её]р/.test(label) ?
-             'actor' : /director|режисс/.test(label) ? 'director' : 'unknown';
-           if(n && n.length<95) people.push({name:n,photo:photo,url:personUrl,role:role});
          });
-         var similar=[];
-         document.querySelectorAll('.b-content__inline_item, .b-sidelist__item').forEach(function(item) {
-           var a=item.querySelector('a[href]');
-           var img=item.querySelector('img');
-           if(!a)return;
-           var name=norm(a.getAttribute('title') || item.querySelector('.b-content__inline_item-link')?.textContent || a.textContent);
-           if(!name || name.length>130)return;
-           var photo=img?absolute(img.getAttribute('data-src') || img.getAttribute('src')):'';
-           similar.push({title:name,url:absolute(a.getAttribute('href')),poster:photo,details:''});
+         document.querySelectorAll('.b-post__actors a[href], .b-post__actors_item a[href], a.b-post__actors_item[href]')
+           .forEach(function(a){person(a,'actor')});
+         document.querySelectorAll('.b-post__directors a[href]').forEach(function(a){person(a,'director')});
+         var similar = [];
+         document.querySelectorAll('.b-post__related .b-content__inline_item, .b-post__related_item, .b-post__similar .b-content__inline_item').forEach(function(item) {
+           var link = item.querySelector('.b-content__inline_item-link a[href], .b-post__related_item_title a[href], a[href]');
+           if (!link) return;
+           var address = absolute(link.getAttribute('href'));
+           var title = norm(link.textContent || link.getAttribute('title'));
+           if (!id(address) || id(address) === id(location.href) || !title) return;
+           var posters = kinoPosters(item.querySelector('.b-content__inline_item-cover') || item,document.baseURI);
+           similar.push({title:title,url:address,posters:posters});
          });
          var franchise=window.__kinoFranchiseParts || [];
-         var directors=[];
-         document.querySelectorAll('.b-post__infotable tr,.b-post__info tr').forEach(function(tr){
-           var td=tr.querySelectorAll('td');
-           if(td.length<2 || !/режисс/i.test(norm(td[0].textContent)))return;
-           var links=Array.from(td[1].querySelectorAll('a[href]'));
-           if(links.length){
-             links.slice(0,12).forEach(function(a){
-               var name=norm(a.textContent);
-               if(name && name.length<90) {
-                 var address=absolute(a.getAttribute('href'));
-                 directors.push({name:name,url:address,
-                   photo:(window.__kinoActorPhotos||{})[address]||''});
-               }
-             });
-           }else{
-             norm(td[1].textContent).split(/,|;/).slice(0,10).forEach(function(value){
-               var name=norm(value);
-               if(name && name.length<90)directors.push({name:name,url:'',photo:''});
-             });
-           }
-         });
-         var voices=kinoDiscoverVoices().voices;
-         if(voices.length===0) {
-           var scripts=Array.from(document.scripts).map(function(s){return s.textContent||'';}).join('\n');
-           var init=scripts.match(/initCDN(?:Series|Movies)Events\s*\(\s*['"]?\d+['"]?\s*,\s*['"]?(\d{1,12})/i);
-           if(init) {
-             var translation=facts.filter(function(entry){
-               return /в переводе|озвучк/i.test(entry[0]);
-             }).map(function(entry){return entry[1];}).find(Boolean)||'';
-             voices.push({id:init[1],name:(translation||('Перевод '+init[1])).slice(0,75)});
-           }
-         }
          return JSON.stringify({
            originalTitle:txt('.b-post__origtitle, .b-post__subtitle, .b-post__title_original'),
-           description:description.substring(0,1800),
+           title:localTitle,
+           posters:kinoFilmPosters(document,document.baseURI),
            descriptions:descriptions.slice(0,12),
            rating:txt('.b-post__rating, .b-post__rating_tables, .b-post__ratings'),
            facts:facts.slice(0,18),
-           people:people.slice(0,18),
-           directors:directors.slice(0,15),
-           voices:voices,
+           people:people.slice(0,60),
+           voices:kinoPlayerMetadata().voices,
            related:similar.slice(0,15),
            franchise:franchise.slice(0,50),
            franchiseDone:window.__kinoFranchiseDone === true
@@ -194,6 +175,7 @@ internal object FilmPageParser {
     val franchiseJavascript = """
        (function() {
          if (window.__kinoFranchiseStarted) return 'already-started';
+         if (document.readyState === 'loading' && !document.querySelector('.b-post__franchise_link_title, .b-post__partcontent_item')) return 'waiting-for-markup';
          window.__kinoFranchiseStarted = true;
          window.__kinoFranchiseParts = [];
          window.__kinoFranchiseDone = false;
@@ -245,12 +227,12 @@ internal object FilmPageParser {
            headers:{Accept:'text/html'}})
            .then(function(response){
              if(!response.ok || new URL(response.url).origin!==location.origin) return null;
-             return response.text();
+             return response.text().then(function(text){return {text:text,url:response.url}});
            })
            .then(function(html){
-             if(!html || html.length>1700000)return;
-             var doc = new DOMParser().parseFromString(html,'text/html');
-             var found = read(doc,endpoint.href);
+             if(!html || html.text.length>1700000)return;
+             var doc = new DOMParser().parseFromString(html.text,'text/html');
+             var found = read(doc,html.url);
              if(found.length>0)window.__kinoFranchiseParts=found.slice(0,50);
            }).catch(function(){}).finally(function(){
              clearTimeout(abort);
@@ -260,113 +242,8 @@ internal object FilmPageParser {
        })();
     """.trimIndent()
 
-    /**
-     * The film page often lists actors as text-only links. Fetch a few same-origin actor
-     * profiles within the existing browser session to find the *actual* portrait.
-     * A profile without a valid image stays without a photo; no identity guessing.
-     */
-    val actorProfilePhotosJavascript = """
-      (function() {
-        if (window.__kinoActorPhotosStarted) return 'existing';
-        window.__kinoActorPhotosStarted = true;
-        window.__kinoActorPhotos = window.__kinoActorPhotos || {};
-        var castCards = Array.from(document.querySelectorAll(
-          '.b-post__people_item, .b-post__actors_item, .b-post__person_item, .persons-list-holder .person-name-item'
-        )).slice(0, 16);
-        // Resolve confirmed director profiles first, before optional actor profiles.
-        var directorCards=[];
-        document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(row) {
-          var td=row.querySelectorAll('td');
-          if(td.length>=2 && /режисс/i.test((td[0].textContent||'').trim())) {
-            td[1].querySelectorAll('a[href]').forEach(function(anchor){directorCards.push(anchor);});
-          }
-        });
-        var cards=directorCards.concat(castCards).slice(0,20);
-        var targets = cards.map(function(e) {
-          var a = e.matches('a[href]') ? e : (e.querySelector('a[href]') || e.closest('a[href]'));
-          var href = a?.getAttribute('href') || e.getAttribute('data-href') || e.getAttribute('data-url');
-          var url;
-          try { url = new URL(href, document.baseURI); } catch (err) { return null; }
-          if(url.origin !== location.origin) return null;
-          var name = (a?.textContent || e.textContent || '').replace(/\s+/g,' ').trim().toLowerCase();
-          if(!name) return null;
-          return {url:url.href,name:name};
-        }).filter(Boolean).filter(function(v, i, all) {
-          return all.findIndex(function(a){return a.url===v.url})===i;
-        });
-        var active = 0;
-        function valid(address) {
-          try {
-            var u = new URL(address, location.href);
-            return u.protocol==='https:' &&
-              !/(?:logo|blank|placeholder|no[-_]?photo|default[-_]?image|spacer|favicon|\/pixel)/i.test(u.pathname);
-          } catch(err) { return false; }
-        }
-        function imageOf(node, docUrl) {
-          if(!node) return '';
-          var values = [node.getAttribute('data-src'),node.getAttribute('data-original'),
-                        node.getAttribute('data-lazy-src'),node.getAttribute('src'),
-                        node.getAttribute('content')];
-          var background=node.getAttribute('style')||'';
-          var css=background.match(/background-image\s*:\s*url\(\s*['"]?([^)'"]+)/i);
-          if(css) values.unshift(css[1]);
-          for(var n=0;n<values.length;n++) {
-            if(!values[n])continue;
-            try {
-              var candidate=new URL(values[n],docUrl).href;
-              if(valid(candidate))return candidate;
-            } catch(err){}
-          }
-          return '';
-        }
-        function photoFromProfile(doc, base, personName) {
-          var title=(doc.title||'').replace(/\s+/g,' ').toLowerCase();
-          var normalized=personName.replace(/[ё]/g,'е');
-          if(!title.replace(/[ё]/g,'е').includes(normalized))return '';
-          var selectors=[
-             '.b-person__photo img','.b-person__poster img','.b-person__image img',
-             '.b-person__info img','.b-content__person img','.b-content__person_photo img',
-             '.b-profile__photo img','[itemprop="image"]',
-             '.b-post__poster img','.b-person img'
-          ];
-          for(var i=0;i<selectors.length;i++) {
-            var photo=imageOf(doc.querySelector(selectors[i]),base);
-            if(photo)return photo;
-          }
-          var meta=doc.querySelector('meta[property="og:image"]');
-          return imageOf(meta,base);
-        }
-        var index=0;
-        async function worker(){
-          while(index<targets.length) {
-            var person=targets[index++];
-            if(window.__kinoActorPhotos[person.url])continue;
-            var controller=new AbortController();
-            var cancel=setTimeout(function(){controller.abort()},3200);
-            try {
-              var response=await fetch(person.url,{
-                credentials:'same-origin',signal:controller.signal,
-                headers:{'Accept':'text/html'}
-              });
-              if(!response.ok || !response.url.startsWith(location.origin))continue;
-              var html=await response.text();
-              if(html.length>850000)continue;
-              var doc=new DOMParser().parseFromString(html,'text/html');
-              var photo=photoFromProfile(doc,response.url,person.name);
-              if(photo)window.__kinoActorPhotos[person.url]=photo;
-            } catch(err){} finally{clearTimeout(cancel);}
-          }
-        }
-        Promise.all([worker(),worker(),worker()]).then(function() {
-          window.__kinoActorPhotosDone=true;
-        });
-        return 'started';
-      })();
-    """.trimIndent()
-
     fun parse(raw: String, source: String): FilmInfo? = runCatching {
-        val decoded = JSONTokener(raw).nextValue() as? String ?: return@runCatching null
-        val data = JSONObject(decoded)
+        val data = MirrorMediaParser.objectFromWebView(raw) ?: return@runCatching null
         val factsArray = data.optJSONArray("facts")
         val facts = buildList {
             if (factsArray != null) for (i in 0 until minOf(20, factsArray.length())) {
@@ -382,62 +259,22 @@ internal object FilmPageParser {
             }
         }
         val peopleArray = data.optJSONArray("people")
-        val peopleCredits = buildList {
-            if (peopleArray != null) for (i in 0 until minOf(peopleArray.length(), 16)) {
-                val item = peopleArray.optJSONObject(i) ?: continue
-                val name = item.optString("name").trim()
-                val photo = item.optString("photo").takeIf(SourceRules::isValidHttpsUrl).orEmpty()
-                val personUrl = item.optString("url").takeIf { url ->
-                    if (!SourceRules.isValidHttpsUrl(url)) return@takeIf false
-                    val host = URI(url).host?.lowercase() ?: return@takeIf false
-                    val origin = URI(source).host?.lowercase() ?: return@takeIf false
-                    host == origin || host.endsWith(".$origin")
-                }.orEmpty()
-                if (name.isNotBlank())
-                    add(FilmPerson(name.take(85), photo, personUrl) to item.optString("role", "unknown"))
+        val credits = buildList {
+            if (peopleArray != null) for (index in 0 until minOf(peopleArray.length(), 60)) {
+                val item = peopleArray.optJSONObject(index) ?: continue
+                val name = item.optString("name").trim().take(85)
+                val role = item.optString("role")
+                if (name.isBlank() || role !in setOf("actor", "director")) continue
+                val photo = item.optString("photo").takeIf(MirrorPoster::isPhoto).orEmpty()
+                val url = item.optString("url").takeIf { SourceRules.sameOrigin(source, it) }.orEmpty()
+                add(FilmPerson(name, photo, url) to role)
             }
-        }.distinctBy { it.first.name.lowercase() }
-        val directorArray=data.optJSONArray("directors")
-        val directors=buildList {
-            if(directorArray!=null)for(i in 0 until minOf(directorArray.length(),15)){
-                val item=directorArray.optJSONObject(i) ?: continue
-                val name=item.optString("name").trim()
-                if(name.length !in 2..90)continue
-                val url=item.optString("url").takeIf { value ->
-                    SourceRules.isValidHttpsUrl(value) && runCatching {
-                        URI(value).host.equals(URI(source).host,ignoreCase=true)
-                    }.getOrDefault(false)
-                }.orEmpty()
-                val photo = item.optString("photo").takeIf(SourceRules::isValidHttpsUrl).orEmpty()
-                add(FilmPerson(name,photo,url))
-            }
-        }.distinctBy { it.name }
-        val people = FilmPersonRoles.actorCredits(peopleCredits, directors)
-        val voiceArray=data.optJSONArray("voices")
-        val voices=buildList {
-            if(voiceArray!=null)for(i in 0 until minOf(voiceArray.length(),45)){
-                val item=voiceArray.optJSONObject(i) ?: continue
-                val id=item.optString("id")
-                val name=item.optString("name").trim()
-                if(id.matches(Regex("[0-9]{1,10}")) && name.length in 2..80)
-                    add(MirrorVoice(id,name))
-            }
-        }.distinctBy { it.id }
-        val relatedArray = data.optJSONArray("related")
-        val originalHost = URI(source).host?.lowercase() ?: return@runCatching null
-        val related = buildList {
-            if (relatedArray != null) for (i in 0 until minOf(relatedArray.length(), 12)) {
-                val item = relatedArray.optJSONObject(i) ?: continue
-                val url = item.optString("url")
-                if (!SourceRules.isValidHttpsUrl(url)) continue
-                val host = URI(url).host?.lowercase() ?: continue
-                if (host != originalHost && !host.endsWith(".$originalHost")) continue
-                val title = item.optString("title").trim()
-                if (title.isBlank()) continue
-                val poster = item.optString("poster").takeIf(SourceRules::isValidHttpsUrl).orEmpty()
-                add(CatalogMovie(url, title.take(130), poster, ""))
-            }
-        }.distinctBy { it.url }
+        }
+        val directors = credits.filter { it.second == "director" }.map { it.first }.distinctBy { it.name }
+        val people = FilmPersonRoles.actorCredits(credits, directors).take(20)
+        val related = MirrorCatalog.parse(JSONObject.quote(
+            JSONObject().put("cards", data.optJSONArray("related") ?: org.json.JSONArray()).toString()
+        ), source)
         val partArray=data.optJSONArray("franchise")
         val items=buildList {
             if(partArray!=null)for(i in 0 until minOf(50,partArray.length())){
@@ -468,7 +305,9 @@ internal object FilmPageParser {
             franchise = parts,
             franchiseResolved = data.optBoolean("franchiseDone",false),
             directors = directors,
-            voices = voices
+            voices = MirrorMediaParser.parseVoices(data.optJSONArray("voices")),
+            title = CatalogTitleCleaner.clean(data.optString("title")),
+            posters = MirrorCatalog.readPosters(data)
         )
     }.getOrNull()
 }
@@ -484,24 +323,20 @@ internal fun FilmDetails(
     savedVoice: String,
     onWatch: (String, String) -> Unit,
     onRelated: (CatalogMovie) -> Unit,
+    onMetadata: (CatalogMovie) -> Unit,
     onPerson: (FilmPerson) -> Unit
 ) {
     val context = LocalContext.current
     var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
-    var loadDone by remember(movie.url) { mutableStateOf(false) }
-    // Never spin forever waiting for scripts blocked by the source.
-    // The metadata reader also runs before onPageFinished (see below).
+    var loadDone by remember(movie.url) { mutableStateOf(info?.franchiseResolved == true) }
+    var loadError by remember(movie.url) { mutableStateOf("") }
     LaunchedEffect(movie.url) {
-        delay(7000)
-        if (!loadDone) loadDone = true
+        if (!loadDone) {
+            delay(9500)
+            loadDone = true
+        }
     }
     var showWatchMenu by remember(movie.url) { mutableStateOf(false) }
-    var voiceId by remember(movie.url) { mutableStateOf(savedVoice) }
-    LaunchedEffect(info?.voices) {
-        val available = info?.voices.orEmpty()
-        if (available.isNotEmpty() && available.none { it.id == voiceId })
-            voiceId = available.first().id
-    }
     val webView = if (!loadDone) remember(context, movie.url) {
         val handler = Handler(Looper.getMainLooper())
         WebView(context).apply {
@@ -511,61 +346,59 @@ internal fun FilmDetails(
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
             webViewClient = object : WebViewClient() {
+                private var scanningUrl: String? = null
+
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
-                    val host = request.url.host ?: return true
-                    val home = URI(source).host ?: return true
-                    return request.url.scheme != "https" ||
-                        !(host.equals(home, true) || host.endsWith(".$home", true))
+                    val blocked = !MirrorPostId.isSameFilm(movie.url, request.url.toString())
+                    if (blocked) {
+                        loadError = "Источник перенаправил на другую страницу."
+                        loadDone = true
+                    }
+                    return blocked
                 }
-                private fun readDetails(view: WebView, pageUrl: String) {
-                    if (loadDone || view.url != pageUrl) return
-                    view.evaluateJavascript(FilmPageParser.javascript) { raw ->
-                        if (loadDone || view.url != pageUrl) return@evaluateJavascript
-                        val parsed = FilmPageParser.parse(raw, source) ?: return@evaluateJavascript
-                        if (FilmInfoReadiness.hasContent(parsed)) {
-                            val previous = info
-                            val merged = parsed.copy(
-                                description = parsed.description.ifBlank {
-                                    previous?.description.orEmpty()
-                                },
-                                facts = parsed.facts.ifEmpty { previous?.facts.orEmpty() },
-                                cast = parsed.cast.ifEmpty { previous?.cast.orEmpty() },
-                                directors = parsed.directors.ifEmpty {
-                                    previous?.directors.orEmpty()
-                                },
-                                voices = parsed.voices.ifEmpty { previous?.voices.orEmpty() },
-                                franchise = parsed.franchise.ifEmpty {
-                                    previous?.franchise.orEmpty()
-                                },
-                                related = parsed.related.ifEmpty { previous?.related.orEmpty() }
-                            )
-                            info = merged
-                            FilmInfoMemory.put(movie.url, merged)
-                            if (FilmInfoReadiness.canFinish(merged)) loadDone = true
-                        }
+
+                private fun scan(view: WebView, pageUrl: String) {
+                    if (loadDone || scanningUrl == pageUrl || !MirrorPostId.isSameFilm(movie.url, pageUrl)) return
+                    scanningUrl = pageUrl
+                    val timings = listOf(100L, 480L, 1200L, 2450L, 4400L, 6800L)
+                    timings.forEachIndexed { index, wait ->
+                        handler.postDelayed({
+                            if (loadDone || view.url != pageUrl) return@postDelayed
+                            view.evaluateJavascript(FilmPageParser.franchiseJavascript) {}
+                            view.evaluateJavascript(FilmPageParser.javascript) { raw ->
+                                if (loadDone || view.url != pageUrl) return@evaluateJavascript
+                                val parsed = FilmPageParser.parse(raw, source)
+                                if (parsed != null && FilmInfoReadiness.hasContent(parsed)) {
+                                    info = parsed
+                                    if (FilmInfoReadiness.canFinish(parsed) && index >= 2) {
+                                        FilmInfoMemory.put(movie.url, parsed)
+                                        loadDone = true
+                                    }
+                                }
+                                if (index == timings.lastIndex) loadDone = true
+                            }
+                        }, wait)
                     }
                 }
-                // A site can keep loading ads/scripts after its content is visible.
-                // Start extracting metadata without waiting for onPageFinished.
-                override fun onPageCommitVisible(view: WebView, url: String) {
-                    listOf(180L, 700L, 1550L, 2900L, 4750L).forEach { ms ->
-                        handler.postDelayed({ readDetails(view, url) }, ms)
+
+                override fun onPageCommitVisible(view: WebView, url: String) = scan(view, url)
+                override fun onPageFinished(view: WebView, url: String) = scan(view, url)
+
+                override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: android.webkit.WebResourceResponse) {
+                    if (request.isForMainFrame) {
+                        loadError = "Источник вернул HTTP ${response.statusCode}."
+                        loadDone = true
                     }
                 }
-                override fun onPageFinished(view: WebView, url: String) {
-                    view.evaluateJavascript(FilmPageParser.franchiseJavascript) {}
-                    handler.postDelayed({
-                        if (view.url == url && !loadDone)
-                            view.evaluateJavascript(FilmPageParser.actorProfilePhotosJavascript) {}
-                    }, 800L)
-                    listOf(0L, 650L, 1800L, 3400L).forEach { ms ->
-                        handler.postDelayed({ readDetails(view, url) }, ms)
-                    }
-                }
+
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                    if (request.isForMainFrame) loadDone = true
+                    if (request.isForMainFrame) {
+                        loadError = "Не удалось загрузить страницу фильма."
+                        loadDone = true
+                    }
                 }
             }
             setTag(handler)
@@ -580,6 +413,18 @@ internal fun FilmDetails(
         }
     }
 
+    val current = info
+    val pictures = (current?.posters.orEmpty() + movie.poster + movie.posterAlternatives)
+        .filter(MirrorPoster::isPhoto).distinct()
+    val visibleMovie = movie.copy(
+        title = current?.title.orEmpty().ifBlank { CatalogTitleCleaner.clean(movie.title, movie.details) },
+        poster = pictures.firstOrNull().orEmpty(),
+        posterAlternatives = pictures.drop(1)
+    )
+    LaunchedEffect(visibleMovie) {
+        if (visibleMovie != movie) onMetadata(visibleMovie)
+    }
+
     val primary = MaterialTheme.colorScheme.onSurface
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 730.dp
@@ -587,22 +432,11 @@ internal fun FilmDetails(
         if (webView != null) AndroidView(factory = { webView }, modifier = Modifier.size(2.dp).alpha(.01f))
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             if (wide) {
-                Box(Modifier.width(tabletPosterWidth).fillMaxHeight()
-                    .clip(RoundedCornerShape(17.dp)).background(appCard),
-                    contentAlignment = Alignment.TopCenter) {
-                    if (movie.poster.isNotBlank()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context).data(movie.poster)
-                                .addHeader("Referer", source).build(),
-                            contentDescription = movie.title,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Icon(Icons.Outlined.Movie, contentDescription = null,
-                            tint = appMuted, modifier = Modifier.size(52.dp))
-                    }
-                }
+                MoviePosterImage(
+                    visibleMovie,
+                    Modifier.width(tabletPosterWidth).fillMaxHeight().clip(RoundedCornerShape(17.dp)),
+                    ContentScale.Fit
+                )
             }
             LazyColumn(
             modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -623,21 +457,13 @@ internal fun FilmDetails(
                 Column(Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(11.dp)) {
                     if (!wide) {
-                        Box(Modifier.fillMaxWidth().height(360.dp)
-                            .clip(RoundedCornerShape(16.dp)).background(appCard),
-                            contentAlignment = Alignment.Center) {
-                            if (movie.poster.isNotBlank()) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(context).data(movie.poster)
-                                        .addHeader("Referer", source).build(),
-                                    contentDescription = movie.title, contentScale = ContentScale.Fit,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else Icon(Icons.Outlined.Movie, contentDescription = null,
-                                tint = appMuted, modifier = Modifier.size(44.dp))
-                        }
+                        MoviePosterImage(
+                            visibleMovie,
+                            Modifier.fillMaxWidth().height(360.dp).clip(RoundedCornerShape(16.dp)),
+                            ContentScale.Fit
+                        )
                     }
-                    Text(movie.title, style = MaterialTheme.typography.headlineSmall,
+                    Text(visibleMovie.title, style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold)
                     if (!info?.originalTitle.isNullOrBlank())
                         Text(info!!.originalTitle, color = appMuted,
@@ -647,10 +473,7 @@ internal fun FilmDetails(
                             style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = {
-                            onWatch(movie.url, info?.voices?.firstOrNull { it.id == voiceId }?.id
-                                ?: info?.voices?.firstOrNull()?.id.orEmpty())
-                        },
+                        Button(onClick = { onWatch(movie.url, "") },
                             modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) {
                             Icon(Icons.Outlined.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(7.dp))
@@ -669,9 +492,7 @@ internal fun FilmDetails(
                     }
                 }
             }
-            val meaningfulDescription = FilmTextSanitizer.description(
-                info?.description.orEmpty()
-            )
+            val meaningfulDescription = info?.description.orEmpty()
             if (meaningfulDescription.isNotBlank()) {
                 item {
                     Text("Описание", style = MaterialTheme.typography.titleMedium,
@@ -753,12 +574,13 @@ internal fun FilmDetails(
                     }
                 }
             }
-            if (info?.franchise?.isNotEmpty() == true) {
+            val otherParts = info?.franchise.orEmpty().filterNot { MirrorPostId.isSameFilm(it.url, movie.url) }
+            if (otherParts.isNotEmpty()) {
                 item {
                     Text("Связанные фильмы и части франшизы", style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-                    info!!.franchise.forEach { part ->
+                    otherParts.forEach { part ->
                         Surface(
                             onClick = { onRelated(part) },
                             color = appPanel,
@@ -790,7 +612,7 @@ internal fun FilmDetails(
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(info!!.related, key = { it.url }) { related ->
                             Box(Modifier.width(124.dp)) {
-                                FilmPoster(related, source) { onRelated(related) }
+                                FilmPoster(related) { onRelated(related) }
                             }
                         }
                     }
@@ -806,7 +628,7 @@ internal fun FilmDetails(
                 }
             } else if (info == null) {
                 item {
-                    Text("Подробные сведения на выбранном зеркале сейчас недоступны.",
+                    Text(loadError.ifBlank { "Подробные сведения на выбранном зеркале сейчас недоступны." },
                         color = appMuted)
                 }
             }
@@ -837,7 +659,6 @@ internal fun FilmDetails(
                         HorizontalDivider(color = appMuted.copy(alpha = .10f))
                         Row(
                             Modifier.fillMaxWidth().clickable {
-                                voiceId = candidate.id
                                 showWatchMenu = false
                                 onWatch(movie.url, candidate.id)
                             }.padding(vertical = 9.dp),
@@ -846,7 +667,7 @@ internal fun FilmDetails(
                             Text(candidate.name, modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodyMedium,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (voiceId == candidate.id) Icon(Icons.Outlined.Check,
+                            if (savedVoice == candidate.id) Icon(Icons.Outlined.Check,
                                 contentDescription = "Выбрано", tint = appBlue,
                                 modifier = Modifier.size(20.dp))
                         }

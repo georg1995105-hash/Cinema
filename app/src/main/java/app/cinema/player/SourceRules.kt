@@ -13,4 +13,12 @@ object SourceRules {
     } catch (_: Exception) {
         false
     }
+
+    fun sameOrigin(first: String, second: String): Boolean {
+        if (!isValidHttpsUrl(first) || !isValidHttpsUrl(second)) return false
+        val a = URI(first.trim())
+        val b = URI(second.trim())
+        return a.host.equals(b.host, ignoreCase = true) &&
+            (if (a.port == -1) 443 else a.port) == (if (b.port == -1) 443 else b.port)
+    }
 }

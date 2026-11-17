@@ -19,10 +19,10 @@ class FilmInfoReadinessTest {
         assertFalse(FilmInfoReadiness.canFinish(info("Описание фильма", false)))
     }
 
-    @Test fun missingActorPhotosKeepBackgroundEnrichmentOpen() {
+    @Test fun missingActorPhotosDoNotHoldFilmMetadataLoading() {
         val actor=FilmPerson("Актёр", "", "https://example.org/person/1")
         val film=info("Описание").copy(cast=listOf(actor))
         assertTrue(FilmInfoReadiness.hasContent(film))
-        assertFalse(FilmInfoReadiness.canFinish(film))
+        assertTrue(FilmInfoReadiness.canFinish(film))
     }
 }

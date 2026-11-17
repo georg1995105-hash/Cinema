@@ -34,14 +34,9 @@ class SearchRelevanceTest {
             "елки").size)
     }
 
-    @Test fun quickSearchUsesOnlySameMirrorEndpointAndEscapesQuery() {
-        val js=MirrorQuickSearch.javascript("фильм');alert(1);//")
-        assertTrue(js.contains("encodeURIComponent(q)"))
-        assertTrue(js.contains("function sameOrigin(raw)"))
-        assertTrue(js.contains("new URL(raw).origin===location.origin"))
-        assertTrue(js.contains("!sameOrigin(resp.url)"))
-        assertTrue(js.contains("!sameOrigin(response.url)"))
-        assertTrue(js.contains("fetch('/engine/ajax/search.php?q='"))
-        assertFalse(js.contains("fetch('https://"))
+    @Test fun triesNominativeWhenTheSourceHasNoMatchesForSpokenAccusative() {
+        assertEquals(listOf("Бригада"), SearchRelevance.alternateQuery(VoiceSearchQuery.clean("найди Бригаду")))
+        assertTrue(SearchRelevance.find(listOf(movie("Другая группа")), "бригаду").isEmpty())
+        assertEquals("Бригада", SearchRelevance.find(listOf(movie("Бригада: Наследник"), movie("Бригада")), "бригаду").first().title)
     }
 }

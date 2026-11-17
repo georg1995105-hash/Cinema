@@ -1,5 +1,6 @@
 package app.cinema.player
 
+import java.net.URI
 import java.text.Normalizer
 import java.util.Locale
 
@@ -10,31 +11,34 @@ internal object SearchRelevance {
         Normalizer.normalize(raw, Normalizer.Form.NFKC).lowercase(Locale.ROOT)
             .replace('ё', 'е').replace(separators, " ").trim()
 
+    fun alternateQuery(raw: String): List<String> {
+        val query = raw.trim()
+        val last = query.substringAfterLast(' ')
+        if (!last.matches(Regex("(?iu)[а-яё]{4,}[ую]"))) return emptyList()
+        val ending = if (last.endsWith("ю", true)) "я" else "а"
+        return listOf(query.dropLast(1) + ending)
+    }
+
     fun find(movies: List<CatalogMovie>, query: String): List<CatalogMovie> {
         val q = normalized(query)
         if (q.isBlank()) return movies
-        val words = q.split(' ').filter { it.isNotBlank() }
+        val forms = listOf(q) + alternateQuery(q).map(::normalized)
         return movies.mapNotNull { movie ->
-            val title = normalized(CatalogTitleCleaner.clean(movie.title))
-            if (title.isEmpty()) return@mapNotNull null
-            val score = when {
-                title == q -> 0
-                title.startsWith("$q ") -> 1
-                title.contains(" $q ") || title.endsWith(" $q") -> 2
-                title.contains(q) -> 3
-                words.size > 1 && words.all { word ->
-                    title.split(' ').any { it == word || it.startsWith(word) }
-                } -> 4
-                // The speech recognizer can return an inflected Russian title:
-                // "найди Бригаду" vs the catalogue's "Бригада".
-                words.size == 1 && words[0].length >= 5 &&
-                    title.split(' ').firstOrNull()?.let { first ->
-                        first.length == q.length && first.dropLast(1) == q.dropLast(1)
-                    } == true -> 5
-                else -> return@mapNotNull null
-            }
+            val title = normalized(CatalogTitleCleaner.clean(movie.title, movie.details))
+            val score = forms.mapIndexedNotNull { index, form ->
+                val match = when {
+                    title == form -> 0
+                    title.startsWith("$form ") -> 2
+                    title.contains(" $form ") || title.endsWith(" $form") -> 4
+                    title.startsWith(form) && form.length >= 3 && form == q -> 6
+                    else -> return@mapIndexedNotNull null
+                }
+                match + index
+            }.minOrNull() ?: return@mapNotNull null
             score to movie
-        }.sortedWith(compareBy<Pair<Int,CatalogMovie>> { it.first }
-            .thenBy { it.second.title.length }).map { it.second }.distinctBy { it.url }
+        }.sortedWith(compareBy<Pair<Int, CatalogMovie>> { it.first }
+            .thenBy { it.second.title.length })
+            .map { it.second }
+            .distinctBy { MirrorPostId.fromUrl(it.url)?.let { id -> URI(it.url).authority + "/" + id } ?: it.url }
     }
 }
