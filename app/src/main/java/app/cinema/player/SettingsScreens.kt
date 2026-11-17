@@ -76,78 +76,97 @@ internal fun SourcesScreen(
     var input by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
     var testing by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-    Column {
-        ScreenHeading("Зеркала", "Адреса сохраняются только на этом устройстве", back)
-        Spacer(Modifier.height(20.dp))
-        Surface(color = appPanel, shape = RoundedCornerShape(18.dp)) {
-            Column(Modifier.fillMaxWidth().padding(18.dp)) {
-                Text("Добавить адрес", fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(input, { input = it; message = "" },
-                    label = { Text("Адрес сайта") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp))
-                Spacer(Modifier.height(10.dp))
-                Button(onClick = {
-                    val address = input.trim()
-                    when {
-                        !SourceRules.isValidHttpsUrl(address) -> message = "Нужен защищённый адрес с https://"
-                        address in sources -> message = "Этот адрес уже добавлен"
-                        else -> {
-                            change(sources.toList() + address)
-                            if (selected == null) select(address)
-                            input = ""
-                            message = "Адрес добавлен"
+    val results=remember { mutableStateMapOf<String,MirrorProbeResult>() }
+    val scope=rememberCoroutineScope()
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeading("Зеркала", "Только сохранённые вами адреса", back)
+        Spacer(Modifier.height(14.dp))
+        Surface(color=appPanel,shape=RoundedCornerShape(16.dp)) {
+            Column(Modifier.fillMaxWidth().padding(15.dp),
+                verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(input,{input=it;message=""},
+                    label={Text("Адрес сайта")},singleLine=true,
+                    modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(12.dp))
+                Row(verticalAlignment=Alignment.CenterVertically) {
+                    Button(onClick={
+                        val url=input.trim()
+                        when{
+                            !SourceRules.isValidHttpsUrl(url)->message="Нужен адрес HTTPS"
+                            url in sources->message="Зеркало уже добавлено"
+                            else->{
+                                change(sources.toList()+url)
+                                if(selected==null)select(url)
+                                input=""
+                                message="Адрес сохранён"
+                            }
                         }
+                    },shape=RoundedCornerShape(12.dp)){
+                        Icon(Icons.Outlined.Add,contentDescription=null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Добавить")
                     }
-                }) {
-                    Icon(Icons.Outlined.Add, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Добавить")
-                }
-                if (message.isNotBlank()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(message, color = appBlue)
+                    if(message.isNotBlank()){
+                        Spacer(Modifier.width(10.dp))
+                        Text(message,color=appMuted,style=MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }
-        Spacer(Modifier.height(18.dp))
-        if (sources.isEmpty()) {
+        Spacer(Modifier.height(12.dp))
+        if(sources.isEmpty()) {
             EmptyPanel("Зеркала не добавлены",
-                "Добавьте своё зеркало вручную. Сохранение адреса не подключает каталог автоматически.",
-                Icons.Outlined.Link)
+                "Добавьте HTTPS-адрес выбранного источника.",Icons.Outlined.Public)
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(sources, key = { it }) { address ->
-                    Surface(color = appCard, shape = RoundedCornerShape(15.dp)) {
-                        Column(Modifier.fillMaxWidth().padding(15.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(address, modifier = Modifier.weight(1f),
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (address == selected) Icon(
-                                    Icons.Outlined.CheckCircle, contentDescription = "Выбрано",
-                                    tint = appBlue)
+            LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp),
+                contentPadding=PaddingValues(bottom=24.dp)) {
+                items(sources,key={it}){address->
+                    var actions by remember(address){mutableStateOf(false)}
+                    val check=results[address]
+                    Surface(color=appCard,shape=RoundedCornerShape(14.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(13.dp),
+                            verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                            Row(verticalAlignment=Alignment.CenterVertically){
+                                Text(address,modifier=Modifier.weight(1f),
+                                    maxLines=1,overflow=TextOverflow.Ellipsis)
+                                if(address==selected)Icon(Icons.Outlined.CheckCircle,
+                                    contentDescription="Выбрано",tint=appBlue)
                             }
-                            Spacer(Modifier.height(6.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (address != selected) TextButton(onClick = { select(address) }) {
-                                    Text("Выбрать")
+                            if(check!=null) {
+                                Text(check.message+
+                                    (check.latencyMs?.let{" · "+it+" мс"}?:""),
+                                    color=if(check.available)appBlue else appMuted,
+                                    style=MaterialTheme.typography.bodySmall)
+                            }
+                            Row(verticalAlignment=Alignment.CenterVertically){
+                                if(address!=selected){
+                                    TextButton(onClick={select(address)}){Text("Выбрать")}
+                                }else{
+                                    Text("Основное",color=appBlue,
+                                        style=MaterialTheme.typography.labelMedium)
                                 }
-                                else Text("Основное", color = appBlue,
-                                    style = MaterialTheme.typography.labelMedium)
                                 Spacer(Modifier.width(8.dp))
-                                TextButton(onClick = { onBrowse(address) }) { Text("Открыть") }
-                                Spacer(Modifier.width(6.dp))
-                                TextButton(enabled = testing != address, onClick = {
-                                    testing = address
+                                TextButton(enabled=testing!=address,onClick={
+                                    testing=address
                                     scope.launch {
-                                        message = SourceProbe.check(address)
-                                        testing = null
+                                        results[address]=SourceProbe.inspect(address)
+                                        testing=null
                                     }
-                                }) { Text(if (testing == address) "Проверка…" else "Проверить") }
-                                TextButton(onClick = { change(sources.filterNot { it == address }) }) {
-                                    Text("Удалить", color = appMuted)
+                                }){Text(if(testing==address)"Проверка…" else "Проверить")}
+                                Spacer(Modifier.weight(1f))
+                                Box {
+                                    IconButton(onClick={actions=true}){
+                                        Icon(Icons.Outlined.MoreVert,
+                                            contentDescription="Действия")
+                                    }
+                                    DropdownMenu(expanded=actions,onDismissRequest={actions=false}){
+                                        DropdownMenuItem(text={Text("Открыть")},
+                                            onClick={actions=false;onBrowse(address)})
+                                        DropdownMenuItem(text={Text("Удалить")},onClick={
+                                            actions=false
+                                            change(sources.filterNot{it==address})
+                                            results.remove(address)
+                                        })
+                                    }
                                 }
                             }
                         }
@@ -156,6 +175,7 @@ internal fun SourcesScreen(
             }
         }
     }
+
 }
 
 @Composable

@@ -5,29 +5,36 @@ import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Only an explicit reachability check; a denied HEAD request is not proof of site failure. */
+internal data class MirrorProbeResult(
+    val available: Boolean, val latencyMs: Long?, val message: String
+)
+
+/** HTTP reachability alone does not confirm working film/video streams. */
 object SourceProbe {
-    suspend fun check(url: String): String = withContext(Dispatchers.IO) {
-        if (!SourceRules.isValidHttpsUrl(url)) return@withContext "Неправильный адрес"
+    internal suspend fun inspect(url: String): MirrorProbeResult = withContext(Dispatchers.IO) {
+        if (!SourceRules.isValidHttpsUrl(url))
+            return@withContext MirrorProbeResult(false,null,"Неправильный адрес")
+        val start=System.nanoTime()
         var connection: HttpURLConnection? = null
         try {
-            connection = (URL(url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 6000
-                readTimeout = 6000
-                requestMethod = "HEAD"
-                instanceFollowRedirects = false
+            connection=(URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout=6000;readTimeout=6000;requestMethod="HEAD"
+                instanceFollowRedirects=false
             }
-            val code = connection.responseCode
-            when (code) {
-                in 200..299 -> "Сервер доступен. Код ответа: $code"
-                in 300..399 -> "Сервер перенаправляет запрос. Код: $code"
-                405 -> "Сервер не разрешил такую проверку"
-                else -> "Ответ сервера: $code"
+            val code=connection.responseCode
+            val latency=((System.nanoTime()-start)/1_000_000L).coerceAtLeast(0L)
+            when(code){
+                in 200..299 -> MirrorProbeResult(true,latency,"Сайт отвечает")
+                in 300..399 -> MirrorProbeResult(false,latency,"Сайт перенаправляет запрос")
+                405 -> MirrorProbeResult(false,latency,"Проверка не поддерживается")
+                else -> MirrorProbeResult(false,latency,"Код ответа: "+code)
             }
         } catch (_: Exception) {
-            "Не удалось связаться с сервером"
-        } finally {
-            connection?.disconnect()
-        }
+            MirrorProbeResult(false,null,"Нет ответа на проверку")
+        } finally {connection?.disconnect()}
+    }
+    suspend fun check(url: String): String {
+        val result=inspect(url)
+        return result.message + (result.latencyMs?.let { " · " + it + " мс" } ?: "")
     }
 }
