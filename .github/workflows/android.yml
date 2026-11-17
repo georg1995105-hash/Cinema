@@ -34,22 +34,41 @@ jobs:
         shell: bash
         run: |
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
-          "$SDKMANAGER" "emulator" "system-images;android-35;google_apis;x86_64"
+          "$SDKMANAGER" "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          printf '%s\n' "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
           test -c /dev/kvm
           sudo chown "$USER" /dev/kvm
       - name: Start Android emulator
         shell: bash
         run: |
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/cinema-avd"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          mkdir -p "$ANDROID_AVD_HOME"
           AVDMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name avdmanager | head -n 1)"
-          printf 'no\n' | "$AVDMANAGER" create avd --force --name kino-ci --package "system-images;android-35;google_apis;x86_64"
-          nohup "$ANDROID_HOME/emulator/emulator" -avd kino-ci -no-window -gpu swiftshader_indirect \
+          printf 'no\n' | "$AVDMANAGER" create avd --force --name CinemaCi \
+            --package "system-images;android-35;google_apis;x86_64" \
+            --path "$ANDROID_AVD_HOME/CinemaCi.avd"
+          test -s "$ANDROID_AVD_HOME/CinemaCi.ini"
+          test -s "$ANDROID_AVD_HOME/CinemaCi.avd/config.ini"
+          adb start-server
+          nohup "$ANDROID_HOME/emulator/emulator" -avd CinemaCi -no-window -gpu swiftshader_indirect \
             -no-audio -no-boot-anim -no-snapshot -memory 2048 \
             > "$RUNNER_TEMP/kino-emulator.log" 2>&1 &
-          timeout 300 bash -c 'adb wait-for-device; until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 3; done' || {
-            cat "$RUNNER_TEMP/kino-emulator.log"
-            exit 1
-          }
-          adb shell input keyevent 82
+          EMULATOR_PID=$!
+          for attempt in $(seq 1 100); do
+            if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then
+              cat "$RUNNER_TEMP/kino-emulator.log"
+              exit 1
+            fi
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
+              adb shell input keyevent 82
+              exit 0
+            fi
+            sleep 3
+          done
+          cat "$RUNNER_TEMP/kino-emulator.log"
+          exit 1
       - name: Run WebView and Media3 tests on Android
         shell: bash
         run: |
@@ -110,8 +129,12 @@ jobs:
           adb uninstall app.cinema.player
           adb install "$RUNNER_TEMP/Kino-0.4.17.apk"
           adb shell am start -W -n app.cinema.player/.MainActivity
+          ORIGINAL_INSTALL="$(adb shell dumpsys package app.cinema.player | awk -F= '/firstInstallTime=/{print $2; exit}')"
+          test -n "$ORIGINAL_INSTALL"
           adb install -r "$APK"
           adb shell am start -W -n app.cinema.player/.MainActivity
+          UPDATED_INSTALL="$(adb shell dumpsys package app.cinema.player | awk -F= '/firstInstallTime=/{print $2; exit}')"
+          test "$ORIGINAL_INSTALL" = "$UPDATED_INSTALL"
           EXPECTED_CODE="$(awk '/versionCode =/{print $3; exit}' app/build.gradle.kts)"
           adb shell dumpsys package app.cinema.player | grep -F "versionCode=$EXPECTED_CODE "
       - uses: actions/upload-artifact@v4

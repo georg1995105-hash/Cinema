@@ -570,12 +570,14 @@ internal fun MirrorNativePlayer(
     }
 
     // All playback controls are overlaid on the video, including quality, audio and speed.
-    var speed by remember { mutableFloatStateOf(1f) }
     val speeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
+    var speed by remember { mutableFloatStateOf(playbackPreferences.playbackSpeed().takeIf { it in speeds } ?: 1f) }
     var draggingSeek by remember(player) { mutableStateOf(false) }
     var dragFraction by remember(player) { mutableFloatStateOf(0f) }
     val pictureModes = listOf("По размеру", "Заполнить", "Растянуть")
-    var pictureMode by remember { mutableStateOf("По размеру") }
+    var pictureMode by remember {
+        mutableStateOf(playbackPreferences.pictureMode().takeIf { it in pictureModes } ?: pictureModes.first())
+    }
     val hasSubtitles = subtitleOptions.isNotEmpty() ||
         (player?.currentTracks?.groups?.any { group ->
             group.type == C.TRACK_TYPE_TEXT &&
@@ -947,12 +949,18 @@ internal fun MirrorNativePlayer(
                                         resumeMs = player?.currentPosition?.coerceAtLeast(0) ?: resumeMs
                                         quality = options[index].label
                                     }
-                                    "Скорость" -> speed = speeds[index]
+                                    "Скорость" -> {
+                                        speed = speeds[index]
+                                        playbackPreferences.savePlaybackSpeed(speed)
+                                    }
                                     "Следующая серия" -> {
                                         autoNextEpisode = index == 0
                                         playbackPreferences.saveAutoNextEpisode(autoNextEpisode)
                                     }
-                                    "Изображение" -> pictureMode = pictureModes[index]
+                                    "Изображение" -> {
+                                        pictureMode = pictureModes[index]
+                                        playbackPreferences.savePictureMode(pictureMode)
+                                    }
                                     "Субтитры" -> subtitleIndex = index - 1
                                     "Озвучка" -> {
                                         val newVoice = movie?.voices?.getOrNull(index)

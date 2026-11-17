@@ -39,7 +39,7 @@ class SourceFlowTest {
                         if (request.isForMainFrame) null
                         else WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(byteArrayOf()))
                 }
-                loadDataWithBaseURL(film, html, "text/html", "UTF-8", null)
+                loadDataWithBaseURL(film, html, "text/html", "UTF-8", film)
             }
         }
         try {
@@ -207,6 +207,10 @@ class SourceFlowTest {
         assertEquals(15, store.seekSeconds())
         assertEquals(3, store.holdSpeed())
         assertFalse(store.autoNextEpisode())
+        store.savePlaybackSpeed(1.5f)
+        store.savePictureMode("Заполнить")
+        assertEquals(1.5f, LocalStore(context).playbackSpeed(), 0f)
+        assertEquals("Заполнить", LocalStore(context).pictureMode())
     }
 
     @Test fun media3DecodesAnAuthorizedTestClipAndAdvancesPlayback() {
@@ -216,14 +220,19 @@ class SourceFlowTest {
             clip.outputStream().use { output -> input.copyTo(output) }
         }
         val playing = CountDownLatch(1)
-        lateinit var player: ExoPlayer
+        val frame = CountDownLatch(1)
+        val texture = android.graphics.SurfaceTexture(false)
+        val surface = android.view.Surface(texture)
+        var player: ExoPlayer? = null
         try {
             instrumentation.runOnMainSync {
                 player = ExoPlayer.Builder(context).build().apply {
+                    setVideoSurface(surface)
                     addListener(object : Player.Listener {
                         override fun onIsPlayingChanged(isPlaying: Boolean) {
                             if (isPlaying) playing.countDown()
                         }
+                        override fun onRenderedFirstFrame() { frame.countDown() }
                     })
                     setMediaItem(MediaItem.fromUri(Uri.fromFile(clip)))
                     prepare()
@@ -231,10 +240,15 @@ class SourceFlowTest {
                 }
             }
             assertTrue("Media3 entered playing state", playing.await(15, TimeUnit.SECONDS))
+            assertTrue("Media3 rendered a video frame", frame.await(15, TimeUnit.SECONDS))
             Thread.sleep(700)
-            instrumentation.runOnMainSync { assertTrue("Playback advanced", player.currentPosition > 200) }
+            var position = 0L
+            instrumentation.runOnMainSync { position = requireNotNull(player).currentPosition }
+            assertTrue("Playback advanced", position > 200)
         } finally {
-            instrumentation.runOnMainSync { player.release() }
+            instrumentation.runOnMainSync { player?.release() }
+            surface.release()
+            texture.release()
             clip.delete()
         }
     }

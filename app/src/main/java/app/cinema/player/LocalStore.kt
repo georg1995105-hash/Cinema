@@ -71,6 +71,16 @@ class LocalStore(context: Context) {
     fun holdSpeed(): Int = prefs.getInt("hold_speed", 2).takeIf { it in 2..4 } ?: 2
     fun saveHoldSpeed(value: Int) { if (value in 2..4) prefs.edit().putInt("hold_speed", value).apply() }
 
+    internal fun playbackSpeed(): Float = prefs.getFloat("playback_speed", 1f)
+    internal fun savePlaybackSpeed(speed: Float) {
+        prefs.edit().putFloat("playback_speed", speed).apply()
+    }
+
+    internal fun pictureMode(): String = prefs.getString("picture_mode", "").orEmpty()
+    internal fun savePictureMode(mode: String) {
+        prefs.edit().putString("picture_mode", mode).apply()
+    }
+
     fun autoNextEpisode(): Boolean = prefs.getBoolean("auto_next_episode", true)
     fun saveAutoNextEpisode(enabled: Boolean) {
         prefs.edit().putBoolean("auto_next_episode", enabled).apply()
