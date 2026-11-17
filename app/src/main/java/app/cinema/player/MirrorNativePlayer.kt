@@ -67,11 +67,20 @@ private val playerMetaJs = """
 (function(){
     function clean(s){return(s||'').replace(/\s+/g,' ').trim();}
     var js=Array.from(document.scripts).map(function(x){return x.textContent||'';}).join('\n');
-    var init=js.match(/initCDN(Series|Movies)Events\(\s*(\d+)\s*,\s*(\d+)/);
-    var holder=document.querySelector('#post_id, input[name="post_id"]');
-    var id=holder?.value || document.querySelector('.b-userset__fav_holder')?.getAttribute('data-post_id') || '';
-    if(!id) id=(document.querySelector('.b-post')?.id||'').replace(/^post-/,'');
-    if(!id && init) id=init[2];
+    var init=js.match(/initCDN(Series|Movies)Events\s*\(\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?(\d{1,12})/i);
+    var numeric=function(v){var x=String(v||'').trim();return /^\d{1,12}$/.test(x)?x:'';};
+    var idCandidates=[
+       document.querySelector('input[name="post_id"]')?.value,
+       document.querySelector('#post_id')?.value,
+       document.querySelector('#post_id')?.getAttribute('data-post-id'),
+       document.querySelector('[data-post_id]')?.getAttribute('data-post_id'),
+       document.querySelector('[data-post-id]')?.getAttribute('data-post-id'),
+       document.querySelector('.b-userset__fav_holder')?.getAttribute('data-post_id'),
+       (document.querySelector('.b-post')?.id||'').replace(/^post-/,''),
+       init?init[2]:'',
+       window.post_id,window.postId
+    ];
+    var id=idCandidates.map(numeric).find(Boolean)||'';
     var voices=Array.from(document.querySelectorAll('#translators-list li[data-translator_id], .b-translator__item[data-translator_id]')).map(
       function(x){return {id:x.getAttribute('data-translator_id'),name:clean(x.getAttribute('title')||x.textContent)}}
     ).filter(function(x){return x.id && x.name});
@@ -80,7 +89,11 @@ private val playerMetaJs = """
     );
     return JSON.stringify({
       id:String(id),series:!!((init&&init[1]==='Series')||document.querySelector('#simple-episodes-tabs')),
-      voice:String(init?init[3]:'0'),voices:voices,episodes:episodes
+      voice:String(init?init[3]:'0'),voices:voices,episodes:episodes,
+      pageState:id?'ready':
+        /captcha|checking your browser|access denied|verify you are human|anubis|cloudflare/i
+          .test((document.title||'')+' '+(document.body?.innerText||'').slice(0,600))
+        ?'protected':'missing-metadata'
     });
 })()
 """.trimIndent()
@@ -204,6 +217,7 @@ internal fun MirrorNativePlayer(
         }
     }
 
+    val metadataHandler = remember(context,filmUrl) { Handler(Looper.getMainLooper()) }
     val web=remember(context,filmUrl) {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
@@ -223,22 +237,38 @@ internal fun MirrorNativePlayer(
                     return req.url.scheme!="https"||(h!=host&&!h.endsWith(".$host"))
                 }
                 override fun onPageFinished(view:WebView,url:String){
-                    view.evaluateJavascript(playerMetaJs){ raw ->
-                        val parsed=MirrorMediaParser.pageFromWebView(raw)
-                        if(parsed==null){
-                            message=""
-                            error="Источник не предоставил данные для запуска встроенного плеера"
-                        }else{
-                            movie=parsed
-                            voice=parsed.voices.firstOrNull { it.id == savedSelection?.voice }?.id
-                                ?: parsed.voices.first().id
-                            episodes=parsed.episodes
-                            val chosen=parsed.episodes.firstOrNull {
-                                it.season == savedSelection?.season && it.id == savedSelection?.episode
-                            } ?: parsed.episodes.firstOrNull()
-                            season=chosen?.season.orEmpty()
-                            episode=chosen?.id.orEmpty()
-                        }
+                    if (runCatching { URI(url).host.equals(host,ignoreCase=true) }
+                            .getOrDefault(false).not()) return
+                    message="Определяем доступный плеер"
+                    // onPageFinished is not the same as completion of deferred site JavaScript.
+                    // Re-query briefly instead of treating one early null as a permanent failure.
+                    val delays=listOf(450L,1300L,2700L,4800L,7800L)
+                    delays.forEachIndexed { index, waitMs ->
+                        metadataHandler.postDelayed({
+                            if (view.url!=url || movie!=null) return@postDelayed
+                            view.evaluateJavascript(playerMetaJs){ raw ->
+                                if (view.url!=url || movie!=null) return@evaluateJavascript
+                                val parsed=MirrorMediaParser.pageFromWebView(raw)
+                                if (parsed!=null && (parsed.voices.size>1 || index>=2)) {
+                                    movie=parsed
+                                    message=""
+                                    error=""
+                                    voice=parsed.voices.firstOrNull { it.id == savedSelection?.voice }?.id
+                                        ?: parsed.voices.first().id
+                                    episodes=parsed.episodes
+                                    val chosen=parsed.episodes.firstOrNull {
+                                        it.season == savedSelection?.season &&
+                                            it.id == savedSelection?.episode
+                                    } ?: parsed.episodes.firstOrNull()
+                                    season=chosen?.season.orEmpty()
+                                    episode=chosen?.id.orEmpty()
+                                    metadataHandler.removeCallbacksAndMessages(null)
+                                } else if (index==delays.lastIndex) {
+                                    message=""
+                                    error=MirrorMediaParser.pageFailureReason(raw)
+                                }
+                            }
+                        },waitMs)
                     }
                 }
                 override fun onReceivedError(view:WebView,req:WebResourceRequest,
@@ -253,7 +283,11 @@ internal fun MirrorNativePlayer(
         }
     }
     DisposableEffect(web){
-        onDispose{web.stopLoading();web.destroy()}
+        onDispose{
+            metadataHandler.removeCallbacksAndMessages(null)
+            web.stopLoading()
+            web.destroy()
+        }
     }
     LaunchedEffect(movie,voice){
         val item=movie?:return@LaunchedEffect

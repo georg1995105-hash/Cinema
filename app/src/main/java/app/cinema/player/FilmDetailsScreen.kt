@@ -98,7 +98,11 @@ internal object FilmPageParser {
            if(!photo && personUrl && window.__kinoActorPhotos) {
              photo = window.__kinoActorPhotos[personUrl] || '';
            }
-           if(n && n.length<95) people.push({name:n,photo:photo,url:personUrl});
+           var group=e.closest('.b-post__actors, .b-post__directors, [data-role], .persons-list-holder');
+           var label=((group?.className||'')+' '+(group?.getAttribute('data-role')||'')).toLowerCase();
+           var role=e.matches('.b-post__actors_item') || /actor|акт[её]р/.test(label) ?
+             'actor' : /director|режисс/.test(label) ? 'director' : 'unknown';
+           if(n && n.length<95) people.push({name:n,photo:photo,url:personUrl,role:role});
          });
          var similar=[];
          document.querySelectorAll('.b-content__inline_item, .b-sidelist__item').forEach(function(item) {
@@ -119,7 +123,11 @@ internal object FilmPageParser {
            if(links.length){
              links.slice(0,12).forEach(function(a){
                var name=norm(a.textContent);
-               if(name && name.length<90)directors.push({name:name,url:absolute(a.getAttribute('href')),photo:''});
+               if(name && name.length<90) {
+                 var address=absolute(a.getAttribute('href'));
+                 directors.push({name:name,url:address,
+                   photo:(window.__kinoActorPhotos||{})[address]||''});
+               }
              });
            }else{
              norm(td[1].textContent).split(/,|;/).slice(0,10).forEach(function(value){
@@ -236,6 +244,14 @@ internal object FilmPageParser {
         var cards = Array.from(document.querySelectorAll(
           '.b-post__people_item, .b-post__actors_item, .b-post__person_item, .persons-list-holder .person-name-item'
         )).slice(0, 16);
+        // Director portraits live on their own linked profile pages, not in the cast list.
+        document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(row) {
+          var td=row.querySelectorAll('td');
+          if(td.length>=2 && /режисс/i.test((td[0].textContent||'').trim())) {
+            td[1].querySelectorAll('a[href]').forEach(function(anchor){cards.push(anchor);});
+          }
+        });
+        cards=cards.slice(0,24);
         var targets = cards.map(function(e) {
           var a = e.matches('a[href]') ? e : (e.querySelector('a[href]') || e.closest('a[href]'));
           var href = a?.getAttribute('href') || e.getAttribute('data-href') || e.getAttribute('data-url');
@@ -336,7 +352,7 @@ internal object FilmPageParser {
             }
         }
         val peopleArray = data.optJSONArray("people")
-        val people = buildList {
+        val peopleCredits = buildList {
             if (peopleArray != null) for (i in 0 until minOf(peopleArray.length(), 16)) {
                 val item = peopleArray.optJSONObject(i) ?: continue
                 val name = item.optString("name").trim()
@@ -347,9 +363,10 @@ internal object FilmPageParser {
                     val origin = URI(source).host?.lowercase() ?: return@takeIf false
                     host == origin || host.endsWith(".$origin")
                 }.orEmpty()
-                if (name.isNotBlank()) add(FilmPerson(name.take(85), photo, personUrl))
+                if (name.isNotBlank())
+                    add(FilmPerson(name.take(85), photo, personUrl) to item.optString("role", "unknown"))
             }
-        }.distinctBy { it.name }
+        }.distinctBy { it.first.name.lowercase() }
         val directorArray=data.optJSONArray("directors")
         val directors=buildList {
             if(directorArray!=null)for(i in 0 until minOf(directorArray.length(),15)){
@@ -361,9 +378,11 @@ internal object FilmPageParser {
                         URI(value).host.equals(URI(source).host,ignoreCase=true)
                     }.getOrDefault(false)
                 }.orEmpty()
-                add(FilmPerson(name,"",url))
+                val photo = item.optString("photo").takeIf(SourceRules::isValidHttpsUrl).orEmpty()
+                add(FilmPerson(name,photo,url))
             }
         }.distinctBy { it.name }
+        val people = FilmPersonRoles.actorCredits(peopleCredits, directors)
         val voiceArray=data.optJSONArray("voices")
         val voices=buildList {
             if(voiceArray!=null)for(i in 0 until minOf(voiceArray.length(),45)){
@@ -434,7 +453,8 @@ internal fun FilmDetails(
 ) {
     val context = LocalContext.current
     var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
-    var loadDone by remember(movie.url) { mutableStateOf(info?.franchiseResolved == true) }
+    // A franchise cache hit is not evidence that late-loading actor/director photos resolved.
+    var loadDone by remember(movie.url) { mutableStateOf(false) }
     var showWatchMenu by remember(movie.url) { mutableStateOf(false) }
     var voiceId by remember(movie.url) { mutableStateOf(savedVoice) }
     LaunchedEffect(info?.voices) {

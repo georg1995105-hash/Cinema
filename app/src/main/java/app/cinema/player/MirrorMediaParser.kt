@@ -33,6 +33,15 @@ internal object MirrorMediaParser {
         }
     }.getOrNull()
 
+    fun pageFailureReason(raw: String): String {
+        val metadata = objectFromWebView(raw)
+        return when (metadata?.optString("pageState")) {
+            "protected" -> "Зеркало открыло страницу проверки доступа вместо страницы фильма."
+            "missing-metadata" -> "Страница фильма открылась, но не предоставила данные плеера."
+            else -> "Не удалось получить данные плеера с выбранного зеркала."
+        }
+    }
+
     fun pageFromWebView(raw: String): MirrorMoviePage? {
         val json = objectFromWebView(raw) ?: return null
         val id = json.optString("id").trim()

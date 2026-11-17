@@ -4,6 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MirrorMediaParserTest {
+    @Test fun retryablePageWithoutPostIdHasClearReason() {
+        val raw = org.json.JSONObject.quote("""{"id":"","pageState":"missing-metadata"}""")
+        assertNull(MirrorMediaParser.pageFromWebView(raw))
+        assertTrue(MirrorMediaParser.pageFailureReason(raw).contains("не предоставила"))
+    }
+
+    @Test fun legitimatePageWithIdGetsVoiceFallback() {
+        val raw = org.json.JSONObject.quote("""{"id":"12345","series":false,"voice":"4","pageState":"ready"}""")
+        val page = MirrorMediaParser.pageFromWebView(raw)
+        assertEquals("12345",page?.id)
+        assertEquals("4",page?.voices?.singleOrNull()?.id)
+    }
+
     @Test fun parsesMediaResolutions() {
         val quality = MirrorMediaParser.parseQualityList(
             "[480p]https://media.example/a.mp4,[720p]https://media.example/b.mp4"

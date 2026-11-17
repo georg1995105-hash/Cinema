@@ -1,6 +1,7 @@
 package app.cinema.player
 
 import android.webkit.WebSettings
+import android.webkit.CookieManager
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -141,9 +142,16 @@ internal fun ActorPortrait(
                     .apply {
                         val photoHost = runCatching { URI(displayed).host.orEmpty() }.getOrDefault("")
                         val mirrorHost = runCatching { URI(source).host.orEmpty() }.getOrDefault("")
-                        if (photoHost.equals(mirrorHost, ignoreCase = true) ||
-                            photoHost.endsWith(".$mirrorHost", ignoreCase = true)) {
+                        if (mirrorHost.isNotBlank() && (
+                            photoHost.equals(mirrorHost, ignoreCase = true) ||
+                            photoHost.endsWith(".$mirrorHost", ignoreCase = true))) {
                             addHeader("Referer", source.trimEnd('/') + "/")
+                            // Never forward site cookies to public Commons or other hosts.
+                            if (photoHost.equals(mirrorHost, ignoreCase = true)) {
+                                CookieManager.getInstance().getCookie(source)?.let { cookie ->
+                                    if (cookie.isNotBlank()) addHeader("Cookie", cookie)
+                                }
+                            }
                         }
                     }
                     .crossfade(true)
