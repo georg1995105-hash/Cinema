@@ -173,8 +173,10 @@ internal fun SearchScreen(
                         }
                         if (expandYears) {
                             val maxYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                (maxYear downTo 1950).forEach { year ->
+                            androidx.compose.foundation.lazy.LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items((maxYear downTo 1950).toList()) { year ->
                                     FilterChip(selected = year in years,
                                         onClick = {
                                             if (year in years) years.remove(year)

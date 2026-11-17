@@ -75,7 +75,8 @@ internal object AppUpdates {
             val candidates = mutableListOf<ReleaseApk>()
             for (i in 0 until releases.length()) {
                 val r = releases.getJSONObject(i)
-                if (r.optBoolean("draft")) continue
+                // Publish stable, signed releases only; temporary test builds cannot update one another.
+                if (r.optBoolean("draft") || r.optBoolean("prerelease")) continue
                 val v = r.optString("tag_name").removePrefix("v")
                 if (!v.matches(Regex("""\d+\.\d+\.\d+"""))) continue
                 if (versionCompare(v, current) <= 0) continue
