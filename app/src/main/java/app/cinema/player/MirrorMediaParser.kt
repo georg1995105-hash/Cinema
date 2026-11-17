@@ -9,6 +9,10 @@ import java.util.Base64
 internal data class MirrorVoice(val id: String, val name: String)
 internal data class MirrorEpisode(val season: String, val id: String, val label: String)
 internal data class MirrorQuality(val label: String, val url: String, val alternatives: List<String> = emptyList())
+internal data class MirrorSubtitle(val title: String, val url: String, val language: String)
+internal data class MirrorStreamInfo(
+    val qualities: List<MirrorQuality>, val subtitles: List<MirrorSubtitle>, val error: String
+)
 internal data class MirrorMoviePage(
     val id: String,
     val isSeries: Boolean,
@@ -93,6 +97,43 @@ internal object MirrorMediaParser {
         return if (parsed.isEmpty()) {
             emptyList<MirrorQuality>() to "Доступный видеопоток не найден для выбранной озвучки и серии"
         } else parsed to ""
+    }
+
+    fun parseStreamInfo(raw: String): MirrorStreamInfo {
+        val (qualities, error) = parseStreamResponse(raw)
+        val json = objectFromWebView(raw)
+        val subtitles = parseSubtitleList(
+            json?.optString("subtitle").orEmpty().ifBlank {
+                json?.optString("subtitles").orEmpty()
+            }
+        )
+        return MirrorStreamInfo(qualities, subtitles, error)
+    }
+
+    /** Regular, already accessible subtitle URLs from a site's stream response. */
+    fun parseSubtitleList(value: String): List<MirrorSubtitle> {
+        if (value.isBlank()) return emptyList()
+        val output = mutableListOf<MirrorSubtitle>()
+        val pattern = Regex("""\[([^\]]{1,70})\](https://[^,\s]+)""")
+        for (match in pattern.findAll(value)) {
+            val title = match.groupValues[1].trim()
+            val uri = match.groupValues[2].trim()
+            if (title.isBlank() || title.contains('<') || !SourceRules.isValidHttpsUrl(uri)) continue
+            val language = when {
+                title.contains("рус", ignoreCase = true) ||
+                    title.equals("ru", ignoreCase = true) ||
+                    title.equals("rus", ignoreCase = true) -> "ru"
+                title.contains("анг", ignoreCase = true) ||
+                    title.contains("engl", ignoreCase = true) ||
+                    title.equals("en", ignoreCase = true) -> "en"
+                title.contains("укр", ignoreCase = true) ||
+                    title.equals("uk", ignoreCase = true) -> "uk"
+                else -> "und"
+            }
+            if (output.none { it.url == uri }) output += MirrorSubtitle(title, uri, language)
+            if (output.size >= 12) break
+        }
+        return output
     }
 
     fun parseQualityList(data: String): List<MirrorQuality> {
