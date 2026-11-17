@@ -833,7 +833,7 @@ internal fun FilmDetails(
                                         if (showEpisodes) currentEpisode else "")
                                 }
                             },
-                            enabled = voiceSelected != null,
+                            enabled = WatchChoicePolicy.validChoice(availableVoices, chosenVoice),
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         ) {

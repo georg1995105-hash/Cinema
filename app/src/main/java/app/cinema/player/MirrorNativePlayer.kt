@@ -335,23 +335,12 @@ internal fun MirrorNativePlayer(
     }
     // Attempt distinct source-provided translators in a bounded sequence.
     // No guessed translation IDs, proxy impersonation or paid stream unlocking.
-    val triedVoices=remember(filmUrl, movie?.id){ mutableStateListOf<String>() }
-    val voiceAvailability = remember(filmUrl) { mutableStateMapOf<Triple<String, String, String>, VoiceAvailability>() }
-    fun voiceKey(id: String) = Triple(season, episode, id)
-    fun tryNextVoice(): Boolean {
-        val available=movie?.voices.orEmpty()
-        val next=AutoVoicePolicy.next(available,voice,triedVoices)?:return false
-        if(voice.isNotBlank() && voice !in triedVoices)triedVoices.add(voice)
-        voice=next.id
-        readyVoice=""
-        resumeMs=0L
-        options=emptyList()
-        subtitleOptions=emptyList()
-        quality=""
-        error=""
-        message="Проверяем озвучку: "+next.name
-        return true
+    // Availability is for displaying real source status; it never triggers an
+    // automatic translation change. The user's choice remains authoritative.
+    val voiceAvailability = remember(filmUrl) {
+        mutableStateMapOf<Triple<String, String, String>, VoiceAvailability>()
     }
+    fun voiceKey(id: String) = Triple(season, episode, id)
     LaunchedEffect(movie, voice) {
         val item = movie ?: return@LaunchedEffect
         if (!item.isSeries || voice.isBlank()) return@LaunchedEffect
@@ -406,7 +395,6 @@ internal fun MirrorNativePlayer(
             ?: MirrorStreamInfo(emptyList(), failure = PlaybackFailure.TIMEOUT)
         if (streams.qualities.isEmpty()) {
             streams.failure?.voiceAvailability()?.let { voiceAvailability[voiceKey(voice)] = it }
-            if (streams.failure == PlaybackFailure.UNAVAILABLE && tryNextVoice()) return@LaunchedEffect
             message = ""
             error = streams.failure?.text ?: PlaybackFailure.UNAVAILABLE.text
             return@LaunchedEffect
@@ -1000,8 +988,7 @@ internal fun MirrorNativePlayer(
                                     "Озвучка" -> {
                                         val newVoice = movie?.voices?.getOrNull(index)
                                         if (newVoice != null && voice != newVoice.id) {
-                                            triedVoices.clear()
-                                            resumeMs = player?.currentPosition?.coerceAtLeast(0) ?: resumeMs
+                                                                            resumeMs = player?.currentPosition?.coerceAtLeast(0) ?: resumeMs
                                             voice = newVoice.id
                                             onSaveSelection(PlaybackSelection(season, episode, voice, quality, resumeMs))
                                             readyVoice = ""

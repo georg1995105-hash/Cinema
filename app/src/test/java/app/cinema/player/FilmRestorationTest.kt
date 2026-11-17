@@ -41,9 +41,10 @@ class FilmRestorationTest {
         assertEquals("new.jpg", merged.cast.first().photo)
         assertEquals("old.jpg", merged.cast.last().photo)
     }
-    @Test fun playerWorksWithExplicitDefaultWithoutVoiceList() {
+    @Test fun playerRequiresPreviouslySelectedVoice() {
         val page = MirrorMoviePage("12", true, emptyList(), emptyList(), defaultVoice = "7")
-        assertEquals("7", MirrorVoiceSelection.choose(page, null))
+        assertEquals("", MirrorVoiceSelection.choose(page, null))
+        assertEquals("7", MirrorVoiceSelection.choose(page, "7"))
     }
 
     @Test fun incompletePageDoesNotCrashOrInventVoiceId() {
@@ -51,12 +52,14 @@ class FilmRestorationTest {
             MirrorMoviePage("12", true, emptyList(), emptyList()), null))
     }
 
-    @Test fun preferFreeTranslatorOverSubscriptionDefault() {
+    @Test fun neverAutomaticallySwitchTranslator() {
         val page = MirrorMoviePage("12", false, listOf(
             MirrorVoice("1", "Premium", requiresSubscription = true),
             MirrorVoice("2", "Другой перевод")
         ), emptyList(), defaultVoice = "1")
-        assertEquals("2", MirrorVoiceSelection.choose(page, null))
+        assertEquals("", MirrorVoiceSelection.choose(page, null))
         assertEquals("1", MirrorVoiceSelection.choose(page, "1"))
+        assertEquals("2", MirrorVoiceSelection.choose(page, "2"))
+        assertEquals("", MirrorVoiceSelection.choose(page, "999"))
     }
 }
