@@ -54,7 +54,7 @@ internal fun SearchScreen(
     var submittedQuery by rememberSaveable { mutableStateOf("") }
     var type by rememberSaveable { mutableStateOf("Все") }
     LaunchedEffect(query) {
-        delay(520)
+        delay(300)
         submittedQuery = query.trim()
     }
     val countries = remember { mutableStateListOf<String>() }
@@ -72,7 +72,13 @@ internal fun SearchScreen(
         if (result.resultCode == Activity.RESULT_OK) {
             val text = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 ?.firstOrNull()
-            if (!text.isNullOrBlank()) query = text
+            if (!text.isNullOrBlank()) {
+                val recognized = VoiceSearchQuery.clean(text)
+                query = recognized
+                submittedQuery = recognized
+                showFilters = false
+                speechError = ""
+            }
         }
     }
     val selectedType = type
@@ -94,17 +100,17 @@ internal fun SearchScreen(
     }
     Column(Modifier.fillMaxSize()) {
         ScreenHeading("Поиск")
-        Spacer(Modifier.height(13.dp))
+        Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = query, onValueChange = { query = it },
-                label = { Text("Название фильма или сериала") },
+                placeholder = { Text("Фильм или сериал", maxLines = 1) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { submittedQuery = query.trim() }),
                 singleLine = true,
                 modifier = Modifier.weight(1f),
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(12.dp)
             )
             Spacer(Modifier.width(8.dp))
             FilledIconButton(
@@ -119,16 +125,20 @@ internal fun SearchScreen(
                     } catch (_: ActivityNotFoundException) {
                         speechError = "На устройстве нет службы распознавания речи"
                     }
-                }, modifier = Modifier.size(50.dp)
+                }, modifier = Modifier.size(44.dp)
             ) { Icon(Icons.Outlined.Mic, contentDescription = "Голосовой поиск") }
         }
         if (speechError.isNotBlank()) {
             Spacer(Modifier.height(6.dp))
             Text(speechError, color = MaterialTheme.colorScheme.error)
         }
-        Spacer(Modifier.height(9.dp))
-        OutlinedButton(onClick = { showFilters = !showFilters },
-            shape = RoundedCornerShape(13.dp)) {
+        Spacer(Modifier.height(5.dp))
+        OutlinedButton(
+            onClick = { showFilters = !showFilters },
+            shape = RoundedCornerShape(10.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp),
+            modifier = Modifier.height(37.dp)
+        ) {
             Icon(Icons.Outlined.Tune, contentDescription = null)
             Spacer(Modifier.width(8.dp))
             Text("Фильтры")
@@ -137,7 +147,7 @@ internal fun SearchScreen(
             Icon(if (showFilters) Icons.Outlined.KeyboardArrowUp
                  else Icons.Outlined.KeyboardArrowDown, contentDescription = null)
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(5.dp))
         if (showFilters) {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 Surface(color = appPanel, shape = RoundedCornerShape(20.dp)) {
@@ -223,13 +233,12 @@ internal fun SearchScreen(
                         }
                     }
                 }
-                Spacer(Modifier.height(14.dp))
-                Text("Параметры сохраняются на экране. Отбор по каталогу заработает после подключения источника.",
-                    color = appMuted, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(5.dp))
             }
         } else if (submittedQuery.isBlank()) {
-            EmptyPanel("Найти фильм или сериал", "Введите название для поиска по выбранному зеркалу.",
-                Icons.Outlined.Search)
+            Text("Введите название или нажмите микрофон",
+                color = appMuted, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp))
         } else {
             val url = remember(source, submittedQuery) {
                 source?.let { MirrorCatalog.searchUrl(it, submittedQuery) }

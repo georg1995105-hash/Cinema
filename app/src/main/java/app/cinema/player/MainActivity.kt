@@ -526,7 +526,6 @@ private fun LibraryScreen(
     remove: (String) -> Unit
 ) {
     var selected by remember { mutableStateOf("История") }
-    var sort by remember { mutableStateOf("По дате") }
     val isTablet = LocalConfiguration.current.screenWidthDp >= 600
     val columns = if (isTablet) cardsPerRow.coerceIn(3,8)
         else cardsPerRow.coerceIn(2,3)
@@ -534,8 +533,7 @@ private fun LibraryScreen(
     val list = if (selected == "История") history.map { it.url } else favourites
     val missing = (history.map { it.url } + favourites).distinct()
         .filter { local.savedMovie(it) == null }.take(16)
-    val visible = if (sort == "По названию")
-        list.sortedBy { local.savedMovie(it)?.title?.lowercase() ?: it } else list
+    val visible = list
 
     Column(Modifier.fillMaxSize()) {
         if (missing.isNotEmpty()) {
@@ -544,9 +542,7 @@ private fun LibraryScreen(
         ScreenHeading("Моё")
         Spacer(Modifier.height(14.dp))
         SimpleTabs(listOf("История", "Избранное"), selected) { selected = it }
-        Spacer(Modifier.height(8.dp))
-        SimpleTabs(listOf("По дате", "По названию"), sort) { sort = it }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         if (visible.isEmpty()) {
             EmptyPanel(
                 if (selected == "История") "Просмотров пока нет" else "Избранное пока пусто",

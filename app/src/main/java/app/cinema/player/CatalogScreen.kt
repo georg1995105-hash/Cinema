@@ -110,7 +110,7 @@ internal object MirrorCatalog {
             if (!SourceRules.isValidHttpsUrl(url)) continue
             val host = URI(url).host?.lowercase() ?: continue
             if (host != origin && !host.endsWith("." + origin)) continue
-            val title = item.optString("title").trim().take(130)
+            val title = CatalogTitleCleaner.clean(item.optString("title")).take(130)
             if (title.isBlank() || !seen.add(url)) continue
             val pictures = buildList {
                 val primary = item.optString("poster").trim()
