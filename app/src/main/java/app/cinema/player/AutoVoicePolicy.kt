@@ -14,7 +14,7 @@ internal object AutoVoicePolicy {
             >= MAX_VOICES) return null
         val excluded = previouslyTried.toSet() + current
         return available.firstOrNull {
-            it.id !in excluded && !restricted.containsMatchIn(it.name)
+            it.id !in excluded && !it.requiresSubscription && !restricted.containsMatchIn(it.name)
         }
     }
 }

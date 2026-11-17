@@ -123,18 +123,18 @@ jobs:
           CERTIFICATE="$(awk -F': ' '/certificate SHA-256 digest: /{print $NF}' <<< "$SIGNER" | sort -u)"
           test "$CERTIFICATE" = '1db504f66fa39cf51feefab727f5b8b229baef08a5ae2de80da05191514f93cb'
           sha256sum "$APK"
-      - name: Verify signed Android update from 0.4.17
+      - name: Verify signed Android update from 0.4.18
         if: steps.signing.outputs.available == 'true'
         shell: bash
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           curl --fail --silent --show-error --location --retry 2 \
-            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.17/Kino-0.4.17.apk" \
-            --output "$RUNNER_TEMP/Kino-0.4.17.apk"
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.18/Cinema-0.4.18.apk" \
+            --output "$RUNNER_TEMP/Cinema-0.4.18.apk"
           if adb shell pm path app.cinema.player | grep -q "^package:"; then
             adb uninstall app.cinema.player
           fi
-          adb install "$RUNNER_TEMP/Kino-0.4.17.apk"
+          adb install "$RUNNER_TEMP/Cinema-0.4.18.apk"
           adb shell am start -W -n app.cinema.player/.MainActivity | grep -F "Status: ok"
           ORIGINAL_INSTALL="$(adb shell dumpsys package app.cinema.player | awk -F= '/firstInstallTime=/{print $2; exit}')"
           test -n "$ORIGINAL_INSTALL"
@@ -174,4 +174,4 @@ jobs:
           gh release create "$TAG" "$RUNNER_TEMP/Cinema-$VERSION.apk" \
             --target "$GITHUB_SHA" \
             --title "Cinema $VERSION" \
-            --notes "Исправлены поиск и постеры, метаданные карточек, выбор озвучек и диагностика плеера. В GitHub Actions проверены WebView, Media3, подпись и установка обновления поверх 0.4.17. Доступность фильма и аккаунта зависит от зеркала."
+            --notes "Поиск берёт постеры из результатов зеркала. Исправлено чтение актёров и портретов из разметки фильма. Cinema различает короткий ролик, требование подписки и доступную озвучку. В Actions проверены WebView, Media3, подпись и обновление поверх 0.4.18."

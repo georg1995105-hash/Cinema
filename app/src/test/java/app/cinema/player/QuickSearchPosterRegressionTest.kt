@@ -15,13 +15,9 @@ class QuickSearchPosterRegressionTest {
         assertEquals(listOf("$source/img/12.jpg"), MirrorCatalog.readPosters(candidate))
     }
 
-    @Test fun posterEnrichmentJoinsTheIdenticalFilmUrl() {
-        val response = JSONArray()
-            .put(JSONObject().put("url", "$source/series/drama/13-other.html")
-                .put("posters", JSONArray(listOf("$source/img/13.jpg"))))
-            .put(JSONObject().put("url", brigada.url)
-                .put("posters", JSONArray(listOf("$source/img/12.jpg"))))
-        val result = MirrorQuickSearch.mergePosters(JSONObject.quote(response.toString()), listOf(brigada))
-        assertEquals(listOf(brigada.copy(poster = "$source/img/12.jpg")), result)
+    @Test fun similarlySpelledDifferentTitleDoesNotDisplaceExactResult() {
+        val direct = brigada.copy(title = "Менталист")
+        val other = CatalogMovie("$source/series/13-other.html", "Менталистка", "", "2026")
+        assertEquals(listOf(direct), SearchRelevance.find(listOf(other, direct), "Менталист"))
     }
 }

@@ -7,7 +7,8 @@ import java.net.URI
 
 internal data class MirrorVoice(
     val id: String, val name: String,
-    val isCamrip: Int = 0, val isAds: Int = 0, val isDirector: Int = 0
+    val isCamrip: Int = 0, val isAds: Int = 0, val isDirector: Int = 0,
+    val requiresSubscription: Boolean = false
 )
 internal data class MirrorEpisode(val season: String, val id: String, val label: String)
 internal data class MirrorQuality(val label: String, val url: String, val alternatives: List<String> = emptyList())
@@ -18,10 +19,25 @@ internal enum class PlaybackFailure(val text: String) {
     BLOCKED("Зеркало ограничило доступ или запросило проверку."),
     AUTH_REQUIRED("Для просмотра войдите в аккаунт выбранного зеркала."),
     PREMIUM("Источник требует платную подписку."),
+    PREVIEW("Источник прислал короткий ролик вместо полного видео. Можно выбрать другую озвучку."),
     DRM("Источник требует DRM."),
     UNAVAILABLE("Источник не предоставил поток для этой озвучки и серии."),
     INVALID_RESPONSE("Формат ответа плеера не распознан."),
     REDIRECT("Запрос плеера перенаправлен на другой адрес.")
+}
+
+internal enum class VoiceAvailability(val label: String) {
+    AVAILABLE("Доступна"),
+    SUBSCRIPTION("Нужна подписка"),
+    PREVIEW("Только ролик"),
+    UNAVAILABLE("Недоступна")
+}
+
+internal fun PlaybackFailure.voiceAvailability(): VoiceAvailability? = when (this) {
+    PlaybackFailure.PREMIUM -> VoiceAvailability.SUBSCRIPTION
+    PlaybackFailure.PREVIEW -> VoiceAvailability.PREVIEW
+    PlaybackFailure.UNAVAILABLE, PlaybackFailure.DRM -> VoiceAvailability.UNAVAILABLE
+    else -> null
 }
 
 internal data class MirrorStreamInfo(
@@ -37,7 +53,8 @@ internal data class MirrorMoviePage(
     val episodes: List<MirrorEpisode>,
     val favs: String = "",
     val defaultVoice: String = "",
-    val defaultFlags: MirrorVoice? = null
+    val defaultFlags: MirrorVoice? = null,
+    val expectedDurationMs: Long? = null
 )
 
 /**
@@ -80,7 +97,8 @@ internal object MirrorMediaParser {
             parseEpisodes(json.optJSONArray("episodes")),
             json.optString("favs").takeIf { it.matches(Regex("[A-Za-z0-9_+=/-]{1,256}")) }.orEmpty(),
             defaultVoice,
-            flags?.let { voiceWithFlags(defaultVoice, "", it) }
+            flags?.let { voiceWithFlags(defaultVoice, "", it) },
+            MirrorPreview.expectedDuration(json.optString("runtime"))
         )
     }
 
@@ -88,7 +106,8 @@ internal object MirrorMediaParser {
 
     private fun voiceWithFlags(id: String, name: String, item: JSONObject): MirrorVoice =
         MirrorVoice(id, name, item.optInt("isCamrip").coerceIn(0, 1),
-            item.optInt("isAds").coerceIn(0, 1), item.optInt("isDirector").coerceIn(0, 1))
+            item.optInt("isAds").coerceIn(0, 1), item.optInt("isDirector").coerceIn(0, 1),
+            item.optBoolean("requiresSubscription", false))
 
     fun parseVoices(input: JSONArray?): List<MirrorVoice> = buildList {
         if (input != null) for (index in 0 until minOf(input.length(), 80)) {
@@ -136,6 +155,7 @@ internal object MirrorMediaParser {
             status == 401 || contains(code, "auth_required|login_required|авторизуй|войдите|войти в аккаунт") ->
                 PlaybackFailure.AUTH_REQUIRED
             status == 402 || contains(code, "premium|премиум|платн.{0,8} подписк") -> PlaybackFailure.PREMIUM
+            json.optBoolean("preview") || contains(code, "(?:^|[^a-z])preview_only(?:$|[^a-z])") -> PlaybackFailure.PREVIEW
             contains(code, "(?:^|[^a-z0-9])drm(?:$|[^a-z0-9])") -> PlaybackFailure.DRM
             status in setOf(403, 429, 451) || contains(code, "captcha|access.denied|доступ запрещ[её]н") ->
                 PlaybackFailure.BLOCKED

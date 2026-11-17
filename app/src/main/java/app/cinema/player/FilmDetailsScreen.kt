@@ -84,6 +84,7 @@ internal object FilmPageParser {
            if (label && value && value.length<220) facts.push([label,value]);
          });
          var descriptions=[];
+         var people = [];
          function addDescription(value) {
            var text = norm(typeof value === 'string' ? value : '');
            if(text && text.length <= 8000 && !descriptions.includes(text)) descriptions.push(text);
@@ -113,35 +114,58 @@ internal object FilmPageParser {
                  if(u.origin !== location.origin || !id(u.href) || id(u.href) !== id(location.href)) return;
                } else if (!localTitle || norm(row.name).toLowerCase() !== localTitle.toLowerCase()) return;
                addDescription(row.description);
+               [['actor', row.actor || row.actors], ['director', row.director]].forEach(function(pair) {
+                 var list = Array.isArray(pair[1]) ? pair[1] : [pair[1]];
+                 list.slice(0,24).forEach(function(entry) {
+                   if (entry && typeof entry === 'object') {
+                     addPerson(pair[0], entry.name, entry.url || entry['@id'], entry.image?.url || entry.image);
+                   }
+                 });
+               });
              });
            } catch(e) {}
          });
-         var people = [];
-         function person(anchor, role) {
-           var entry = anchor.closest('.b-post__people_item, .b-post__actors_item, .b-post__person_item, .person-name-item') || anchor;
-           var name = norm(anchor.textContent || entry.querySelector('img')?.getAttribute('alt'));
+         function addPerson(role, rawName, address, image) {
+           var name = norm(rawName);
            if (!name || name.length >= 95) return;
-           var address = anchor.getAttribute('href');
-           var url = address ? absolute(address) : '';
+           var url = typeof address === 'string' && address ? absolute(address) : '';
+           var photo = typeof image === 'string' && image ? absolute(image) : '';
+           var previous = people.find(function(entry) { return entry.role === role &&
+             entry.name.toLowerCase().replace(/ё/g,'е') === name.toLowerCase().replace(/ё/g,'е'); });
+           photo = photo || window.__kinoPortraits?.images[url] || '';
+           if (previous) {
+             previous.url = previous.url || url;
+             previous.photo = previous.photo || photo;
+           } else people.push({name:name,url:url,photo:photo,role:role});
+         }
+         function person(node, role) {
+           var entry = node.closest('.b-post__people_item, .b-post__actors_item, .b-post__person_item, .person-name-item, [itemprop~="actor"], [itemprop~="actors"], [itemprop~="director"]') || node;
+           var anchor = node.matches('a[href]') ? node : entry.querySelector('a[href]');
+           var label = entry.querySelector('[itemprop~="name"], .person-name') ||
+             anchor?.querySelector('[itemprop~="name"]') || anchor || entry;
+           var name = label.getAttribute('content') || label.textContent || entry.querySelector('img')?.getAttribute('alt');
            var photo = kinoPosters(entry,document.baseURI)[0] || '';
-           people.push({name:name, url:url, photo:photo || window.__kinoPortraits?.images[url] || '', role:role});
+           addPerson(role, name, anchor?.getAttribute('href'), photo);
          }
          document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(row) {
-           var cells = row.querySelectorAll('td');
-           if (cells.length < 2) return;
+           var cells = row.cells;
+           if (!cells || cells.length < 2) return;
            var label = norm(cells[0].textContent);
-           var role = /^(?:в ролях|акт[её]ры)/i.test(label) ? 'actor' : /^режисс/i.test(label) ? 'director' : '';
+           var role = /^(?:в ролях|в главных ролях|акт[её]р)/i.test(label) ? 'actor' : /^режисс/i.test(label) ? 'director' : '';
            if (!role) return;
-           var links = cells[1].querySelectorAll('a[href]');
-           if (links.length) links.forEach(function(a){person(a, role)});
-           else norm(cells[1].textContent).split(/,|;/).slice(0,12).forEach(function(name) {
-             if (name.trim()) people.push({name:name.trim(),url:'',photo:'',role:role});
-           });
+           var entries = cells[1].querySelectorAll('a[href], [itemprop~="actor"], [itemprop~="actors"], [itemprop~="director"]');
+           if (entries.length) entries.forEach(function(item){person(item,role)});
+           else norm(cells[1].textContent).split(/,|;/).slice(0,12)
+             .forEach(function(name){addPerson(role,name,'','')});
          });
-         document.querySelectorAll('.b-post__actors a[href], .b-post__actors_item a[href], a.b-post__actors_item[href]')
-           .forEach(function(a){person(a,'actor')});
-         document.querySelectorAll('.b-post__directors a[href]').forEach(function(a){person(a,'director')});
-         var profiles = people.filter(function(p) {
+         document.querySelectorAll(
+           '.b-post__actors a[href], .b-post__actors_item a[href], a.b-post__actors_item[href], ' +
+           '.b-post [itemprop~="actor"], .b-post [itemprop~="actors"], .b-post__infotable [itemprop~="actor"], ' +
+           '.b-post__infotable [itemprop~="actors"], .persons-list-holder [itemprop~="actor"], .persons-list-holder [itemprop~="actors"]'
+         ).forEach(function(node){person(node,'actor')});
+         document.querySelectorAll('.b-post__directors a[href], .b-post [itemprop~="director"], .b-post__infotable [itemprop~="director"]')
+           .forEach(function(node){person(node,'director')});
+         var profiles = people.slice().sort(function(a,b) {return (a.role !== "actor") - (b.role !== "actor")}).filter(function(p) {
            if (p.photo || !p.url) return false;
            var u = new URL(p.url);
            return u.origin === location.origin && /\/(?:person|persons|actors)\//i.test(u.pathname);
@@ -163,7 +187,7 @@ internal object FilmPageParser {
                 var doc = new DOMParser().parseFromString(html, 'text/html');
                 var title = norm(doc.querySelector('h1, .b-person__name')?.textContent);
                 if (title.toLowerCase().replace(/ё/g,'е') !== profile.name.toLowerCase().replace(/ё/g,'е')) return;
-                var portrait = doc.querySelector('.b-person__photo, .b-person__poster, .b-person__image, .b-person [itemprop="image"]');
+                var portrait = doc.querySelector('.b-person__photo, .b-person__poster, .b-person__image, .b-person [itemprop~="image"], [itemtype$="/Person"] [itemprop~="image"]');
                 var image = kinoPosters(portrait, response.url)[0];
                 if (image) portraits.images[profile.url] = image;
               } catch (e) {}
@@ -181,6 +205,7 @@ internal object FilmPageParser {
          });
          var franchise=window.__kinoFranchiseParts || [];
          return JSON.stringify({
+           browserCheck:/captcha|verify you are human|checking your browser|проверяем.{0,30}не бот/i.test(document.title || ''),
            originalTitle:txt('.b-post__origtitle, .b-post__subtitle, .b-post__title_original'),
            title:localTitle,
            posters:kinoFilmPosters(document,document.baseURI),
@@ -404,12 +429,18 @@ internal fun FilmDetails(
                                 val parsed = FilmPageParser.parse(raw, source)
                                 if (parsed != null && FilmInfoReadiness.hasContent(parsed)) {
                                     info = parsed
-                                    if (FilmInfoReadiness.canFinish(parsed) && parsed.portraitsResolved && index >= 2) {
+                                    if (FilmInfoReadiness.canFinish(parsed) && parsed.portraitsResolved && (parsed.cast.isNotEmpty() || index >= 4)) {
                                         FilmInfoMemory.put(movie.url, parsed)
                                         loadDone = true
                                     }
                                 }
-                                if (index == timings.lastIndex) loadDone = true
+                                if (index == timings.lastIndex) {
+                                    if (info == null && MirrorMediaParser.objectFromWebView(raw)
+                                            ?.optBoolean("browserCheck") == true) {
+                                        loadError = "Зеркало запросило проверку браузера. Откройте сайт в настройках источника."
+                                    }
+                                    loadDone = true
+                                }
                             }
                         }, wait)
                     }
@@ -698,6 +729,10 @@ internal fun FilmDetails(
                             Text(candidate.name, modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodyMedium,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (candidate.requiresSubscription) {
+                                Text("Подписка", color = appMuted, style = MaterialTheme.typography.labelSmall)
+                                Spacer(Modifier.width(8.dp))
+                            }
                             if (savedVoice == candidate.id) Icon(Icons.Outlined.Check,
                                 contentDescription = "Выбрано", tint = appBlue,
                                 modifier = Modifier.size(20.dp))
