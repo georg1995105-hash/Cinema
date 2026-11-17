@@ -276,6 +276,11 @@ internal fun MirrorNativePlayer(
         }
     }
     val selected=options.firstOrNull {it.label==quality}?:options.firstOrNull()
+    val availableUrls = selected?.let { listOf(it.url) + it.alternatives } ?: emptyList()
+    var alternativeIndex by remember(selected?.url, season, episode, voice, quality) {
+        mutableIntStateOf(0)
+    }
+    val currentUrl = availableUrls.getOrNull(alternativeIndex)
     var playbackState by remember(selected?.url){mutableIntStateOf(Player.STATE_IDLE)}
     var playerIssue by remember(selected?.url){mutableStateOf("")}
     var position by remember(selected?.url){mutableLongStateOf(resumeMs)}
@@ -283,8 +288,8 @@ internal fun MirrorNativePlayer(
     var paused by remember(selected?.url){mutableStateOf(false)}
     var controls by remember {mutableStateOf(true)}
     var accelerated by remember {mutableStateOf(false)}
-    val player=remember(selected?.url){
-        selected?.let {stream ->
+    val player=remember(currentUrl){
+        currentUrl?.let {streamUrl ->
             val http=DefaultHttpDataSource.Factory()
                 .setUserAgent(WebSettings.getDefaultUserAgent(context))
                 .setDefaultRequestProperties(mapOf("Referer" to filmUrl))
@@ -298,8 +303,13 @@ internal fun MirrorNativePlayer(
                             if (state == Player.STATE_READY) {
                                 val length=duration
                                 if (length in 1..150_000L) {
-                                    playerIssue="Источник передал короткий ролик вместо полного видео. Проверьте другую доступную озвучку или качество."
-                                    pause()
+                                    if (alternativeIndex < availableUrls.lastIndex) {
+                                        alternativeIndex++
+                                        message="Проверяем другой доступный сервер"
+                                    } else {
+                                        playerIssue="Источник передал короткий ролик вместо полного видео. Проверьте другую доступную озвучку или качество."
+                                        pause()
+                                    }
                                 }
                             }
                             if (state == Player.STATE_ENDED) {
@@ -311,11 +321,16 @@ internal fun MirrorNativePlayer(
                             }
                         }
                         override fun onPlayerError(failure:PlaybackException){
-                            playerIssue="Ошибка воспроизведения: "+failure.errorCodeName
+                            if (alternativeIndex < availableUrls.lastIndex) {
+                                alternativeIndex++
+                                message="Пробуем другой доступный видеосервер"
+                            } else {
+                                playerIssue="Ошибка воспроизведения: "+failure.errorCodeName
+                            }
                         }
                         override fun onIsPlayingChanged(isPlaying:Boolean){paused=!isPlaying}
                     })
-                    setMediaItem(MediaItem.fromUri(stream.url))
+                    setMediaItem(MediaItem.fromUri(streamUrl))
                     prepare()
                     if(resumeMs>0)seekTo(resumeMs)
                     playWhenReady=true

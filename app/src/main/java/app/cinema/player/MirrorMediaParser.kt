@@ -8,7 +8,7 @@ import java.util.Base64
 
 internal data class MirrorVoice(val id: String, val name: String)
 internal data class MirrorEpisode(val season: String, val id: String, val label: String)
-internal data class MirrorQuality(val label: String, val url: String)
+internal data class MirrorQuality(val label: String, val url: String, val alternatives: List<String> = emptyList())
 internal data class MirrorMoviePage(
     val id: String,
     val isSeries: Boolean,
@@ -115,11 +115,16 @@ internal object MirrorMediaParser {
                 listOf("/premium/", "/promo/", "/preroll/", "/advert/", "premium-promo",
                     "ad-preview", "premium_ad").any(lower::contains)
             }
-            val chosen = candidates.firstOrNull { it.endsWith(".mp4", true) || ".mp4?" in it.lowercase() }
-                ?: candidates.firstOrNull { ".m3u8" in it.lowercase() }
-                ?: candidates.firstOrNull()
+            val ordered = candidates.distinct().sortedBy { source ->
+                when {
+                    source.endsWith(".mp4", true) || ".mp4?" in source.lowercase() -> 0
+                    ".m3u8" in source.lowercase() -> 1
+                    else -> 2
+                }
+            }
+            val chosen = ordered.firstOrNull()
             if (chosen != null && output.none { it.label == label }) {
-                output += MirrorQuality(label, chosen)
+                output += MirrorQuality(label, chosen, ordered.drop(1))
             }
         }
         if (output.isEmpty()) {

@@ -33,4 +33,19 @@ class MirrorMediaParserTest {
         )
         assertEquals("https://media.example/second.mp4", quality.single().url)
     }
+
+    @Test fun keepsAlternateOpenMediaHosts() {
+        val quality = MirrorMediaParser.parseQualityList(
+            "[720p]https://free-a.example/a.mp4 or https://free-b.example/b.mp4"
+        ).single()
+        assertEquals("https://free-a.example/a.mp4", quality.url)
+        assertEquals(listOf("https://free-b.example/b.mp4"), quality.alternatives)
+    }
+
+    @Test fun neverOffersPremiumLabeledAlternative() {
+        val quality = MirrorMediaParser.parseQualityList(
+            "[720p]https://free.example/main.mp4 or https://media.example/premium/trial.mp4"
+        ).single()
+        assertTrue(quality.alternatives.isEmpty())
+    }
 }
