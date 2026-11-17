@@ -79,6 +79,11 @@ jobs:
           VERSION="$(grep 'versionName =' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
           test -n "$VERSION"
           TAG="v$VERSION"
+          CURRENT_HEAD="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          if [ "$CURRENT_HEAD" != "$GITHUB_SHA" ]; then
+            echo "Skipping outdated build $GITHUB_SHA; main is $CURRENT_HEAD"
+            exit 0
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists: not overwriting a published APK"
             exit 0
