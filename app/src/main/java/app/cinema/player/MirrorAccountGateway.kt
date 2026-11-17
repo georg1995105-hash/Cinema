@@ -31,7 +31,9 @@ internal object MirrorLoginProtocol {
                 .replace(Regex("\\s+"), " ").trim().take(170)
             MirrorLoginResult(ok, if (ok) "Вход подтверждён сайтом" else
                 msg.ifBlank { "Не удалось войти. Проверьте логин, пароль и зеркало." })
-        }.getOrDefault(MirrorLoginResult(false, "Некорректный ответ сайта."))
+        }.getOrDefault(MirrorLoginResult(false,
+            "Сайт вернул страницу вместо ответа входа.",
+            retryInBrowser = true))
     }
 }
 

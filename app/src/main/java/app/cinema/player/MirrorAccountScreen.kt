@@ -137,7 +137,11 @@ internal fun MirrorAccountScreen(
                     Text("Войти в аккаунт", fontWeight = FontWeight.Medium)
                     OutlinedTextField(
                         value = login,
-                        onValueChange = { login = it; message = "" },
+                        onValueChange = { entered ->
+                            login = entered.take(128)
+                            local.saveAccountName(selected, login)
+                            message = ""
+                        },
                         label = { Text("Логин или почта") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
@@ -170,6 +174,8 @@ internal fun MirrorAccountScreen(
                         Button(
                             enabled = !busy && login.isNotBlank() && password.isNotBlank(),
                             onClick = {
+                                // Save the entered email even when this mirror rejects sign-in.
+                                local.saveAccountName(selected, login)
                                 busy = true
                                 scope.launch {
                                     val result = gateway.signIn(selected, login, password, userAgent)
