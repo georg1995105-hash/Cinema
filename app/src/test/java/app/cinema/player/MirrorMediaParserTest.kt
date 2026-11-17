@@ -39,7 +39,7 @@ class MirrorMediaParserTest {
     }
 
     @Test fun acceptsStringAndBooleanSuccessfulResponses() {
-        listOf("true", "\\"1\\"").forEach { success ->
+        listOf("true", "\"1\"").forEach { success ->
             val raw = org.json.JSONObject.quote(
                 """{"success":$success,"url":"[480p]https://media.example/video.mp4"}"""
             )
