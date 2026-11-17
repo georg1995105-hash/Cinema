@@ -105,6 +105,16 @@ private val playerMetaJs = """
         x.getAttribute('data-translator-id')||x.getAttribute('data-id'));}).find(Boolean)||'';
     var initVoice=numeric(init?init[3]:'');
     var defaultVoice=activeVoice||initVoice||(voices.length===1?voices[0].id:'');
+    if(voices.length===0 && defaultVoice){
+      var translation=Array.from(document.querySelectorAll(
+        '.b-post__infotable tr, .b-post__info tr'
+      )).map(function(row){
+        var cells=row.querySelectorAll('td');
+        if(cells.length<2 || !/в переводе|озвучк/i.test(clean(cells[0].textContent)))return '';
+        return clean(cells[1].textContent);
+      }).find(Boolean)||'';
+      voices.push({id:defaultVoice,name:(translation||('Перевод '+defaultVoice)).slice(0,75)});
+    }
     var episodes=Array.from(document.querySelectorAll('.b-simple_episode__item[data-episode_id]')).map(
       function(x){return{season:x.getAttribute('data-season_id')||x.closest('ul[id^="simple-episodes-list-"]')?.id.replace('simple-episodes-list-','')||'1',episode:x.getAttribute('data-episode_id'),label:clean(x.textContent)}}
     );

@@ -78,9 +78,11 @@ internal object MirrorMediaParser {
             if (id.matches(Regex("[0-9]{1,12}")) && name.isNotBlank() &&
                 list.none { it.id == id }) list += MirrorVoice(id, name)
         }
+        // Do not fabricate translator 0. A fallback is allowed only when the
+        // selected mirror explicitly published its numeric translator ID.
         if (list.isEmpty()) {
-            val id = fallback.trim().takeIf { it.matches(Regex("[0-9]{1,12}")) } ?: "0"
-            list += MirrorVoice(id, "Озвучка по умолчанию")
+            val id = fallback.trim().takeIf { it.matches(Regex("[0-9]{1,12}")) }
+            if (id != null) list += MirrorVoice(id, "Перевод $id")
         }
         return list
     }

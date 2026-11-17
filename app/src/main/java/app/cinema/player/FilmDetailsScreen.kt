@@ -154,6 +154,16 @@ internal object FilmPageParser {
            .filter(function(item,index,array){
               return array.findIndex(function(other){return other.id===item.id;})===index;
            }).slice(0,45);
+         if(voices.length===0) {
+           var scripts=Array.from(document.scripts).map(function(s){return s.textContent||'';}).join('\n');
+           var init=scripts.match(/initCDN(?:Series|Movies)Events\s*\(\s*['"]?\d+['"]?\s*,\s*['"]?(\d{1,12})/i);
+           if(init) {
+             var translation=facts.filter(function(entry){
+               return /в переводе|озвучк/i.test(entry[0]);
+             }).map(function(entry){return entry[1];}).find(Boolean)||'';
+             voices.push({id:init[1],name:(translation||('Перевод '+init[1])).slice(0,75)});
+           }
+         }
          return JSON.stringify({
            originalTitle:txt('.b-post__origtitle, .b-post__subtitle, .b-post__title_original'),
            description:description.substring(0,1800),
@@ -438,7 +448,7 @@ internal object FilmPageParser {
         val parts=FranchiseParts.validate(items,source)
         FilmInfo(
             originalTitle = data.optString("originalTitle").trim().take(130),
-            description = data.optString("description").trim().take(1800),
+            description = FilmTextSanitizer.description(data.optString("description")),
             facts = facts,
             rating = data.optString("rating").replace(Regex("\\s+"), " ").trim().take(130),
             cast = people,
@@ -476,8 +486,8 @@ internal fun FilmDetails(
     var voiceId by remember(movie.url) { mutableStateOf(savedVoice) }
     LaunchedEffect(info?.voices) {
         val available = info?.voices.orEmpty()
-        if (voiceId.isNotBlank() && available.isNotEmpty() &&
-            available.none { it.id == voiceId }) voiceId = ""
+        if (available.isNotEmpty() && available.none { it.id == voiceId })
+            voiceId = available.first().id
     }
     val webView = if (!loadDone) remember(context, movie.url) {
         val handler = Handler(Looper.getMainLooper())
@@ -614,7 +624,10 @@ internal fun FilmDetails(
                             style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = { onWatch(movie.url, voiceId) },
+                        Button(onClick = {
+                            onWatch(movie.url, info?.voices?.firstOrNull { it.id == voiceId }?.id
+                                ?: info?.voices?.firstOrNull()?.id.orEmpty())
+                        },
                             modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) {
                             Icon(Icons.Outlined.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(7.dp))
@@ -792,21 +805,10 @@ internal fun FilmDetails(
                     Text(runCatching { URI(source).host.orEmpty() }
                             .getOrDefault("Выбранное зеркало"),
                         color = appMuted, style = MaterialTheme.typography.labelSmall)
-                    Row(
-                        Modifier.fillMaxWidth().clickable {
-                            voiceId = ""
-                            showWatchMenu = false
-                            onWatch(movie.url, "")
-                        }.padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Outlined.AutoAwesome, contentDescription = null,
-                            tint = appBlue, modifier = Modifier.size(21.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text("Автоматически", modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyMedium)
-                        if (voiceId.isBlank()) Icon(Icons.Outlined.Check,
-                            contentDescription = "Выбрано", tint = appBlue)
+                    if (info?.voices.isNullOrEmpty()) {
+                        Text("Зеркало пока не предоставило список озвучек.",
+                            color = appMuted, style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(vertical = 8.dp))
                     }
                     info?.voices.orEmpty().forEach { candidate ->
                         HorizontalDivider(color = appMuted.copy(alpha = .10f))

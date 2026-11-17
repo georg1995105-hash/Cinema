@@ -17,6 +17,11 @@ class MirrorMediaParserTest {
         assertEquals("4",page?.voices?.singleOrNull()?.id)
     }
 
+    @Test fun neverInventsDefaultVoiceForMissingIds() {
+        assertTrue(MirrorMediaParser.parseVoices(null, "").isEmpty())
+        assertTrue(MirrorMediaParser.parseVoices(org.json.JSONArray(), "").isEmpty())
+        assertEquals("9", MirrorMediaParser.parseVoices(null, "9").single().id)
+    }
     @Test fun rejectsPrematureInventedVoiceZero() {
         val early = org.json.JSONObject.quote("""{"id":"40","voice":"0","voices":[]}""")
         assertFalse(MirrorMediaParser.hasRealVoiceMetadata(early))
