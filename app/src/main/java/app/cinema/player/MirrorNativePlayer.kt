@@ -250,14 +250,14 @@ internal fun MirrorNativePlayer(
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
                     val url = request.url.toString()
-                    if (MirrorPostId.isSameFilm(filmUrl, url)) return false
+                    if (MirrorPostId.canOpen(filmUrl, url)) return false
                     fail(if (SourceRules.sameOrigin(filmUrl, url) && request.url.path.orEmpty().contains("login", true))
                         PlaybackFailure.AUTH_REQUIRED.text else PlaybackFailure.REDIRECT.text)
                     return true
                 }
 
                 private fun scan(view: WebView, url: String) {
-                    if (failed || scanningUrl == url || !MirrorPostId.isSameFilm(filmUrl, url)) return
+                    if (failed || scanningUrl == url || !MirrorPostId.canOpen(filmUrl, url)) return
                     scanningUrl = url
                     message = "Определяем доступный плеер"
                     val timings = listOf(150L, 500L, 1250L, 2400L, 4100L, 6500L)

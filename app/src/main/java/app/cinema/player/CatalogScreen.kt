@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -162,6 +163,7 @@ internal object MirrorCatalog {
 }
 
 @SuppressLint("SetJavaScriptEnabled")
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun CatalogGrid(
     source: String?,
@@ -207,7 +209,20 @@ internal fun CatalogGrid(
     var movies by remember(requestUrl, attempt) {
         mutableStateOf(if (attempt == 0) CatalogMemory.get(cacheKey).orEmpty() else emptyList())
     }
-    var pending by remember(requestUrl, attempt) { mutableStateOf(movies.isEmpty()) }
+    var nativeSearchChecked by remember(requestUrl, attempt) {
+        mutableStateOf(searchText.isBlank() || movies.isNotEmpty())
+    }
+    LaunchedEffect(requestUrl, attempt, loadContent) {
+        if (loadContent && !nativeSearchChecked) {
+            val cards = PublicSearch.read(source, searchText, WebSettings.getDefaultUserAgent(context))
+            if (cards.isNotEmpty()) {
+                movies = cards
+                CatalogMemory.put(cacheKey, cards)
+            }
+            nativeSearchChecked = true
+        }
+    }
+    var pending by remember(requestUrl, attempt, nativeSearchChecked) { mutableStateOf(movies.isEmpty()) }
     var problem by remember(requestUrl, attempt) { mutableStateOf("") }
     fun recoverEmptyCatalog(reason: String) {
         if (!useUnfiltered && requestOverride == null && section != "Новинки") {
@@ -219,15 +234,15 @@ internal fun CatalogGrid(
     }
     // Page callbacks are not guaranteed after a network stall or blocked navigation.
     // Bound each load, then try only the standard category once before showing an error.
-    LaunchedEffect(requestUrl, attempt, loadContent) {
-        if (loadContent && pending) {
+    LaunchedEffect(requestUrl, attempt, loadContent, nativeSearchChecked) {
+        if (loadContent && nativeSearchChecked && pending) {
             delay(12500)
             if (pending) recoverEmptyCatalog(
                 "Источник не завершил загрузку каталога. Проверьте доступность зеркала."
             )
         }
     }
-    val browser = if (loadContent && pending && movies.isEmpty()) remember(context, requestUrl, attempt) {
+    val browser = if (loadContent && nativeSearchChecked && pending && movies.isEmpty()) remember(context, requestUrl, attempt) {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
             settings.javaScriptEnabled = true
@@ -358,58 +373,59 @@ internal fun CatalogGrid(
     // Never show the mirror's default homepage cards as results for an unrelated search.
     val visibleMovies = (if (searchText.isBlank()) movies
         else SearchRelevance.find(movies, searchText)).filter(movieFilter)
-    Box(Modifier.fillMaxSize()) {
-        // The hidden view reads the ordinary page over the user's current network and VPN.
-        if (browser != null) AndroidView(factory = { browser }, modifier = Modifier.size(2.dp).alpha(0.01f))
-        when {
-            visibleMovies.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+    val content: @Composable () -> Unit = {
+        Box(Modifier.fillMaxSize()) {
+            // The hidden view reads the ordinary page over the user's current network and VPN.
+            if (browser != null) AndroidView(factory = { browser }, modifier = Modifier.size(2.dp).alpha(0.01f))
+            when {
+                visibleMovies.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
                     Text((if (useUnfiltered) "Общий каталог • " else "") +
                         visibleMovies.size.toString() + " результатов", color = appMuted,
-                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { CatalogMemory.invalidate(cacheKey); attempt++ }) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = null,
-                            modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text("Обновить")
+                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(columns),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 20.dp, top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(11.dp),
+                        verticalArrangement = Arrangement.spacedBy(18.dp)
+                    ) {
+                        items(visibleMovies, key = { it.url }) { movie ->
+                            FilmPoster(movie) { onOpen(movie) }
+                        }
                     }
                 }
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(columns),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 20.dp, top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(11.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp)
-                ) {
-                    items(visibleMovies, key = { it.url }) { movie ->
-                        FilmPoster(movie) { onOpen(movie) }
-                    }
+                (pending || !nativeSearchChecked) -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = appBlue, modifier = Modifier.size(34.dp))
+                    Spacer(Modifier.height(15.dp))
+                    Text("Загружаем фильмы", color = appMuted)
                 }
-            }
-            pending -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                CircularProgressIndicator(color = appBlue, modifier = Modifier.size(34.dp))
-                Spacer(Modifier.height(15.dp))
-                Text("Загружаем фильмы", color = appMuted)
-            }
-            else -> Column(Modifier.align(Alignment.Center).padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Outlined.CloudOff, contentDescription = null, tint = appMuted,
-                    modifier = Modifier.size(39.dp))
-                Spacer(Modifier.height(14.dp))
-                Text(if (searchText.isNotBlank()) "Совпадений не найдено"
-                    else "Не удалось получить карточки",
-                    style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(7.dp))
-                Text(problem.ifBlank {
-                    if (searchText.isNotBlank()) "Зеркало не нашло фильм с таким названием."
-                    else "Источник не ответил."
-                }, color = appMuted)
-                Spacer(Modifier.height(15.dp))
-                Button(onClick = { CatalogMemory.invalidate(cacheKey); attempt++ }) { Text("Повторить") }
-                TextButton(onClick = { onBrowse(source) }) { Text("Открыть зеркало") }
+                else -> Column(Modifier.align(Alignment.Center).padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Outlined.CloudOff, contentDescription = null, tint = appMuted,
+                        modifier = Modifier.size(39.dp))
+                    Spacer(Modifier.height(14.dp))
+                    Text(if (searchText.isNotBlank()) "Совпадений не найдено"
+                        else "Не удалось получить карточки",
+                        style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(7.dp))
+                    Text(problem.ifBlank {
+                        if (searchText.isNotBlank()) "Зеркало не нашло фильм с таким названием."
+                        else "Источник не ответил."
+                    }, color = appMuted)
+                    Spacer(Modifier.height(15.dp))
+                    Button(onClick = { CatalogMemory.invalidate(cacheKey); attempt++ }) { Text("Повторить") }
+                    TextButton(onClick = { onBrowse(source) }) { Text("Открыть зеркало") }
+                }
             }
         }
     }
+    if (searchText.isBlank()) {
+        PullToRefreshBox(
+            isRefreshing = attempt > 0 && pending,
+            onRefresh = { CatalogMemory.invalidate(cacheKey); attempt++ },
+            modifier = Modifier.fillMaxSize()
+        ) { content() }
+    } else content()
 }
 
 @Composable

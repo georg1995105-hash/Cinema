@@ -177,6 +177,7 @@ private fun CinemaApp() {
                     onAddSource = { page = Page.SOURCES }
                 )
                 Page.SEARCH -> SearchScreen(
+                    local = local,
                     source = activeSource,
                     cardsPerRow = local.cardsPerRow(),
                     onOpen = { local.rememberMovie(it); selectedFilm = it; movieBack = Page.SEARCH; page = Page.MOVIE },
@@ -235,7 +236,8 @@ private fun CinemaApp() {
                 Page.SITE -> BrowserScreen(
                     browsingSource ?: activeSource.orEmpty(),
                     onBack = { page = browseReturn },
-                    accountMode = browseReturn == Page.ACCOUNT
+                    accountMode = browseReturn == Page.ACCOUNT,
+                    readFilmMetadata = browseReturn == Page.MOVIE
                 )
                 Page.FILM_PLAYER -> MirrorNativePlayer(
                     filmUrl = browsingSource ?: selectedFilm?.url.orEmpty(),
@@ -268,6 +270,7 @@ private fun CinemaApp() {
                         isFavourite = movie.url in favourites,
                         onToggleFavourite = { toggleFavourite(movie.url) },
                         onBack = { page = movieBack },
+                        onBrowse = { browsingSource = movie.url; browseReturn = Page.MOVIE; page = Page.SITE },
                         savedVoice = local.playbackSelection(movie.url)?.voice.orEmpty(),
                         onWatch = { url, voice ->
                             val previous = local.playbackSelection(url) ?: PlaybackSelection()
