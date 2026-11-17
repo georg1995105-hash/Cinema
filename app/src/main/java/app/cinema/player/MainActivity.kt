@@ -197,11 +197,21 @@ private fun CinemaApp() {
                 Page.FILM_PLAYER -> MirrorNativePlayer(
                     filmUrl = browsingSource ?: selectedFilm?.url.orEmpty(),
                     filmTitle = selectedFilm?.title.orEmpty(),
-                    startPositionMs = history.firstOrNull {
+                    startPositionMs = local.playbackSelection(
+                        browsingSource ?: selectedFilm?.url.orEmpty()
+                    )?.positionMs ?: history.firstOrNull {
                         it.url == (browsingSource ?: selectedFilm?.url)
                     }?.positionMs ?: 0L,
                     seekSeconds = local.seekSeconds(),
                     holdSpeed = local.holdSpeed(),
+                    savedSelection = local.playbackSelection(
+                        browsingSource ?: selectedFilm?.url.orEmpty()
+                    ),
+                    onSaveSelection = { selection ->
+                        local.savePlaybackSelection(
+                            browsingSource ?: selectedFilm?.url.orEmpty(), selection
+                        )
+                    },
                     onSave = { ms ->
                         val address = browsingSource ?: selectedFilm?.url
                         if (address != null) saveProgress(address, ms)

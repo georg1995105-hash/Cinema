@@ -331,17 +331,59 @@ internal fun MirrorNativePlayer(
             }
         }
     }
-    LaunchedEffect(player){
-        if(player!=null)while(true){
-            position=player.currentPosition.coerceAtLeast(0)
-            total=player.duration.coerceAtLeast(0)
-            delay(350)
+    LaunchedEffect(player, season, episode, voice, quality) {
+        if (player != null) {
+            var checkpoint = -1L
+            while (true) {
+                position = player.currentPosition.coerceAtLeast(0)
+                total = player.duration.coerceAtLeast(0)
+                if (position > 0L && (checkpoint < 0 ||
+                        kotlin.math.abs(position - checkpoint) >= 5000L)) {
+                    onSave(position)
+                    onSaveSelection(PlaybackSelection(season, episode, voice, quality, position))
+                    checkpoint = position
+                }
+                delay(500)
+            }
+        }
+    }
+
+    var showSettings by remember { mutableStateOf(false) }
+    var settingsSection by remember { mutableStateOf("Настройки") }
+    val nextEpisode = EpisodeNavigator.next(episodes, season, episode)
+
+    fun switchEpisode(target: MirrorEpisode) {
+        if (target.season == season && target.id == episode) return
+        val oldPosition = player?.currentPosition?.coerceAtLeast(0) ?: 0L
+        if (oldPosition > 0L) {
+            onSaveSelection(PlaybackSelection(season, episode, voice, quality, oldPosition))
+        }
+        resumeMs = 0L
+        season = target.season
+        episode = target.id
+        options = emptyList()
+        quality = ""
+        message = "Загружаем серию"
+        onSaveSelection(PlaybackSelection(target.season, target.id, voice, "", 0L))
+        showSettings = false
+        controls = true
+        episodeNotice = "Сезон " + target.season + " · " + target.label
+    }
+
+    LaunchedEffect(endedCounter) {
+        if (endedCounter > 0 && movie?.isSeries == true && playerIssue.isBlank()) {
+            val next = EpisodeNavigator.next(episodes, season, episode)
+            if (next == null) {
+                episodeNotice = "Последняя доступная серия завершена"
+            } else if (autoNextEpisode) {
+                switchEpisode(next)
+            } else {
+                episodeNotice = "Серия окончена"
+            }
         }
     }
 
     // All playback controls are overlaid on the video, including quality, audio and speed.
-    var showSettings by remember { mutableStateOf(false) }
-    var settingsSection by remember { mutableStateOf("Настройки") }
     var speed by remember { mutableFloatStateOf(1f) }
     val speeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
     val playbackPreferences = remember(context) { LocalStore(context) }
@@ -458,6 +500,16 @@ internal fun MirrorNativePlayer(
                 color = appBlue, modifier = Modifier.align(Alignment.Center).size(30.dp)
             )
         }
+        if (episodeNotice.isNotBlank()) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 66.dp),
+                color = Color.Black.copy(alpha = .75f),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text(episodeNotice, color = Color.White,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
+            }
+        }
         if (accelerated) {
             Surface(
                 color = Color.Black.copy(alpha = .65f),
@@ -486,7 +538,10 @@ internal fun MirrorNativePlayer(
                         style = MaterialTheme.typography.titleMedium)
                     if (player != null) Text(
                         listOfNotNull(quality.takeIf { it.isNotBlank() },
-                            speed.takeIf { it != 1f }?.let { it.toString() + "×" }).joinToString(" · "),
+                            speed.takeIf { it != 1f }?.let { it.toString() + "×" },
+                            if (movie?.isSeries == true && season.isNotBlank())
+                                "Сезон " + season + " · Серия " + episode else null
+                        ).joinToString(" · "),
                         color = Color.LightGray, style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -574,6 +629,12 @@ internal fun MirrorNativePlayer(
                     )
                     Text(if (total > 0L) formatVideoTime(total) else "—:—",
                         color = Color.White, style = MaterialTheme.typography.labelMedium)
+                    if (nextEpisode != null && movie?.isSeries == true) {
+                        IconButton(onClick = { switchEpisode(nextEpisode) }) {
+                            Icon(Icons.Outlined.SkipNext,
+                                contentDescription = "Следующая серия", tint = Color.White)
+                        }
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = {
@@ -641,7 +702,8 @@ internal fun MirrorNativePlayer(
                     ) else emptyList()) + if (movie?.isSeries == true) listOf(
                         "Сезон" to season.ifBlank { "—" },
                         "Серия" to (episodes.firstOrNull { it.id == episode && it.season == season }
-                            ?.label ?: episode.ifBlank { "—" })
+                            ?.label ?: episode.ifBlank { "—" }),
+                        "Следующая серия" to (if (autoNextEpisode) "Автоматически" else "Вручную")
                     ) else emptyList()
                     menuRows.forEach { (heading, value) ->
                         Row(
@@ -671,6 +733,7 @@ internal fun MirrorNativePlayer(
                         "Озвучка" -> movie?.voices?.map { it.name }.orEmpty()
                         "Сезон" -> episodes.map { it.season }.distinct().map { "Сезон " + it }
                         "Серия" -> episodes.filter { it.season == season }.map { it.label }
+                        "Следующая серия" -> listOf("Автоматически", "Вручную")
                         else -> emptyList()
                     }
                     val currentIndex = when (settingsSection) {
@@ -681,6 +744,7 @@ internal fun MirrorNativePlayer(
                         "Озвучка" -> movie?.voices?.indexOfFirst { it.id == voice } ?: -1
                         "Сезон" -> episodes.map { it.season }.distinct().indexOf(season)
                         "Серия" -> episodes.filter { it.season == season }.indexOfFirst { it.id == episode }
+                        "Следующая серия" -> if (autoNextEpisode) 0 else 1
                         else -> -1
                     }
                     if (choices.isEmpty()) Text(
@@ -697,6 +761,10 @@ internal fun MirrorNativePlayer(
                                         quality = options[index].label
                                     }
                                     "Скорость" -> speed = speeds[index]
+                                    "Следующая серия" -> {
+                                        autoNextEpisode = index == 0
+                                        playbackPreferences.saveAutoNextEpisode(autoNextEpisode)
+                                    }
                                     "Изображение" -> pictureMode = pictureModes[index]
                                     "Субтитры" -> subtitlesEnabled = index == 0
                                     "Озвучка" -> {
@@ -710,11 +778,10 @@ internal fun MirrorNativePlayer(
                                     }
                                     "Сезон" -> {
                                         val id = episodes.map { it.season }.distinct()[index]
-                                        season = id
-                                        episode = episodes.firstOrNull { it.season == id }?.id.orEmpty()
+                                        episodes.firstOrNull { it.season == id }?.let(::switchEpisode)
                                     }
                                     "Серия" -> {
-                                        episode = episodes.filter { it.season == season }[index].id
+                                        switchEpisode(episodes.filter { it.season == season }[index])
                                     }
                                 }
                                 showSettings = false
