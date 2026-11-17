@@ -489,9 +489,10 @@ internal fun FilmDetails(
     val context = LocalContext.current
     var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
     var loadDone by remember(movie.url) { mutableStateOf(false) }
-    // A silent network stall must not leave the film page spinning forever.
+    // Never spin forever waiting for scripts blocked by the source.
+    // The metadata reader also runs before onPageFinished (see below).
     LaunchedEffect(movie.url) {
-        delay(9000)
+        delay(7000)
         if (!loadDone) loadDone = true
     }
     var showWatchMenu by remember(movie.url) { mutableStateOf(false) }
@@ -518,39 +519,42 @@ internal fun FilmDetails(
                     return request.url.scheme != "https" ||
                         !(host.equals(home, true) || host.endsWith(".$home", true))
                 }
+                private fun readDetails(view: WebView, pageUrl: String) {
+                    if (loadDone || view.url != pageUrl) return
+                    view.evaluateJavascript(FilmPageParser.javascript) { raw ->
+                        if (loadDone || view.url != pageUrl) return@evaluateJavascript
+                        val parsed = FilmPageParser.parse(raw, source) ?: return@evaluateJavascript
+                        if (parsed.description.isNotBlank() || parsed.facts.isNotEmpty() ||
+                            parsed.cast.isNotEmpty() || parsed.voices.isNotEmpty() ||
+                            parsed.directors.isNotEmpty()) {
+                            val merged = if (parsed.franchise.isEmpty() &&
+                                info?.franchise?.isNotEmpty() == true)
+                                parsed.copy(franchise = info!!.franchise) else parsed
+                            info = merged
+                            FilmInfoMemory.put(movie.url, merged)
+                        }
+                        if (parsed.franchiseResolved &&
+                            parsed.cast.all { it.photo.isNotBlank() || it.url.isBlank() } &&
+                            parsed.directors.all { it.photo.isNotBlank() || it.url.isBlank() }) {
+                            loadDone = true
+                        }
+                    }
+                }
+                // A site can keep loading ads/scripts after its content is visible.
+                // Start extracting metadata without waiting for onPageFinished.
+                override fun onPageCommitVisible(view: WebView, url: String) {
+                    listOf(180L, 700L, 1550L, 2900L, 4750L).forEach { ms ->
+                        handler.postDelayed({ readDetails(view, url) }, ms)
+                    }
+                }
                 override fun onPageFinished(view: WebView, url: String) {
-                    // Keep this same-origin session alive briefly to resolve real actor profile portraits.
                     view.evaluateJavascript(FilmPageParser.franchiseJavascript) {}
                     handler.postDelayed({
-                        if (view.url == url) {
+                        if (view.url == url && !loadDone)
                             view.evaluateJavascript(FilmPageParser.actorProfilePhotosJavascript) {}
-                        }
-                    }, 900L)
-                    val delays = listOf(220L, 1000L, 2300L, 4600L, 6900L)
-                    delays.forEachIndexed { index, delay ->
-                        handler.postDelayed({
-                            if (view.url != url || loadDone) return@postDelayed
-                            view.evaluateJavascript(FilmPageParser.javascript) { raw ->
-                                if (loadDone) return@evaluateJavascript
-                                val parsed = FilmPageParser.parse(raw, source)
-                                if (parsed != null &&
-                                    (parsed.description.isNotBlank() || parsed.facts.isNotEmpty() ||
-                                        parsed.cast.isNotEmpty() || parsed.voices.isNotEmpty())) {
-                                    val merged = if(parsed.franchise.isEmpty() &&
-                                        info?.franchise?.isNotEmpty() == true)
-                                        parsed.copy(franchise=info!!.franchise) else parsed
-                                    // Latest confirmed source metadata replaces older role assignments.
-                                // Otherwise stale cached actor cards could masquerade as directors.
-                                info = merged
-                                FilmInfoMemory.put(movie.url, merged)
-                                }
-                                if (index == delays.lastIndex || (parsed?.franchiseResolved == true &&
-                                    parsed.cast.isNotEmpty() &&
-                                    parsed.cast.all { it.photo.isNotBlank() || it.url.isBlank() } &&
-                                    parsed.directors.all { it.photo.isNotBlank() || it.url.isBlank() }))
-                                    loadDone = true
-                            }
-                        }, delay)
+                    }, 800L)
+                    listOf(0L, 650L, 1800L, 3400L).forEach { ms ->
+                        handler.postDelayed({ readDetails(view, url) }, ms)
                     }
                 }
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {

@@ -298,7 +298,7 @@ internal fun CatalogGrid(
                             var polls = 0
                             fun poll() {
                                 if (!pending || view.url != url) return
-                                if (polls++ >= 14) {
+                                if (polls++ >= 24) {
                                     recoverEmptyCatalog("Поиск зеркала не вернул совпадений по названию.")
                                     return
                                 }
@@ -424,7 +424,7 @@ internal fun FilmPoster(movie: CatalogMovie, source: String, onClick: () -> Unit
     val image = remember(url, source) {
         val builder = ImageRequest.Builder(context)
             .data(url)
-            .addHeader("Referer", source.trimEnd('/') + "/")
+            .addHeader("Referer", movie.url)
             .addHeader("User-Agent", WebSettings.getDefaultUserAgent(context))
         // Coil does not share WebView's authenticated cookie jar automatically.
         // Never attach account cookies to third-party image/CDN hosts.
