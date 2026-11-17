@@ -267,6 +267,17 @@ private fun CinemaApp() {
                     FilmDetails(
                         movie = movie,
                         source = MirrorAccountGateway.origin(movie.url) ?: activeSource.orEmpty(),
+                        sources = sources.toList(),
+                        onChooseSource = { mirror ->
+                            val nextUrl = MirrorFilmUrl.changeOrigin(movie.url, mirror)
+                            if (nextUrl != null) {
+                                activeSource = mirror
+                                local.saveActiveSource(mirror)
+                                val changed = movie.copy(url = nextUrl)
+                                local.rememberMovie(changed)
+                                selectedFilm = changed
+                            }
+                        },
                         isFavourite = movie.url in favourites,
                         onToggleFavourite = { toggleFavourite(movie.url) },
                         onBack = { page = movieBack },

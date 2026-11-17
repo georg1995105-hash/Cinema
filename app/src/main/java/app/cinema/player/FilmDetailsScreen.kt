@@ -383,6 +383,8 @@ internal object FilmPageParser {
 internal fun FilmDetails(
     movie: CatalogMovie,
     source: String,
+    sources: List<String>,
+    onChooseSource: (String) -> Unit,
     isFavourite: Boolean,
     onToggleFavourite: () -> Unit,
     onBack: () -> Unit,
@@ -753,14 +755,30 @@ internal fun FilmDetails(
                         fontWeight = FontWeight.SemiBold)
                     val host = runCatching { URI(source).host.orEmpty() }
                         .getOrDefault("")
-                    Surface(
-                        color = appBlue.copy(alpha = 0.14f),
-                        shape = RoundedCornerShape(11.dp)
-                    ) {
-                        Text("Rezka · " + host.ifBlank { "выбранное зеркало" },
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                            color = appBlue)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        (listOf(source) + sources).filter(SourceRules::isValidHttpsUrl)
+                            .distinctBy { MirrorAccountGateway.origin(it) }
+                            .forEach { candidate ->
+                                val origin = MirrorAccountGateway.origin(candidate).orEmpty()
+                                val selected = SourceRules.sameOrigin(source, candidate)
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = {
+                                        if (!selected && MirrorFilmUrl.changeOrigin(movie.url, candidate) != null) {
+                                            showWatchMenu = false
+                                            onChooseSource(candidate)
+                                        }
+                                    },
+                                    label = {
+                                        Text(runCatching { URI(candidate).host.orEmpty() }
+                                            .getOrDefault("Rezka"), maxLines = 1)
+                                    }
+                                )
+                            }
                     }
+                    Text("Выбранный адрес применяется к этому фильму. Состояние видеопотока проверяется при просмотре.",
+                        color = appMuted, style = MaterialTheme.typography.labelSmall)
                     Text("Озвучка", style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold)
                     if (availableVoices.isEmpty()) {
