@@ -270,10 +270,9 @@ private fun CinemaApp() {
                         onBack = { page = movieBack },
                         savedVoice = local.playbackSelection(movie.url)?.voice.orEmpty(),
                         onWatch = { url, voice ->
-                            if (voice.isNotBlank()) {
-                                val previous = local.playbackSelection(url) ?: PlaybackSelection()
-                                local.savePlaybackSelection(url, previous.copy(voice = voice))
-                            }
+                            val previous = local.playbackSelection(url) ?: PlaybackSelection()
+                            // Empty voice deliberately requests automatic selection.
+                            local.savePlaybackSelection(url, previous.copy(voice = voice))
                             browsingSource = url
                             page = Page.FILM_PLAYER
                         },

@@ -465,8 +465,8 @@ internal fun FilmDetails(
     var voiceId by remember(movie.url) { mutableStateOf(savedVoice) }
     LaunchedEffect(info?.voices) {
         val available = info?.voices.orEmpty()
-        if (available.isNotEmpty() && available.none { it.id == voiceId })
-            voiceId = available.first().id
+        if (voiceId.isNotBlank() && available.isNotEmpty() &&
+            available.none { it.id == voiceId }) voiceId = ""
     }
     val webView = if (!loadDone) remember(context, movie.url) {
         val handler = Handler(Looper.getMainLooper())
@@ -603,11 +603,15 @@ internal fun FilmDetails(
                             style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = { showWatchMenu = true },
+                        Button(onClick = { onWatch(movie.url, voiceId) },
                             modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) {
                             Icon(Icons.Outlined.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(7.dp))
                             Text("Смотреть")
+                        }
+                        OutlinedIconButton(onClick = { showWatchMenu = true }) {
+                            Icon(Icons.Outlined.Tune, contentDescription = "Выбрать озвучку",
+                                tint = appBlue)
                         }
                         OutlinedIconButton(onClick = onToggleFavourite) {
                             Icon(if (isFavourite) Icons.Outlined.BookmarkAdded
@@ -764,56 +768,54 @@ internal fun FilmDetails(
             ModalBottomSheet(
                 onDismissRequest = { showWatchMenu = false },
                 containerColor = appPanel,
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
             ) {
-                Column(Modifier.fillMaxWidth().heightIn(max = 520.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Просмотр", style = MaterialTheme.typography.titleLarge,
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = 340.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 18.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text("Озвучка", style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold)
-                    Text("Источник", color = appMuted,
-                        style = MaterialTheme.typography.labelLarge)
-                    Surface(color = appCard, shape = RoundedCornerShape(12.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.Public, contentDescription = null, tint = appBlue)
-                            Spacer(Modifier.width(9.dp))
-                            Text(runCatching { URI(source).host }.getOrDefault("Выбранное зеркало"),
-                                style = MaterialTheme.typography.bodyMedium)
-                        }
+                    Text(runCatching { URI(source).host.orEmpty() }
+                            .getOrDefault("Выбранное зеркало"),
+                        color = appMuted, style = MaterialTheme.typography.labelSmall)
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            voiceId = ""
+                            showWatchMenu = false
+                            onWatch(movie.url, "")
+                        }.padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.AutoAwesome, contentDescription = null,
+                            tint = appBlue, modifier = Modifier.size(21.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text("Автоматически", modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium)
+                        if (voiceId.isBlank()) Icon(Icons.Outlined.Check,
+                            contentDescription = "Выбрано", tint = appBlue)
                     }
-                    if (info?.voices?.isNotEmpty() == true) {
-                        Text("Озвучка", color = appMuted,
-                            style = MaterialTheme.typography.labelLarge)
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(1.dp)
+                    info?.voices.orEmpty().forEach { candidate ->
+                        HorizontalDivider(color = appMuted.copy(alpha = .10f))
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                voiceId = candidate.id
+                                showWatchMenu = false
+                                onWatch(movie.url, candidate.id)
+                            }.padding(vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            info!!.voices.forEach { voice ->
-                                FilterChip(
-                                    selected = voiceId == voice.id,
-                                    onClick = { voiceId = voice.id },
-                                    label = { Text(voice.name) },
-                                    shape = RoundedCornerShape(10.dp)
-                                )
-                            }
+                            Text(candidate.name, modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (voiceId == candidate.id) Icon(Icons.Outlined.Check,
+                                contentDescription = "Выбрано", tint = appBlue,
+                                modifier = Modifier.size(20.dp))
                         }
-                    } else {
-                        Text("Озвучку можно выбрать внутри плеера после загрузки фильма.",
-                            color = appMuted, style = MaterialTheme.typography.bodySmall)
                     }
-                    HorizontalDivider(color = appMuted.copy(alpha = .15f))
-                    Button(onClick = {
-                        showWatchMenu = false
-                        onWatch(movie.url,voiceId)
-                    }, modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)) {
-                        Icon(Icons.Outlined.PlayArrow, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Смотреть")
-                    }
-                    Spacer(Modifier.height(7.dp))
+                    Spacer(Modifier.height(8.dp))
                 }
             }
         }
