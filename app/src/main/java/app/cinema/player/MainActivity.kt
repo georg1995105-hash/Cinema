@@ -272,13 +272,21 @@ private fun CinemaApp() {
                         onBack = { page = movieBack },
                         onBrowse = { browsingSource = movie.url; browseReturn = Page.MOVIE; page = Page.SITE },
                         savedVoice = local.playbackSelection(movie.url)?.voice.orEmpty(),
-                        onWatch = { url, voice ->
-                            val previous = local.playbackSelection(url) ?: PlaybackSelection()
-                            if (voice.isNotBlank() && voice != previous.voice) {
-                                local.savePlaybackSelection(url, previous.copy(voice = voice))
+                        onWatch = { url, voice, season, episode ->
+                            if (voice.isNotBlank()) {
+                                val previous = local.playbackSelection(url) ?: PlaybackSelection()
+                                val changed = previous.voice != voice ||
+                                    (season.isNotBlank() && previous.season != season) ||
+                                    (episode.isNotBlank() && previous.episode != episode)
+                                local.savePlaybackSelection(url, previous.copy(
+                                    voice = voice,
+                                    season = season.ifBlank { if (changed) "" else previous.season },
+                                    episode = episode.ifBlank { if (changed) "" else previous.episode },
+                                    positionMs = if (changed) 0L else previous.positionMs
+                                ))
+                                browsingSource = url
+                                page = Page.FILM_PLAYER
                             }
-                            browsingSource = url
-                            page = Page.FILM_PLAYER
                         },
                         onRelated = { next -> local.rememberMovie(next); selectedFilm = next },
                         onMetadata = { refined -> local.rememberMovie(refined); selectedFilm = refined },

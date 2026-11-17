@@ -48,7 +48,9 @@ internal data class FilmInfo(
     val voices: List<MirrorVoice> = emptyList(),
     val title: String = "",
     val posters: List<String> = emptyList(),
-    val portraitsResolved: Boolean = true
+    val portraitsResolved: Boolean = true,
+    val defaultVoice: String = "",
+    val episodes: List<MirrorEpisode> = emptyList()
 )
 
 internal object FilmInfoMemory {
@@ -72,6 +74,7 @@ internal object FilmPageParser {
        (function() {
          function norm(s) {return (typeof s === 'string' ? s : '').replace(/\s+/g,' ').trim();}
          ${MirrorVoiceDiscovery.javascript}
+         ${MirrorVoiceDiscovery.episodesJavascript}
          ${MirrorPoster.javascript}
          function txt(s) {var e=document.querySelector(s);return e?norm(e.textContent):'';}
          function absolute(s) {try {return new URL(s,document.baseURI).href;} catch(e) {return '';}}
@@ -215,6 +218,8 @@ internal object FilmPageParser {
            facts:facts.slice(0,18),
            people:people.slice(0,60),
            voices:kinoPlayerMetadata().voices,
+           defaultVoice:kinoPlayerMetadata().defaultVoice,
+           episodes:kinoEpisodes(document),
            related:similar.slice(0,15),
            franchise:franchise.slice(0,50),
            franchiseDone:window.__kinoFranchiseDone === true,
@@ -362,6 +367,10 @@ internal object FilmPageParser {
             franchiseResolved = data.optBoolean("franchiseDone",false),
             directors = directors,
             voices = MirrorMediaParser.parseVoices(data.optJSONArray("voices")),
+            defaultVoice = data.optString("defaultVoice").takeIf {
+                it.matches(Regex("[0-9]{1,12}"))
+            }.orEmpty(),
+            episodes = MirrorMediaParser.parseEpisodes(data.optJSONArray("episodes")),
             title = CatalogTitleCleaner.clean(data.optString("title")),
             posters = MirrorCatalog.readPosters(data),
             portraitsResolved = data.optBoolean("portraitsDone", true)
@@ -369,7 +378,7 @@ internal object FilmPageParser {
     }.getOrNull()
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun FilmDetails(
     movie: CatalogMovie,
@@ -379,7 +388,7 @@ internal fun FilmDetails(
     onBack: () -> Unit,
     onBrowse: () -> Unit,
     savedVoice: String,
-    onWatch: (String, String) -> Unit,
+    onWatch: (String, String, String, String) -> Unit,
     onRelated: (CatalogMovie) -> Unit,
     onMetadata: (CatalogMovie) -> Unit,
     onPerson: (FilmPerson) -> Unit
@@ -399,6 +408,9 @@ internal fun FilmDetails(
         }
     }
     var showWatchMenu by remember(movie.url) { mutableStateOf(false) }
+    var chosenVoice by remember(movie.url) { mutableStateOf("") }
+    var chosenSeason by remember(movie.url) { mutableStateOf("") }
+    var chosenEpisode by remember(movie.url) { mutableStateOf("") }
     val webView = if (!loadDone) remember(context, movie.url) {
         val handler = Handler(Looper.getMainLooper())
         WebView(context).apply {
@@ -543,15 +555,18 @@ internal fun FilmDetails(
                             style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = { onWatch(movie.url, "") },
+                        Button(onClick = {
+                            chosenVoice = savedVoice.takeIf { id ->
+                                info?.voices.orEmpty().any { it.id == id }
+                            }.orEmpty()
+                            chosenSeason = ""
+                            chosenEpisode = ""
+                            showWatchMenu = true
+                        },
                             modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) {
                             Icon(Icons.Outlined.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(7.dp))
                             Text("Смотреть")
-                        }
-                        OutlinedIconButton(onClick = { showWatchMenu = true }) {
-                            Icon(Icons.Outlined.Tune, contentDescription = "Выбрать озвучку",
-                                tint = appBlue)
                         }
                         OutlinedIconButton(onClick = onToggleFavourite) {
                             Icon(if (isFavourite) Icons.Outlined.BookmarkAdded
@@ -714,49 +729,124 @@ internal fun FilmDetails(
                 containerColor = appPanel,
                 shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
             ) {
+                val availableVoices = info?.voices.orEmpty()
+                val voiceSelected = availableVoices.firstOrNull { it.id == chosenVoice }
+                val pageEpisodes = info?.episodes.orEmpty()
+                val showEpisodes = voiceSelected != null && pageEpisodes.isNotEmpty() &&
+                    (info?.defaultVoice.isNullOrBlank() ||
+                     info?.defaultVoice == chosenVoice || availableVoices.size == 1)
+                val seasons = if (showEpisodes) pageEpisodes.map { it.season }.distinct()
+                    else emptyList()
+                val currentSeason = chosenSeason.takeIf { it in seasons }
+                    ?: seasons.firstOrNull().orEmpty()
+                val currentEpisodes = pageEpisodes.filter { showEpisodes && it.season == currentSeason }
+                val currentEpisode = chosenEpisode.takeIf { id ->
+                    currentEpisodes.any { it.id == id }
+                } ?: currentEpisodes.firstOrNull()?.id.orEmpty()
                 Column(
-                    Modifier.fillMaxWidth().heightIn(max = 340.dp)
+                    Modifier.fillMaxWidth().heightIn(max = 620.dp)
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 18.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                        .padding(horizontal = 18.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
                 ) {
+                    Text("Источник", style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold)
+                    val host = runCatching { URI(source).host.orEmpty() }
+                        .getOrDefault("")
+                    Surface(
+                        color = appBlue.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(11.dp)
+                    ) {
+                        Text("Rezka · " + host.ifBlank { "выбранное зеркало" },
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            color = appBlue)
+                    }
                     Text("Озвучка", style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold)
-                    Text(runCatching { URI(source).host.orEmpty() }
-                            .getOrDefault("Выбранное зеркало"),
-                        color = appMuted, style = MaterialTheme.typography.labelSmall)
-                    if (info?.voices.isNullOrEmpty()) {
-                        Text(if (!loadDone) "Загружаем озвучки…" else loadError.ifBlank {
-                            "Источник не предоставил список озвучек."
-                        },
-                            color = appMuted, style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(vertical = 8.dp))
-                    }
-                    if (loadDone && info == null) {
-                        TextButton(onClick = { showWatchMenu = false; onBrowse() }) { Text("Открыть страницу на сайте") }
-                    }
-                    info?.voices.orEmpty().forEach { candidate ->
-                        HorizontalDivider(color = appMuted.copy(alpha = .10f))
-                        Row(
-                            Modifier.fillMaxWidth().clickable {
-                                showWatchMenu = false
-                                onWatch(movie.url, candidate.id)
-                            }.padding(vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(candidate.name, modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (candidate.requiresSubscription) {
-                                Text("Подписка", color = appMuted, style = MaterialTheme.typography.labelSmall)
-                                Spacer(Modifier.width(8.dp))
+                    if (availableVoices.isEmpty()) {
+                        Text(if (!loadDone) "Ищем озвучки…" else
+                            "Зеркало не предоставило список озвучек.",
+                            color = appMuted, style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            availableVoices.forEach { candidate ->
+                                FilterChip(
+                                    selected = chosenVoice == candidate.id,
+                                    onClick = {
+                                        if (chosenVoice != candidate.id) {
+                                            chosenVoice = candidate.id
+                                            chosenSeason = ""
+                                            chosenEpisode = ""
+                                        }
+                                    },
+                                    label = {
+                                        Text(candidate.name +
+                                            if (candidate.requiresSubscription) " · Подписка" else "",
+                                            maxLines = 2)
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = appBlue.copy(alpha = 0.19f),
+                                        selectedLabelColor = appBlue
+                                    )
+                                )
                             }
-                            if (savedVoice == candidate.id) Icon(Icons.Outlined.Check,
-                                contentDescription = "Выбрано", tint = appBlue,
-                                modifier = Modifier.size(20.dp))
                         }
                     }
-                    Spacer(Modifier.height(8.dp))
+                    if (showEpisodes) {
+                        Text("Сезон", style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            seasons.forEach { value ->
+                                FilterChip(
+                                    selected = value == currentSeason,
+                                    onClick = { chosenSeason = value; chosenEpisode = "" },
+                                    label = { Text("S" + value) }
+                                )
+                            }
+                        }
+                        Text("Серия", style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            currentEpisodes.forEach { entry ->
+                                FilterChip(
+                                    selected = entry.id == currentEpisode,
+                                    onClick = { chosenSeason = currentSeason; chosenEpisode = entry.id },
+                                    label = { Text("E" + entry.id) }
+                                )
+                            }
+                        }
+                    }
+                    if (voiceSelected?.requiresSubscription == true) {
+                        Text("Для этой озвучки источник может потребовать подписку.",
+                            color = appMuted, style = MaterialTheme.typography.bodySmall)
+                    }
+                    HorizontalDivider()
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = {
+                                if (voiceSelected != null) {
+                                    showWatchMenu = false
+                                    onWatch(movie.url, voiceSelected.id,
+                                        if (showEpisodes) currentSeason else "",
+                                        if (showEpisodes) currentEpisode else "")
+                                }
+                            },
+                            enabled = voiceSelected != null,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Outlined.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(5.dp))
+                            Text("Смотреть")
+                        }
+                        OutlinedButton(
+                            onClick = { showWatchMenu = false; onBrowse() },
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("На сайте") }
+                    }
+                    Spacer(Modifier.height(10.dp))
                 }
             }
         }
