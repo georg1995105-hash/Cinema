@@ -72,6 +72,40 @@ class LocalStore(context: Context) {
         }
         prefs.edit().putString("watch_history", array.toString()).apply()
     }
+    /** Bounded device-only poster/title index for history and bookmarks. */
+    fun rememberMovie(movie: CatalogMovie) {
+        if (!SourceRules.isValidHttpsUrl(movie.url)) return
+        val all = runCatching {
+            JSONArray(prefs.getString("movie_index_v1", "[]") ?: "[]")
+        }.getOrDefault(JSONArray())
+        val items = JSONArray()
+        items.put(JSONObject()
+            .put("url",movie.url)
+            .put("title",movie.title.take(130))
+            .put("poster",movie.poster.takeIf(SourceRules::isValidHttpsUrl).orEmpty())
+            .put("details",movie.details.take(110)))
+        for (i in 0 until all.length()) {
+            if (items.length() >= 160) break
+            val item = all.optJSONObject(i) ?: continue
+            if (item.optString("url") != movie.url) items.put(item)
+        }
+        prefs.edit().putString("movie_index_v1",items.toString()).apply()
+    }
+
+    fun savedMovie(url: String): CatalogMovie? = runCatching {
+        val array = JSONArray(prefs.getString("movie_index_v1","[]") ?: "[]")
+        val item = (0 until array.length())
+            .mapNotNull(array::optJSONObject)
+            .firstOrNull { it.optString("url") == url } ?: return@runCatching null
+        val title = item.optString("title")
+        if (title.isBlank()) return@runCatching null
+        CatalogMovie(
+            url = url, title = title,
+            poster = item.optString("poster").takeIf(SourceRules::isValidHttpsUrl).orEmpty(),
+            details = item.optString("details")
+        )
+    }.getOrNull()
+
     fun playbackSelection(url: String): PlaybackSelection? = runCatching {
         val json = JSONObject(prefs.getString("playback_selections_v2", "{}") ?: "{}")
         val saved = json.optJSONObject(url) ?: return@runCatching null
