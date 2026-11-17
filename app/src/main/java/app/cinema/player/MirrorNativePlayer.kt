@@ -61,7 +61,7 @@ private val playerMetaJs = """
       function(x){return {id:x.getAttribute('data-translator_id'),name:clean(x.getAttribute('title')||x.textContent)}}
     ).filter(function(x){return x.id && x.name});
     var episodes=Array.from(document.querySelectorAll('.b-simple_episode__item[data-episode_id]')).map(
-      function(x){return{season:x.getAttribute('data-season_id')||'1',episode:x.getAttribute('data-episode_id'),label:clean(x.textContent)}}
+      function(x){return{season:x.getAttribute('data-season_id')||x.closest('ul[id^="simple-episodes-list-"]')?.id.replace('simple-episodes-list-','')||'1',episode:x.getAttribute('data-episode_id'),label:clean(x.textContent)}}
     );
     return JSON.stringify({
       id:String(id),series:!!((init&&init[1]==='Series')||document.querySelector('#simple-episodes-tabs')),
@@ -86,7 +86,7 @@ private suspend fun mirrorAjax(web: WebView, payload: Map<String,String>): Strin
                  body:new URLSearchParams($body).toString()
                }).then(function(response){if(!response.ok)throw Error('http');return response.json()})
                  .then(function(data){
-                    if(data.episodes && data.seasons){
+                    if(data.episodes){
                       var holder=document.createElement('div');
                       holder.innerHTML=(data.episodes||'')+(data.seasons||'');
                       data.__kinoEpisodes=Array.from(holder.querySelectorAll('.b-simple_episode__item[data-episode_id]'))
