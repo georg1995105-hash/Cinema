@@ -462,19 +462,11 @@ internal fun FilmDetails(
                                         .clip(RoundedCornerShape(12.dp)).background(appCard),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    if (person.photo.isNotBlank()) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(context)
-                                                .data(person.photo)
-                                                .addHeader("Referer", source.trimEnd('/') + "/")
-                                                .addHeader("User-Agent", WebSettings.getDefaultUserAgent(context))
-                                                .build(),
-                                            contentDescription = person.name,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    } else Icon(Icons.Outlined.Person, contentDescription = null,
-                                        tint = appMuted, modifier = Modifier.size(38.dp))
+                                    ActorPortrait(
+                                        person = person,
+                                        source = source,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
                                 }
                                 Spacer(Modifier.height(5.dp))
                                 Text(person.name, maxLines = 2,
