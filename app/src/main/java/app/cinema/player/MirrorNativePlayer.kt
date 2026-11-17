@@ -101,8 +101,13 @@ private suspend fun mirrorAjax(web: WebView, payload: Map<String,String>): Strin
                       var holder=document.createElement('div');
                       holder.innerHTML=(data.episodes||'')+(data.seasons||'');
                       data.__kinoEpisodes=Array.from(holder.querySelectorAll('.b-simple_episode__item[data-episode_id]'))
-                        .map(function(x){return {season:x.getAttribute('data-season_id')||'1',
-                                episode:x.getAttribute('data-episode_id'),label:(x.textContent||'').trim()};});
+                        .map(function(x){
+                           var season=x.getAttribute('data-season_id') ||
+                               x.closest('ul[id^="simple-episodes-list-"]')?.id.replace('simple-episodes-list-','') ||
+                               x.closest('[data-season_id]')?.getAttribute('data-season_id') || '1';
+                           return {season:String(season),episode:x.getAttribute('data-episode_id'),
+                                   label:(x.textContent||'').trim()};
+                        });
                     }
                     window['$marker']=JSON.stringify(data);
                  }).catch(function(){window['$marker']=JSON.stringify({error:'network'});});
