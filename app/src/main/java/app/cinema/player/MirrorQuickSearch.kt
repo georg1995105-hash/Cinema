@@ -35,9 +35,15 @@ internal object MirrorQuickSearch {
           var timeout = setTimeout(function(){controller.abort()}, 3500);
           (async function() {
             var cards = [];
+            function normalize(s) {
+              return s.normalize('NFKC').toLowerCase().replace(/ё/g,'е').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+            }
             for (var q of queries) {
-              cards = await search(q, controller.signal);
-              if (cards.length) break;
+              cards = cards.concat(await search(q, controller.signal));
+              var expected = normalize(q);
+              if (cards.some(function(card) {
+                return (' ' + normalize(card.title) + ' ').includes(' ' + expected + ' ');
+              })) break;
             }
             window.__kinoQuickSearchResult = JSON.stringify({cards:cards});
           })().catch(function() {

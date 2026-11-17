@@ -1,7 +1,6 @@
 package app.cinema.player
 
 import android.webkit.WebSettings
-import android.webkit.CookieManager
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -24,7 +23,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
-import java.net.URI
 import java.net.URLEncoder
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
@@ -59,7 +57,7 @@ internal object ActorPhotoLibrary {
             append(URLEncoder.encode(name, "UTF-8"))
         }
         val list = fetchJson(query)?.optJSONArray("search") ?: return null
-        val suitable = (0 until list.length()).mapNotNull { list.optJSONObject(it) }.firstOrNull { result ->
+        val suitable = (0 until list.length()).mapNotNull { list.optJSONObject(it) }.filter { result ->
             val label = clean(result.optString("label"))
             val description = result.optString("description").lowercase()
             label == normalized && listOf(
@@ -67,7 +65,7 @@ internal object ActorPhotoLibrary {
                 "actor", "actress", "director", "film maker", "filmmaker"
             ).any { description.contains(it) } &&
                 result.optString("id").matches(Regex("Q[0-9]{1,15}"))
-        } ?: return null
+        }.singleOrNull() ?: return null
 
         val id = suitable.optString("id")
         val entityUrl = "https://www.wikidata.org/w/api.php?action=wbgetentities" +
@@ -119,6 +117,7 @@ internal fun ActorPortrait(
 ) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+    val imageLoader = remember(context) { posterImageLoader(context) }
     var mirrorFailed by remember(person.photo) { mutableStateOf(false) }
     var externalFailed by remember(person.name) { mutableStateOf(false) }
     val wikimedia by produceState<OpenPortrait?>(
@@ -140,18 +139,9 @@ internal fun ActorPortrait(
                 ImageRequest.Builder(context).data(displayed)
                     .addHeader("User-Agent", WebSettings.getDefaultUserAgent(context))
                     .apply {
-                        val photoHost = runCatching { URI(displayed).host.orEmpty() }.getOrDefault("")
-                        val mirrorHost = runCatching { URI(source).host.orEmpty() }.getOrDefault("")
-                        if (mirrorHost.isNotBlank() && (
-                            photoHost.equals(mirrorHost, ignoreCase = true) ||
-                            photoHost.endsWith(".$mirrorHost", ignoreCase = true))) {
-                            addHeader("Referer", source.trimEnd('/') + "/")
-                            // Never forward site cookies to public Commons or other hosts.
-                            if (photoHost.equals(mirrorHost, ignoreCase = true)) {
-                                CookieManager.getInstance().getCookie(source)?.let { cookie ->
-                                    if (cookie.isNotBlank()) addHeader("Cookie", cookie)
-                                }
-                            }
+                        if (actual != null && SourceRules.sameOrigin(source, displayed)) {
+                            addHeader("Referer", person.url.takeIf { SourceRules.sameOrigin(source, it) }
+                                ?: source.trimEnd('/') + "/")
                         }
                     }
                     .crossfade(true)
@@ -159,6 +149,7 @@ internal fun ActorPortrait(
             }
             AsyncImage(
                 model = request,
+                imageLoader = imageLoader,
                 contentDescription = person.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

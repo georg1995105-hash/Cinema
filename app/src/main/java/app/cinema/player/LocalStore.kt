@@ -42,30 +42,29 @@ class LocalStore(context: Context) {
         prefs.edit().putString("active_source", value).apply()
     }
 
-    /** Remember only the login name per chosen mirror, never a password. */
+    /** Keep the original keys and recognize the same mirror with or without a trailing slash. */
     fun savedAccountName(source: String): String {
-        if (!SourceRules.isValidHttpsUrl(source)) return ""
-        val specific = runCatching {
-            JSONObject(prefs.getString("account_names_v1", "{}") ?: "{}")
-                .optString(source).take(128)
-        }.getOrDefault("")
-        // The same login may be used on several mirrors; no password or cookie is copied.
-        return specific.ifBlank {
-            prefs.getString("last_account_name_v1", "").orEmpty().take(128)
-        }
+        val origin = MirrorAccountGateway.origin(source) ?: return ""
+        val names = accountNames()
+        val matchingKey = sequenceOf(origin, source).plus(names.keys().asSequence())
+            .firstOrNull { names.has(it) && SourceRules.sameOrigin(origin, it) }
+        if (matchingKey != null) return names.optString(matchingKey).take(128)
+        return prefs.getString("last_account_name_v1", "").orEmpty().take(128)
     }
 
     fun saveAccountName(source: String, name: String) {
-        if (!SourceRules.isValidHttpsUrl(source)) return
-        val entries = runCatching {
-            JSONObject(prefs.getString("account_names_v1", "{}") ?: "{}")
-        }.getOrDefault(JSONObject())
-        if (name.isBlank()) entries.remove(source) else entries.put(source, name.trim().take(128))
-        prefs.edit().putString("account_names_v1", entries.toString()).apply()
-        if (name.isNotBlank()) {
-            prefs.edit().putString("last_account_name_v1", name.trim().take(128)).apply()
-        }
+        val origin = MirrorAccountGateway.origin(source) ?: return
+        val entries = accountNames()
+        val login = name.trim().take(128)
+        entries.put(origin, login)
+        val editor = prefs.edit().putString("account_names_v1", entries.toString())
+        if (login.isNotBlank()) editor.putString("last_account_name_v1", login)
+        editor.apply()
     }
+
+    private fun accountNames(): JSONObject = runCatching {
+        JSONObject(prefs.getString("account_names_v1", "{}") ?: "{}")
+    }.getOrDefault(JSONObject())
 
     fun cardsPerRow(): Int = prefs.getInt("cards_per_row", 5).coerceIn(2, 8)
     fun saveCardsPerRow(value: Int) { prefs.edit().putInt("cards_per_row", value.coerceIn(2, 8)).apply() }

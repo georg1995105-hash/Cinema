@@ -462,7 +462,7 @@ internal fun MoviePosterImage(movie: CatalogMovie, modifier: Modifier, contentSc
 @Volatile private var sharedPosterLoader: ImageLoader? = null
 
 @Synchronized
-private fun posterImageLoader(context: android.content.Context): ImageLoader =
+internal fun posterImageLoader(context: android.content.Context): ImageLoader =
     sharedPosterLoader ?: ImageLoader.Builder(context.applicationContext)
         .okHttpClient {
             MirrorHttp.client.newBuilder().addNetworkInterceptor { chain ->

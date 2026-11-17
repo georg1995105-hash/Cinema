@@ -47,7 +47,8 @@ internal data class FilmInfo(
     val directors: List<FilmPerson> = emptyList(),
     val voices: List<MirrorVoice> = emptyList(),
     val title: String = "",
-    val posters: List<String> = emptyList()
+    val posters: List<String> = emptyList(),
+    val portraitsResolved: Boolean = true
 )
 
 internal object FilmInfoMemory {
@@ -69,7 +70,7 @@ internal object FilmInfoMemory {
 internal object FilmPageParser {
     val javascript = """
        (function() {
-         function norm(s) {return (s || '').replace(/\s+/g,' ').trim();}
+         function norm(s) {return (typeof s === 'string' ? s : '').replace(/\s+/g,' ').trim();}
          ${MirrorVoiceDiscovery.javascript}
          ${MirrorPoster.javascript}
          function txt(s) {var e=document.querySelector(s);return e?norm(e.textContent):'';}
@@ -123,7 +124,7 @@ internal object FilmPageParser {
            var address = anchor.getAttribute('href');
            var url = address ? absolute(address) : '';
            var photo = kinoPosters(entry,document.baseURI)[0] || '';
-           people.push({name:name, url:url, photo:photo, role:role});
+           people.push({name:name, url:url, photo:photo || window.__kinoPortraits?.images[url] || '', role:role});
          }
          document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(row) {
            var cells = row.querySelectorAll('td');
@@ -140,6 +141,34 @@ internal object FilmPageParser {
          document.querySelectorAll('.b-post__actors a[href], .b-post__actors_item a[href], a.b-post__actors_item[href]')
            .forEach(function(a){person(a,'actor')});
          document.querySelectorAll('.b-post__directors a[href]').forEach(function(a){person(a,'director')});
+         var profiles = people.filter(function(p) {
+           if (p.photo || !p.url) return false;
+           var u = new URL(p.url);
+           return u.origin === location.origin && /\/(?:person|persons|actors)\//i.test(u.pathname);
+         }).filter(function(p, index, all) {
+           return all.findIndex(function(other){return other.url === p.url}) === index;
+         }).slice(0, 4);
+         if (profiles.length && !window.__kinoPortraits) {
+           var portraits = window.__kinoPortraits = {images:{}, done:false};
+           var controller = new AbortController();
+           var timeout = setTimeout(function(){controller.abort()}, 2600);
+           Promise.all(profiles.map(async function(profile) {
+              try {
+                var response = await fetch(profile.url, {credentials:'same-origin',signal:controller.signal});
+                var from = new URL(profile.url);
+                var final = new URL(response.url);
+                if (!response.ok || from.origin !== final.origin || from.pathname !== final.pathname) return;
+                var html = await response.text();
+                if (html.length > 750000) return;
+                var doc = new DOMParser().parseFromString(html, 'text/html');
+                var title = norm(doc.querySelector('h1, .b-person__name')?.textContent);
+                if (title.toLowerCase().replace(/ё/g,'е') !== profile.name.toLowerCase().replace(/ё/g,'е')) return;
+                var portrait = doc.querySelector('.b-person__photo, .b-person__poster, .b-person__image, .b-person [itemprop="image"]');
+                var image = kinoPosters(portrait, response.url)[0];
+                if (image) portraits.images[profile.url] = image;
+              } catch (e) {}
+           })).finally(function(){clearTimeout(timeout); portraits.done = true});
+         }
          var similar = [];
          document.querySelectorAll('.b-post__related .b-content__inline_item, .b-post__related_item, .b-post__similar .b-content__inline_item').forEach(function(item) {
            var link = item.querySelector('.b-content__inline_item-link a[href], .b-post__related_item_title a[href], a[href]');
@@ -162,7 +191,8 @@ internal object FilmPageParser {
            voices:kinoPlayerMetadata().voices,
            related:similar.slice(0,15),
            franchise:franchise.slice(0,50),
-           franchiseDone:window.__kinoFranchiseDone === true
+           franchiseDone:window.__kinoFranchiseDone === true,
+           portraitsDone:!window.__kinoPortraits || window.__kinoPortraits.done
          });
        })();
     """.trimIndent()
@@ -307,7 +337,8 @@ internal object FilmPageParser {
             directors = directors,
             voices = MirrorMediaParser.parseVoices(data.optJSONArray("voices")),
             title = CatalogTitleCleaner.clean(data.optString("title")),
-            posters = MirrorCatalog.readPosters(data)
+            posters = MirrorCatalog.readPosters(data),
+            portraitsResolved = data.optBoolean("portraitsDone", true)
         )
     }.getOrNull()
 }
@@ -373,7 +404,7 @@ internal fun FilmDetails(
                                 val parsed = FilmPageParser.parse(raw, source)
                                 if (parsed != null && FilmInfoReadiness.hasContent(parsed)) {
                                     info = parsed
-                                    if (FilmInfoReadiness.canFinish(parsed) && index >= 2) {
+                                    if (FilmInfoReadiness.canFinish(parsed) && parsed.portraitsResolved && index >= 2) {
                                         FilmInfoMemory.put(movie.url, parsed)
                                         loadDone = true
                                     }

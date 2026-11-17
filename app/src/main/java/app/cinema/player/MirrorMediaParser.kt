@@ -136,7 +136,7 @@ internal object MirrorMediaParser {
             status == 401 || contains(code, "auth_required|login_required|авторизуй|войдите|войти в аккаунт") ->
                 PlaybackFailure.AUTH_REQUIRED
             status == 402 || contains(code, "premium|премиум|платн.{0,8} подписк") -> PlaybackFailure.PREMIUM
-            contains(code, "\\bdrm\\b") -> PlaybackFailure.DRM
+            contains(code, "(?:^|[^a-z0-9])drm(?:$|[^a-z0-9])") -> PlaybackFailure.DRM
             status in setOf(403, 429, 451) || contains(code, "captcha|access.denied|доступ запрещ[её]н") ->
                 PlaybackFailure.BLOCKED
             status == 404 || status == 410 -> PlaybackFailure.UNAVAILABLE
@@ -167,6 +167,7 @@ internal object MirrorMediaParser {
         if (qualities.isEmpty()) {
             val failure = when {
                 contains(streamText, "prem-quality|prem-icon|/premium/|premium-promo|premium_ad") -> PlaybackFailure.PREMIUM
+                streamText.isBlank() && !json.has("url") && !json.has("streams") && !json.has("success") -> PlaybackFailure.INVALID_RESPONSE
                 streamText.isBlank() -> PlaybackFailure.UNAVAILABLE
                 else -> PlaybackFailure.INVALID_RESPONSE
             }

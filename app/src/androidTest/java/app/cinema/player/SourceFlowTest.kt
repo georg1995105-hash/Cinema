@@ -78,7 +78,7 @@ class SourceFlowTest {
           window.calls.push(address.pathname + address.search);
           if (address.pathname === '/engine/ajax/search.php') {
             const html = address.searchParams.get('q') === 'Бригада' ?
-              '<div class="b-search__live_section"><ul><li><a href="/series/drama/12-brigada.html"><span class="enty">Бригада</span><small>2002, Россия, Драмы</small><img src="/static/hdrezka.png"></a></li><li><a href="/films/drama/99-other.html"><span class="enty">Другой фильм</span></a></li></ul></div>' : '';
+              '<div class="b-search__live_section"><ul><li><a href="/series/drama/12-brigada.html"><span class="enty">Бригада</span><small>2002, Россия, Драмы</small><img src="/static/hdrezka.png"></a></li><li><a href="/films/drama/99-other.html"><span class="enty">Другой фильм</span></a></li></ul></div>' : '<div class="b-search__live_section"><ul><li><a href="/films/drama/99-other.html"><span class="enty">Другой фильм</span></a></li></ul></div>';
             return {ok:true, url:address.href, text:async()=>html};
           }
           return {ok:true, url:location.origin + '/series/drama/12-canonical.html',
@@ -201,7 +201,9 @@ class SourceFlowTest {
         assertEquals(listOf(film), store.favourites())
         assertEquals(WatchedVideo(film, 45000), store.history().single())
         assertEquals(PlaybackSelection("2", "3", "7", "720p", 45000), store.playbackSelection(film))
-        assertEquals("fixture@example.org", store.savedAccountName(origin))
+        assertEquals("fixture@example.org", store.savedAccountName("$origin/"))
+        store.saveAccountName("$origin/", "updated@example.org")
+        assertEquals("updated@example.org", LocalStore(context).savedAccountName(origin))
         assertEquals(15, store.seekSeconds())
         assertEquals(3, store.holdSpeed())
         assertFalse(store.autoNextEpisode())
