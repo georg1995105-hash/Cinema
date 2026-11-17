@@ -298,14 +298,15 @@ internal fun MirrorNativePlayer(
         mutableIntStateOf(0)
     }
     val currentUrl = availableUrls.getOrNull(alternativeIndex)
-    var playbackState by remember(selected?.url){mutableIntStateOf(Player.STATE_IDLE)}
-    var playerIssue by remember(selected?.url){mutableStateOf("")}
-    var position by remember(selected?.url){mutableLongStateOf(resumeMs)}
-    var total by remember(selected?.url){mutableLongStateOf(0L)}
-    var paused by remember(selected?.url){mutableStateOf(false)}
+    val episodeKey = season + "/" + episode + "/" + voice
+    var playbackState by remember(currentUrl, episodeKey){mutableIntStateOf(Player.STATE_IDLE)}
+    var playerIssue by remember(currentUrl, episodeKey){mutableStateOf("")}
+    var position by remember(currentUrl, episodeKey){mutableLongStateOf(resumeMs)}
+    var total by remember(currentUrl, episodeKey){mutableLongStateOf(0L)}
+    var paused by remember(currentUrl, episodeKey){mutableStateOf(false)}
     var controls by remember {mutableStateOf(true)}
     var accelerated by remember {mutableStateOf(false)}
-    val player=remember(currentUrl, subtitleOptions){
+    val player=remember(currentUrl, subtitleOptions, episodeKey){
         currentUrl?.let {streamUrl ->
             val http=DefaultHttpDataSource.Factory()
                 .setUserAgent(WebSettings.getDefaultUserAgent(context))
@@ -365,11 +366,17 @@ internal fun MirrorNativePlayer(
                 }
         }
     }
-    DisposableEffect(player){
-        onDispose{
-            if(player!=null){
+    DisposableEffect(player, episodeKey) {
+        val attachedEpisode = episodeKey
+        onDispose {
+            if (player != null) {
                 val ms=player.currentPosition.coerceAtLeast(0)
-                if(ms>0){resumeMs=ms;onSave(ms)}
+                // Do not overwrite the next episode's position with the previous episode's end.
+                if (ms > 0 && attachedEpisode == season + "/" + episode + "/" + voice) {
+                    resumeMs = ms
+                    onSave(ms)
+                    onSaveSelection(PlaybackSelection(season, episode, voice, quality, ms))
+                }
                 player.release()
             }
         }
