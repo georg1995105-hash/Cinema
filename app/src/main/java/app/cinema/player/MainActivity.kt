@@ -230,7 +230,8 @@ private fun HomeScreen() {
             items(feeds) { section ->
                 val active = feed == section
                 Column(
-                    Modifier.clickable { feed = section }
+                    Modifier.width(IntrinsicSize.Max)
+                        .clickable { feed = section }
                         .padding(top = 15.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
