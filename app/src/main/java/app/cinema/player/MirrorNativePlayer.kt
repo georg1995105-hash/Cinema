@@ -249,7 +249,7 @@ internal fun MirrorNativePlayer(
                             view.evaluateJavascript(playerMetaJs){ raw ->
                                 if (view.url!=url || movie!=null) return@evaluateJavascript
                                 val parsed=MirrorMediaParser.pageFromWebView(raw)
-                                if (parsed!=null && (parsed.voices.size>1 || index>=2)) {
+                                if (parsed!=null) {
                                     movie=parsed
                                     message=""
                                     error=""
@@ -287,6 +287,13 @@ internal fun MirrorNativePlayer(
             metadataHandler.removeCallbacksAndMessages(null)
             web.stopLoading()
             web.destroy()
+        }
+    }
+    LaunchedEffect(filmUrl) {
+        delay(10000)
+        if (movie == null && error.isBlank()) {
+            message = ""
+            error = "Источник не загрузил сведения плеера. Проверьте доступность выбранного зеркала."
         }
     }
     LaunchedEffect(movie,voice){

@@ -264,7 +264,7 @@ private fun CinemaApp() {
                 Page.MOVIE -> selectedFilm?.let { movie ->
                     FilmDetails(
                         movie = movie,
-                        source = activeSource.orEmpty(),
+                        source = MirrorAccountGateway.origin(movie.url) ?: activeSource.orEmpty(),
                         isFavourite = movie.url in favourites,
                         onToggleFavourite = { toggleFavourite(movie.url) },
                         onBack = { page = movieBack },

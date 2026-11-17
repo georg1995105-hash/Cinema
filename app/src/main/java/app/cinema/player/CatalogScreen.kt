@@ -38,6 +38,7 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import java.net.URI
 import java.net.URLEncoder
+import kotlinx.coroutines.delay
 
 internal data class CatalogMovie(
     val url: String,
@@ -134,12 +135,16 @@ internal object MirrorCatalog {
           )).slice(0,96);
           var cards = nodes.map(function(item) {
             var a = item.querySelector('.b-content__inline_item-link a[href]') ||
-                    item.querySelector('a[href*="/films/"], a[href*="/series/"], a[href*="/cartoons/"], a[href*="/animation/"]');
+                    item.querySelector('a.b-content__inline_item-link[href]') ||
+                    item.querySelector('a[href*="/films/"], a[href*="/series/"], a[href*="/cartoons/"], a[href*="/animation/"]') ||
+                    item.querySelector('a[href]');
             if (!a) return null;
             var link = item.querySelector('.b-content__inline_item-link');
             var img = item.querySelector('.b-content__inline_item-cover img') || item.querySelector('img');
             var cover = item.querySelector('.b-content__inline_item-cover');
-            var name = (a.textContent || a.getAttribute('title') || img?.getAttribute('alt') || '').trim();
+            var name = (a.getAttribute('title') ||
+                item.querySelector('.b-content__inline_item-link')?.textContent ||
+                img?.getAttribute('alt') || a.textContent || '').replace(/\s+/g,' ').trim();
             function absolute(s) {
               try { return new URL(s,document.baseURI).href; } catch(e) { return ''; }
             }
@@ -223,8 +228,13 @@ internal fun CatalogGrid(
     val isTablet = LocalConfiguration.current.screenWidthDp >= 600
     val columns = if (isTablet) cardsPerRow.coerceIn(2,8) else cardsPerRow.coerceIn(2,3)
     var attempt by remember(source, section, kind, requestOverride) { mutableIntStateOf(0) }
-    val requestUrl = remember(source, section, kind, requestOverride) {
-        requestOverride ?: MirrorCatalog.requestUrl(source, section, kind)
+    var useUnfiltered by remember(source, section, kind, requestOverride, attempt) {
+        mutableStateOf(false)
+    }
+    val requestUrl = remember(source, section, kind, requestOverride, useUnfiltered) {
+        requestOverride ?: MirrorCatalog.requestUrl(
+            source, if (useUnfiltered) "Новинки" else section, kind
+        )
     }
     val cacheKey = requestUrl
     var movies by remember(requestUrl, attempt) {
@@ -232,6 +242,24 @@ internal fun CatalogGrid(
     }
     var pending by remember(requestUrl, attempt) { mutableStateOf(movies.isEmpty()) }
     var problem by remember(requestUrl, attempt) { mutableStateOf("") }
+    fun recoverEmptyCatalog(reason: String) {
+        if (!useUnfiltered && requestOverride == null && section != "Новинки") {
+            useUnfiltered = true
+        } else {
+            pending = false
+            problem = reason
+        }
+    }
+    // Page callbacks are not guaranteed after a network stall or blocked navigation.
+    // Bound each load, then try only the standard category once before showing an error.
+    LaunchedEffect(requestUrl, attempt, loadContent) {
+        if (loadContent && pending) {
+            delay(9000)
+            if (pending) recoverEmptyCatalog(
+                "Источник не завершил загрузку каталога. Проверьте доступность зеркала."
+            )
+        }
+    }
     val browser = if (loadContent && pending && movies.isEmpty()) remember(context, requestUrl, attempt) {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
@@ -260,7 +288,7 @@ internal fun CatalogGrid(
                     }
                 }
                 override fun onPageFinished(view: WebView, url: String) {
-                    val delays = listOf(550L, 1800L, 4000L, 7000L)
+                    val delays = listOf(300L, 1100L, 2600L, 4800L)
                     delays.forEachIndexed { index, delayMs ->
                         handler.postDelayed({
                             if (view.url != url || !pending) return@postDelayed
@@ -273,8 +301,9 @@ internal fun CatalogGrid(
                                     pending = false
                                     problem = ""
                                 } else if (index == delays.lastIndex) {
-                                    pending = false
-                                    problem = "Сайт не предоставил карточки. Возможно, он открыл страницу защиты."
+                                    recoverEmptyCatalog(
+                                        "Источник не предоставил карточки или открыл проверку доступа."
+                                    )
                                 }
                             }
                         }, delayMs)
@@ -299,7 +328,8 @@ internal fun CatalogGrid(
         when {
             movies.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(visibleMovies.size.toString() + " результатов", color = appMuted,
+                    Text((if (useUnfiltered) "Общий каталог • " else "") +
+                        visibleMovies.size.toString() + " результатов", color = appMuted,
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                     TextButton(onClick = { CatalogMemory.invalidate(cacheKey); attempt++ }) {
                         Icon(Icons.Outlined.Refresh, contentDescription = null,

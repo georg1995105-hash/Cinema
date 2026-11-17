@@ -34,6 +34,7 @@ import coil.request.ImageRequest
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.net.URI
+import kotlinx.coroutines.delay
 
 internal data class FilmPerson(val name: String, val photo: String, val url: String = "")
 internal data class FilmInfo(
@@ -454,8 +455,12 @@ internal fun FilmDetails(
 ) {
     val context = LocalContext.current
     var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
-    // A franchise cache hit is not evidence that late-loading actor/director photos resolved.
     var loadDone by remember(movie.url) { mutableStateOf(false) }
+    // A silent network stall must not leave the film page spinning forever.
+    LaunchedEffect(movie.url) {
+        delay(8500)
+        if (!loadDone) loadDone = true
+    }
     var showWatchMenu by remember(movie.url) { mutableStateOf(false) }
     var voiceId by remember(movie.url) { mutableStateOf(savedVoice) }
     LaunchedEffect(info?.voices) {
@@ -488,7 +493,7 @@ internal fun FilmDetails(
                             view.evaluateJavascript(FilmPageParser.actorProfilePhotosJavascript) {}
                         }
                     }, 900L)
-                    val delays = listOf(550L, 1700L, 3400L, 6200L, 10000L)
+                    val delays = listOf(220L, 1000L, 2300L, 4600L)
                     delays.forEachIndexed { index, delay ->
                         handler.postDelayed({
                             if (view.url != url || loadDone) return@postDelayed
@@ -593,9 +598,6 @@ internal fun FilmDetails(
                     if (!info?.originalTitle.isNullOrBlank())
                         Text(info!!.originalTitle, color = appMuted,
                             style = MaterialTheme.typography.bodyMedium)
-                    if (info?.rating?.isNotBlank() == true)
-                        Text(info!!.rating, color = appBlue,
-                            style = MaterialTheme.typography.bodyMedium)
                     if (movie.details.isNotBlank())
                         Text(movie.details, color = appMuted,
                             style = MaterialTheme.typography.bodyMedium)
@@ -616,11 +618,15 @@ internal fun FilmDetails(
                     }
                 }
             }
-            if (info?.description?.isNotBlank() == true) {
+            val meaningfulDescription = FilmTextSanitizer.description(
+                info?.description.orEmpty()
+            )
+            if (meaningfulDescription.isNotBlank()) {
                 item {
-                    Text("Описание", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Описание", style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(9.dp))
-                    Text(info!!.description, color = primary.copy(alpha = .88f),
+                    Text(meaningfulDescription, color = primary.copy(alpha = .88f),
                         style = MaterialTheme.typography.bodyMedium)
                 }
             }
