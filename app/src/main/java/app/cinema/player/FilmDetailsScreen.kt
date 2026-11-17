@@ -79,15 +79,21 @@ internal object FilmPageParser {
            var img=e.querySelector('img');
            var n=norm(e.querySelector('a')?.textContent || img?.getAttribute('alt') || e.textContent);
            var photo=img ? absolute(img.getAttribute('data-src') || img.getAttribute('data-original') ||
-                                   img.getAttribute('data-lazy-src') || img.getAttribute('src')) : '';
+                                   img.getAttribute('data-lazy-src') || img.getAttribute('data-image') ||
+                                   img.getAttribute('src') || img.currentSrc) : '';
            if(!photo) {
              var visual=e.querySelector('[style*="background-image"]');
              var css=visual?.getAttribute('style') || '';
              var found=css.match(/url\((['"]?)(.*?)\1\)/);
              if(found) photo=absolute(found[2]);
            }
-           var anchor=e.matches('a[href]')?e:e.querySelector('a[href]');
-           var personUrl=anchor?absolute(anchor.getAttribute('href')):'';
+           var anchor=e.matches('a[href]')?e:(e.querySelector('a[href]')||e.closest('a[href]'));
+           var href=anchor?.getAttribute('href') || e.getAttribute('data-href') ||
+                    e.getAttribute('data-url') || '';
+           var personUrl=href?absolute(href):'';
+           if(!photo && personUrl && window.__kinoActorPhotos) {
+             photo = window.__kinoActorPhotos[personUrl] || '';
+           }
            if(n && n.length<95) people.push({name:n,photo:photo,url:personUrl});
          });
          var similar=[];
@@ -109,6 +115,101 @@ internal object FilmPageParser {
            related:similar.slice(0,15)
          });
        })();
+    """.trimIndent()
+
+    /**
+     * The film page often lists actors as text-only links. Fetch a few same-origin actor
+     * profiles within the existing browser session to find the *actual* portrait.
+     * A profile without a valid image stays without a photo; no identity guessing.
+     */
+    val actorProfilePhotosJavascript = """
+      (function() {
+        if (window.__kinoActorPhotosStarted) return 'existing';
+        window.__kinoActorPhotosStarted = true;
+        window.__kinoActorPhotos = window.__kinoActorPhotos || {};
+        var cards = Array.from(document.querySelectorAll(
+          '.b-post__people_item, .b-post__actors_item, .b-post__person_item, .persons-list-holder .person-name-item'
+        )).slice(0, 16);
+        var targets = cards.map(function(e) {
+          var a = e.matches('a[href]') ? e : (e.querySelector('a[href]') || e.closest('a[href]'));
+          var href = a?.getAttribute('href') || e.getAttribute('data-href') || e.getAttribute('data-url');
+          var url;
+          try { url = new URL(href, document.baseURI); } catch (err) { return null; }
+          if(url.origin !== location.origin) return null;
+          var name = (a?.textContent || e.textContent || '').replace(/\s+/g,' ').trim().toLowerCase();
+          if(!name) return null;
+          return {url:url.href,name:name};
+        }).filter(Boolean).filter(function(v, i, all) {
+          return all.findIndex(function(a){return a.url===v.url})===i;
+        });
+        var active = 0;
+        function valid(address) {
+          try {
+            var u = new URL(address, location.href);
+            return u.protocol==='https:' &&
+              !/(?:logo|blank|placeholder|no[-_]?photo|default[-_]?image|spacer|favicon|\/pixel)/i.test(u.pathname);
+          } catch(err) { return false; }
+        }
+        function imageOf(node, docUrl) {
+          if(!node) return '';
+          var values = [node.getAttribute('data-src'),node.getAttribute('data-original'),
+                        node.getAttribute('data-lazy-src'),node.getAttribute('src'),
+                        node.getAttribute('content')];
+          var background=node.getAttribute('style')||'';
+          var css=background.match(/background-image\s*:\s*url\(\s*['"]?([^)'"]+)/i);
+          if(css) values.unshift(css[1]);
+          for(var n=0;n<values.length;n++) {
+            if(!values[n])continue;
+            try {
+              var candidate=new URL(values[n],docUrl).href;
+              if(valid(candidate))return candidate;
+            } catch(err){}
+          }
+          return '';
+        }
+        function photoFromProfile(doc, base, personName) {
+          var title=(doc.title||'').replace(/\s+/g,' ').toLowerCase();
+          var normalized=personName.replace(/[ё]/g,'е');
+          if(!title.replace(/[ё]/g,'е').includes(normalized))return '';
+          var selectors=[
+             '.b-person__photo img','.b-person__poster img','.b-person__image img',
+             '.b-person__info img','.b-content__person img','.b-content__person_photo img',
+             '.b-profile__photo img','[itemprop="image"]',
+             '.b-post__poster img','.b-person img'
+          ];
+          for(var i=0;i<selectors.length;i++) {
+            var photo=imageOf(doc.querySelector(selectors[i]),base);
+            if(photo)return photo;
+          }
+          var meta=doc.querySelector('meta[property="og:image"]');
+          return imageOf(meta,base);
+        }
+        var index=0;
+        async function worker(){
+          while(index<targets.length) {
+            var person=targets[index++];
+            if(window.__kinoActorPhotos[person.url])continue;
+            var controller=new AbortController();
+            var cancel=setTimeout(function(){controller.abort()},3200);
+            try {
+              var response=await fetch(person.url,{
+                credentials:'same-origin',signal:controller.signal,
+                headers:{'Accept':'text/html'}
+              });
+              if(!response.ok || !response.url.startsWith(location.origin))continue;
+              var html=await response.text();
+              if(html.length>850000)continue;
+              var doc=new DOMParser().parseFromString(html,'text/html');
+              var photo=photoFromProfile(doc,response.url,person.name);
+              if(photo)window.__kinoActorPhotos[person.url]=photo;
+            } catch(err){} finally{clearTimeout(cancel);}
+          }
+        }
+        Promise.all([worker(),worker(),worker()]).then(function() {
+          window.__kinoActorPhotosDone=true;
+        });
+        return 'started';
+      })();
     """.trimIndent()
 
     fun parse(raw: String, source: String): FilmInfo? = runCatching {
@@ -201,20 +302,28 @@ internal fun FilmDetails(
                         !(host.equals(home, true) || host.endsWith(".$home", true))
                 }
                 override fun onPageFinished(view: WebView, url: String) {
-                    listOf(400L, 1400L, 3000L).forEachIndexed { index, delay ->
+                    // Keep this same-origin session alive briefly to resolve real actor profile portraits.
+                    view.evaluateJavascript(FilmPageParser.actorProfilePhotosJavascript) {}
+                    val delays = listOf(550L, 1700L, 3400L, 6200L, 8500L)
+                    delays.forEachIndexed { index, delay ->
                         handler.postDelayed({
                             if (view.url != url || loadDone) return@postDelayed
                             view.evaluateJavascript(FilmPageParser.javascript) { raw ->
+                                if (loadDone) return@evaluateJavascript
                                 val parsed = FilmPageParser.parse(raw, source)
                                 if (parsed != null &&
                                     (parsed.description.isNotBlank() || parsed.facts.isNotEmpty() ||
                                         parsed.cast.isNotEmpty())) {
-                                    info = parsed
-                                    FilmInfoMemory.put(movie.url, parsed)
-                                    loadDone = true
-                                } else if (index == 2) {
-                                    loadDone = true
+                                    if (info == null ||
+                                        parsed.cast.count { it.photo.isNotBlank() } >=
+                                        (info?.cast?.count { it.photo.isNotBlank() } ?: 0)) {
+                                        info = parsed
+                                        FilmInfoMemory.put(movie.url, parsed)
+                                    }
                                 }
+                                if (index == delays.lastIndex || parsed?.cast?.all {
+                                        it.photo.isNotBlank() || it.url.isBlank()
+                                    } == true) loadDone = true
                             }
                         }, delay)
                     }
@@ -354,8 +463,16 @@ internal fun FilmDetails(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (person.photo.isNotBlank()) {
-                                        AsyncImage(model = person.photo, contentDescription = person.name,
-                                            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context)
+                                                .data(person.photo)
+                                                .addHeader("Referer", source.trimEnd('/') + "/")
+                                                .addHeader("User-Agent", WebSettings.getDefaultUserAgent(context))
+                                                .build(),
+                                            contentDescription = person.name,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
                                     } else Icon(Icons.Outlined.Person, contentDescription = null,
                                         tint = appMuted, modifier = Modifier.size(38.dp))
                                 }
