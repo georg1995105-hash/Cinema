@@ -185,15 +185,29 @@ private fun CinemaApp() {
                         history.removeAll { it.url == url }
                         local.saveHistory(history.toList())
                     })
-                Page.SETTINGS -> SettingsScreen { page = it }
+                Page.SETTINGS -> SettingsScreen(
+                    open = { page = it },
+                    onAccount = {
+                        if (activeSource != null) {
+                            browsingSource = activeSource
+                            browseReturn = Page.SETTINGS
+                            page = Page.SITE
+                        } else {
+                            page = Page.SOURCES
+                        }
+                    }
+                )
                 Page.SOURCES -> SourcesScreen(sources, activeSource, ::saveSources,
                     { selected -> activeSource = selected; local.saveActiveSource(selected) }, ::back,
                     onBrowse = { browsingSource = it; browseReturn = Page.SOURCES; page = Page.SITE })
                 Page.PLAYER -> PlayerSettingsScreen(local, ::back) { page = Page.TEST }
                 Page.APPEARANCE -> AppearanceScreen(local, ::back)
                 Page.UPDATES -> UpdatesScreen()
-                Page.SITE -> BrowserScreen(browsingSource ?: activeSource.orEmpty(),
-                    onBack = { page = browseReturn })
+                Page.SITE -> BrowserScreen(
+                    browsingSource ?: activeSource.orEmpty(),
+                    onBack = { page = browseReturn },
+                    accountMode = browseReturn == Page.SETTINGS
+                )
                 Page.FILM_PLAYER -> MirrorNativePlayer(
                     filmUrl = browsingSource ?: selectedFilm?.url.orEmpty(),
                     filmTitle = selectedFilm?.title.orEmpty(),

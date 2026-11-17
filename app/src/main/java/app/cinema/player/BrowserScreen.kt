@@ -25,7 +25,7 @@ import java.net.URI
  * Does not bypass the site's access requirements or provide a native catalogue.
  */
 @Composable
-internal fun BrowserScreen(url: String, onBack: () -> Unit) {
+internal fun BrowserScreen(url: String, onBack: () -> Unit, accountMode: Boolean = false) {
     if (!SourceRules.isValidHttpsUrl(url)) {
         Column {
             ScreenHeading("Просмотр сайта", "Выберите зеркало в настройках", onBack)
@@ -101,13 +101,20 @@ internal fun BrowserScreen(url: String, onBack: () -> Unit) {
                 Icon(Icons.Outlined.ArrowBack, contentDescription = "Закрыть просмотр")
             }
             Column(Modifier.weight(1f)) {
-                Text("Гостевой просмотр", style = MaterialTheme.typography.titleMedium)
+                Text(if (accountMode) "Аккаунт зеркала" else "Просмотр сайта",
+                    style = MaterialTheme.typography.titleMedium)
                 Text(currentTitle, style = MaterialTheme.typography.bodySmall, color = appMuted, maxLines = 1)
             }
             IconButton(onClick = { webView.reload() }) {
                 Icon(Icons.Outlined.Refresh, contentDescription = "Обновить страницу")
             }
         }
+        if (accountMode) Text(
+            "Войдите в аккаунт на самом сайте. Пароли не сохраняются приложением. " +
+                "Авторизация и синхронизация истории зависят от возможностей зеркала.",
+            color = appMuted, style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+        )
         if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         if (message.isNotEmpty()) Text(message, color = MaterialTheme.colorScheme.error)
         AndroidView(

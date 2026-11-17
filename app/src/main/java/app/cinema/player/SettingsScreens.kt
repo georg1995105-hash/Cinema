@@ -18,10 +18,12 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun SettingsScreen(open: (Page) -> Unit) {
+internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         ScreenHeading("Настройки", "Только нужное")
         Spacer(Modifier.height(24.dp))
+        MenuItem("Аккаунт зеркала", "Войти на сайте или продолжить как гость",
+            Icons.Outlined.AccountCircle, onAccount)
         MenuItem("Источники и зеркала", "Добавление и проверка адресов", Icons.Outlined.Link) {
             open(Page.SOURCES)
         }
@@ -38,7 +40,7 @@ internal fun SettingsScreen(open: (Page) -> Unit) {
             open(Page.ABOUT)
         }
         Spacer(Modifier.height(18.dp))
-        Text("Вход в аккаунт не требуется. Гостевой режим включён.",
+        Text("Вход необязателен. Данные аккаунта вводятся на сайте выбранного зеркала.",
             color = appMuted, style = MaterialTheme.typography.bodySmall)
     }
 }
