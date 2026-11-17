@@ -79,7 +79,7 @@ jobs:
           mkdir -p app/src/androidTest/assets
           ffmpeg -hide_banner -loglevel error -f lavfi -i 'color=blue:size=160x120:rate=24' \
             -f lavfi -i 'anullsrc=channel_layout=mono:sample_rate=44100' -t 4 \
-            -c:v libx264 -pix_fmt yuv420p -c:a aac app/src/androidTest/assets/kino-test-video.mp4
+            -c:v libx264 -pix_fmt yuv420p -c:a aac -movflags +faststart app/src/androidTest/assets/kino-test-video.mp4
           gradle --no-daemon :app:connectedDebugAndroidTest
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -130,7 +130,9 @@ jobs:
           curl --fail --silent --show-error --location --retry 2 \
             "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.17/Kino-0.4.17.apk" \
             --output "$RUNNER_TEMP/Kino-0.4.17.apk"
-          adb uninstall app.cinema.player
+          if adb shell pm path app.cinema.player | grep -q "^package:"; then
+            adb uninstall app.cinema.player
+          fi
           adb install "$RUNNER_TEMP/Kino-0.4.17.apk"
           adb shell am start -W -n app.cinema.player/.MainActivity | grep -F "Status: ok"
           ORIGINAL_INSTALL="$(adb shell dumpsys package app.cinema.player | awk -F= '/firstInstallTime=/{print $2; exit}')"

@@ -6,6 +6,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -18,7 +19,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
@@ -244,8 +247,27 @@ class SourceFlowTest {
                 val filmPage = localUrl(mirror, "/films/drama/12-brigada.html").toString()
                 val cookies = android.webkit.CookieManager.getInstance()
                 cookies.setCookie(filmPage, "cinema_fixture=active; Path=/; Secure; Max-Age=120")
-                mirror.enqueue(MockResponse().setResponseCode(302).addHeader("Location", localUrl(cdn, "/clip.mp4").toString()))
-                cdn.enqueue(MockResponse().addHeader("Content-Type", "video/mp4").setBody(Buffer().write(clip)))
+                mirror.dispatcher = object : Dispatcher() {
+                    override fun dispatch(request: RecordedRequest) =
+                        MockResponse().setResponseCode(302)
+                            .addHeader("Location", localUrl(cdn, "/clip.mp4").toString())
+                }
+                cdn.dispatcher = object : Dispatcher() {
+                    override fun dispatch(request: RecordedRequest): MockResponse {
+                        val response = MockResponse().addHeader("Content-Type", "video/mp4")
+                            .addHeader("Accept-Ranges", "bytes")
+                        val range = request.getHeader("Range")
+                        if (range == null) return response.setBody(Buffer().write(clip))
+                        val bounds = Regex("""bytes=(\d+)-(\d*)""").matchEntire(range)
+                            ?: return response.setResponseCode(416)
+                        val start = bounds.groupValues[1].toIntOrNull() ?: return response.setResponseCode(416)
+                        val end = minOf(clip.lastIndex, bounds.groupValues[2].toIntOrNull() ?: clip.lastIndex)
+                        if (start > end) return response.setResponseCode(416)
+                        return response.setResponseCode(206)
+                            .addHeader("Content-Range", "bytes $start-$end/${clip.size}")
+                            .setBody(Buffer().write(clip, start, end - start + 1))
+                    }
+                }
                 val stream = MirrorMediaParser.parseQualityList("[720p]" + localUrl(mirror, "/stream.mp4")).single()
                 val client = MirrorHttp.client.newBuilder()
                     .sslSocketFactory(fixtureTrust.sslSocketFactory(), fixtureTrust.trustManager).build()
@@ -256,6 +278,7 @@ class SourceFlowTest {
                 val texture = android.graphics.SurfaceTexture(false)
                 val surface = android.view.Surface(texture)
                 var player: ExoPlayer? = null
+                val playbackError = java.util.concurrent.atomic.AtomicReference<PlaybackException>()
                 try {
                     instrumentation.runOnMainSync {
                         player = ExoPlayer.Builder(context)
@@ -267,14 +290,22 @@ class SourceFlowTest {
                                         if (isPlaying) playing.countDown()
                                     }
                                     override fun onRenderedFirstFrame() { frame.countDown() }
+                                    override fun onPlayerError(error: PlaybackException) {
+                                        playbackError.set(error)
+                                        playing.countDown()
+                                        frame.countDown()
+                                    }
                                 })
                                 setMediaItem(MediaItem.fromUri(stream.url))
                                 prepare()
                                 play()
                             }
                     }
-                    assertTrue("Media3 entered playing state", playing.await(20, TimeUnit.SECONDS))
+                    assertTrue("Media3 entered playing state. Requests: ${mirror.requestCount}/${cdn.requestCount}",
+                        playing.await(20, TimeUnit.SECONDS))
+                    playbackError.get()?.let { throw AssertionError("Media3 HTTPS playback failed", it) }
                     assertTrue("Media3 rendered a video frame", frame.await(15, TimeUnit.SECONDS))
+                    playbackError.get()?.let { throw AssertionError("Media3 HTTPS frame failed", it) }
                     Thread.sleep(700)
                     var position = 0L
                     instrumentation.runOnMainSync { position = requireNotNull(player).currentPosition }
