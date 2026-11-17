@@ -561,7 +561,6 @@ internal fun MirrorNativePlayer(
             onSaveSelection(PlaybackSelection(season, episode, voice, quality, oldPosition))
         }
         resumeMs = 0L
-        triedVoices.clear()
         season = target.season
         episode = target.id
         options = emptyList()
