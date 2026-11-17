@@ -105,6 +105,7 @@ private fun CinemaApp() {
         return
     }
     BackHandler(enabled = page != Page.HOME) { back() }
+    LaunchedEffect(Unit) { AppUpdates.check(context) }
 
     Scaffold(
         containerColor = appBackground,
@@ -168,6 +169,7 @@ private fun CinemaApp() {
             }
         }
     }
+    UpdateNotice()
 }
 
 @Composable
