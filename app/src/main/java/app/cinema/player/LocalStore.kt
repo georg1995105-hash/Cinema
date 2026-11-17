@@ -6,6 +6,15 @@ import org.json.JSONObject
 
 data class WatchedVideo(val url: String, val positionMs: Long)
 
+/** Playback state is stored only on the user's device and keyed by their own film URL. */
+data class PlaybackSelection(
+    val season: String = "",
+    val episode: String = "",
+    val voice: String = "",
+    val quality: String = "",
+    val positionMs: Long = 0L
+)
+
 class LocalStore(context: Context) {
     // Keep the same storage name so updates retain the previous history and mirror list.
     private val prefs = context.getSharedPreferences("cinema_local_v1", Context.MODE_PRIVATE)
@@ -58,4 +67,35 @@ class LocalStore(context: Context) {
         }
         prefs.edit().putString("watch_history", array.toString()).apply()
     }
+    fun playbackSelection(url: String): PlaybackSelection? = runCatching {
+        val json = JSONObject(prefs.getString("playback_selections_v2", "{}") ?: "{}")
+        val saved = json.optJSONObject(url) ?: return@runCatching null
+        PlaybackSelection(
+            season = saved.optString("season").take(6),
+            episode = saved.optString("episode").take(6),
+            voice = saved.optString("voice").take(15),
+            quality = saved.optString("quality").take(30),
+            positionMs = saved.optLong("positionMs", 0L).coerceAtLeast(0L)
+        )
+    }.getOrNull()
+
+    fun savePlaybackSelection(url: String, selection: PlaybackSelection) {
+        if (!SourceRules.isValidHttpsUrl(url)) return
+        val objectRoot = runCatching {
+            JSONObject(prefs.getString("playback_selections_v2", "{}") ?: "{}")
+        }.getOrDefault(JSONObject())
+        objectRoot.put(url, JSONObject()
+            .put("season", selection.season)
+            .put("episode", selection.episode)
+            .put("voice", selection.voice)
+            .put("quality", selection.quality)
+            .put("positionMs", selection.positionMs.coerceAtLeast(0L)))
+        // Bound persisted data; this is an on-device preference, never sync to public accounts.
+        if (objectRoot.length() > 100) {
+            val keys = objectRoot.keys().asSequence().toList()
+            keys.take(objectRoot.length() - 100).forEach(objectRoot::remove)
+        }
+        prefs.edit().putString("playback_selections_v2", objectRoot.toString()).apply()
+    }
+
 }
