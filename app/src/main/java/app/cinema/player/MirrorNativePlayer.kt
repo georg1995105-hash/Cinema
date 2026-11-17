@@ -308,8 +308,8 @@ internal fun MirrorNativePlayer(
         mutableIntStateOf(0)
     }
     val currentUrl = availableUrls.getOrNull(alternativeIndex)
-    val episodeKey = season + "/" + episode + "/" + voice + "/" + quality +
-        (if (anonymousRequest) "/guest" else "/session")
+    // Keep this key compatible with saved episode state and disposal checks.
+    val episodeKey = season + "/" + episode + "/" + voice + "/" + quality
     var playbackState by remember(currentUrl, episodeKey){mutableIntStateOf(Player.STATE_IDLE)}
     var playerIssue by remember(currentUrl, episodeKey){mutableStateOf("")}
     var position by remember(currentUrl, episodeKey){mutableLongStateOf(resumeMs)}
