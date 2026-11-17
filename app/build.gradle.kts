@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "app.cinema.player"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.cinema.player"
