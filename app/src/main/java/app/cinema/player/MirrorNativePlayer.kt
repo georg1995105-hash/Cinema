@@ -298,7 +298,7 @@ internal fun MirrorNativePlayer(
         mutableIntStateOf(0)
     }
     val currentUrl = availableUrls.getOrNull(alternativeIndex)
-    val episodeKey = season + "/" + episode + "/" + voice
+    val episodeKey = season + "/" + episode + "/" + voice + "/" + quality
     var playbackState by remember(currentUrl, episodeKey){mutableIntStateOf(Player.STATE_IDLE)}
     var playerIssue by remember(currentUrl, episodeKey){mutableStateOf("")}
     var position by remember(currentUrl, episodeKey){mutableLongStateOf(resumeMs)}
@@ -306,6 +306,15 @@ internal fun MirrorNativePlayer(
     var paused by remember(currentUrl, episodeKey){mutableStateOf(false)}
     var controls by remember {mutableStateOf(true)}
     var accelerated by remember {mutableStateOf(false)}
+    fun tryAnotherAvailableQuality(): Boolean {
+        val next = options.dropWhile { it.label != quality }.drop(1).firstOrNull()
+            ?: return false
+        resumeMs = 0L
+        quality = next.label
+        onSaveSelection(PlaybackSelection(season,episode,voice,next.label,0L))
+        message = "Пробуем доступное качество " + next.label
+        return true
+    }
     val player=remember(currentUrl, subtitleOptions, episodeKey){
         currentUrl?.let {streamUrl ->
             val http=DefaultHttpDataSource.Factory()
@@ -324,15 +333,19 @@ internal fun MirrorNativePlayer(
                                     if (alternativeIndex < availableUrls.lastIndex) {
                                         alternativeIndex++
                                         message="Проверяем другой доступный сервер"
-                                    } else {
-                                        playerIssue="Источник передал короткий ролик вместо полного видео. Проверьте другую доступную озвучку или качество."
+                                    } else if (!tryAnotherAvailableQuality()) {
+                                        playerIssue="Источник передал короткий ролик вместо полного видео. Проверьте другую доступную озвучку."
                                         pause()
                                     }
                                 }
                             }
                             if (state == Player.STATE_ENDED) {
                                 if (currentPosition < 150_000L) {
-                                    playerIssue="Источник завершил короткое видео. Выберите другой доступный вариант."
+                                    if (alternativeIndex < availableUrls.lastIndex) {
+                                        alternativeIndex++
+                                    } else if (!tryAnotherAvailableQuality()) {
+                                        playerIssue="Источник завершил короткий ролик. Полный поток недоступен."
+                                    }
                                 } else {
                                     endedCounter++
                                 }
@@ -342,7 +355,7 @@ internal fun MirrorNativePlayer(
                             if (alternativeIndex < availableUrls.lastIndex) {
                                 alternativeIndex++
                                 message="Пробуем другой доступный видеосервер"
-                            } else {
+                            } else if (!tryAnotherAvailableQuality()) {
                                 playerIssue="Ошибка воспроизведения: "+failure.errorCodeName
                             }
                         }
@@ -373,7 +386,7 @@ internal fun MirrorNativePlayer(
                 val ms=player.currentPosition.coerceAtLeast(0)
                 // Do not overwrite the next episode's position with the previous episode's end.
                 if (ms > 0 && EpisodeNavigator.canResumeDisposedStream(
-                    attachedEpisode, season + "/" + episode + "/" + voice)) {
+                    attachedEpisode, season + "/" + episode + "/" + voice + "/" + quality)) {
                     resumeMs = ms
                     onSave(ms)
                     onSaveSelection(PlaybackSelection(season, episode, voice, quality, ms))
