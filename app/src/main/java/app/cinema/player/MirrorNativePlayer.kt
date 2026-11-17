@@ -20,6 +20,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -34,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -457,6 +459,8 @@ internal fun MirrorNativePlayer(
     // All playback controls are overlaid on the video, including quality, audio and speed.
     var speed by remember { mutableFloatStateOf(1f) }
     val speeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
+    var draggingSeek by remember(player) { mutableStateOf(false) }
+    var dragFraction by remember(player) { mutableFloatStateOf(0f) }
     val pictureModes = listOf("По размеру", "Заполнить", "Растянуть")
     var pictureMode by remember { mutableStateOf("По размеру") }
     val hasSubtitles = subtitleOptions.isNotEmpty() ||
@@ -686,10 +690,23 @@ internal fun MirrorNativePlayer(
                     Text(formatVideoTime(position), color = Color.White,
                         style = MaterialTheme.typography.labelMedium)
                     Slider(
-                        value = if (total > 0L) (position.toFloat() / total).coerceIn(0f, 1f) else 0f,
-                        onValueChange = { if (total > 0L) player.seekTo((it * total).toLong()) },
+                        value = if (draggingSeek) dragFraction else
+                            if (total > 0L) (position.toFloat() / total).coerceIn(0f, 1f) else 0f,
+                        onValueChange = { dragFraction = it; draggingSeek = true },
+                        onValueChangeFinished = {
+                            if (total > 0L) player.seekTo((dragFraction * total).toLong())
+                            draggingSeek = false
+                        },
                         modifier = Modifier.weight(1f).height(28.dp)
-                            .padding(horizontal = 10.dp)
+                            .padding(horizontal = 10.dp),
+                        colors = SliderDefaults.colors(
+                            thumbColor = appBlue,
+                            activeTrackColor = appBlue,
+                            inactiveTrackColor = Color.White.copy(alpha = .35f)
+                        ),
+                        thumb = {
+                            Box(Modifier.size(12.dp).clip(CircleShape).background(appBlue))
+                        }
                     )
                     Text(if (total > 0L) formatVideoTime(total) else "—:—",
                         color = Color.White, style = MaterialTheme.typography.labelMedium)
@@ -700,8 +717,8 @@ internal fun MirrorNativePlayer(
                         }
                     }
                 }
-                // Quality, voice, speed and episodes are all in the single player menu.
-                // No duplicated rows of oversized player controls below the seekbar.
+                // Quality, voice, speed and episodes are in the top-right player menu.
+                // No duplicated seekbar actions or oversized secondary toolbar.
             }
         }
         // Player settings are part of the same immersive screen, not a separate modal window.
