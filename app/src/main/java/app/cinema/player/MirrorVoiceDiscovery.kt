@@ -7,10 +7,10 @@ package app.cinema.player
 internal object MirrorVoiceDiscovery {
     val javascript = """
     function kinoDiscoverVoices() {
-      function clean(s) { return String(s || '').replace(/\\s+/g,' ').trim(); }
+      function clean(s) { return String(s || '').replace(/\s+/g,' ').trim(); }
       function numeric(v) {
         var s=String(v||'').trim();
-        return /^\\d{1,12}$/.test(s) ? s : '';
+        return /^\d{1,12}$/.test(s) ? s : '';
       }
       var selectors=[
         '#translators-list [data-translator_id]',
