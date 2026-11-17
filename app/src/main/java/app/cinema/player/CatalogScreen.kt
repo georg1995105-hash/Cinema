@@ -127,26 +127,35 @@ internal object MirrorCatalog {
         if (MirrorPoster.isPhoto(primary) && primary !in this) add(primary)
     }
 
-    val javascript = """
-        (function() {
-          ${MirrorPoster.javascript}
-          var nodes = Array.from(document.querySelectorAll(
+    val cardsJavascript = """
+        ${MirrorPoster.javascript}
+        function kinoCatalogCards(doc, base, origin) {
+          var nodes = Array.from(doc.querySelectorAll(
             '.b-content__inline_item, .b-content__list_item, .b-content__item'
           )).slice(0,96);
-          var cards = nodes.flatMap(function(item) {
+          return nodes.flatMap(function(item) {
             var link = item.querySelector('.b-content__inline_item-link');
             var a = link?.matches('a[href]') ? link : link?.querySelector('a[href]');
-            a = a || item.querySelector('a[href*="/films/"], a[href*="/series/"], a[href*="/cartoons/"], a[href*="/animation/"]');
-            if (!a) return [];
-            var url = new URL(a.getAttribute('href'), document.baseURI);
-            if (url.origin !== location.origin || !/\/\d{1,12}-[^/]+\.html$/i.test(url.pathname)) return [];
             var cover = item.querySelector('.b-content__inline_item-cover') || item.querySelector('img');
-            var name = (a.textContent || a.getAttribute('title') || '').replace(/\s+/g,' ').trim();
+            var address = a?.getAttribute('href') || item.getAttribute('data-url') ||
+                cover?.querySelector('a[href]')?.getAttribute('href');
+            if (!address) return [];
+            var url;
+            try { url = new URL(address, base); } catch(e) { return []; }
+            if (url.origin !== origin || !/\/\d{1,12}-[^/]+\.html$/i.test(url.pathname)) return [];
+            var name = (a?.textContent || a?.getAttribute('title') ||
+                cover?.querySelector('img[alt]')?.getAttribute('alt') || '').replace(/\s+/g,' ').trim();
             var data = link?.querySelector('div');
-            return name ? [{url:url.href,title:name,posters:kinoPosters(cover,document.baseURI),
+            return name ? [{url:url.href,title:name,posters:kinoPosters(cover,base),
                             details:data?.textContent.trim() || ''}] : [];
           });
-          return JSON.stringify({cards:cards});
+        }
+    """.trimIndent()
+
+    val javascript = """
+        (function() {
+          $cardsJavascript
+          return JSON.stringify({cards:kinoCatalogCards(document,document.baseURI,location.origin)});
         })();
     """.trimIndent()
 
@@ -281,36 +290,28 @@ internal fun CatalogGrid(
                         }
                     }
 
-                    fun completeSearch(matches: List<CatalogMovie>) {
-                        if (matches.isEmpty() || matches.all { it.poster.isNotBlank() }) {
-                            finish(matches)
-                            return
-                        }
-                        view.evaluateJavascript(MirrorQuickSearch.postersJavascript(matches)) {
-                            poll("window.__kinoSearchPosters || null", 16) { raw ->
-                                finish(raw?.let { MirrorQuickSearch.mergePosters(it, matches) } ?: matches)
+                    fun mergeResults(primary: List<CatalogMovie>, extra: List<CatalogMovie>): List<CatalogMovie> {
+                        val merged = (primary + extra).groupBy { MirrorPostId.fromUrl(it.url) ?: it.url }
+                            .values.map { entries ->
+                                val first = entries.first()
+                                val photos = entries.flatMap { listOf(it.poster) + it.posterAlternatives }
+                                    .filter(String::isNotBlank).distinct()
+                                first.copy(poster = photos.firstOrNull().orEmpty(),
+                                    posterAlternatives = photos.drop(1),
+                                    details = entries.firstOrNull { it.details.isNotBlank() }?.details.orEmpty())
                             }
-                        }
+                        return SearchRelevance.find(merged, searchText)
                     }
 
                     fun quickSearch(existing: List<CatalogMovie>) {
                         view.evaluateJavascript(MirrorQuickSearch.javascript(searchText)) {
-                            poll("window.__kinoQuickSearchResult || null", 19) { raw ->
+                            poll("window.__kinoQuickSearchResult || null", 32) { raw ->
                                 val quick = raw?.let { MirrorCatalog.parse(it, source) }.orEmpty()
-                                val merged = (existing + quick).groupBy { MirrorPostId.fromUrl(it.url) ?: it.url }
-                                    .values.map { entries ->
-                                        val first = entries.first()
-                                        val photos = entries.flatMap { listOf(it.poster) + it.posterAlternatives }
-                                            .filter(String::isNotBlank).distinct()
-                                        first.copy(poster = photos.firstOrNull().orEmpty(),
-                                            posterAlternatives = photos.drop(1),
-                                            details = entries.firstOrNull { it.details.isNotBlank() }?.details.orEmpty())
-                                    }
-                                val matches = SearchRelevance.find(merged, searchText)
+                                val matches = mergeResults(existing, quick)
                                 if (matches.isEmpty() && (raw == null ||
                                         MirrorMediaParser.objectFromWebView(raw)?.optBoolean("failed") == true)) {
                                     finish(emptyList(), "Не удалось получить ответ поиска от зеркала.")
-                                } else completeSearch(matches)
+                                } else finish(matches)
                             }
                         }
                     }

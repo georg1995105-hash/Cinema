@@ -67,13 +67,15 @@ internal val mirrorPlayerMetadataJavascript = """
 (function(){
     ${MirrorVoiceDiscovery.javascript}
     ${MirrorVoiceDiscovery.episodesJavascript}
+    ${MirrorPreview.runtimeJavascript}
     var data = kinoPlayerMetadata();
-    var blocked = /captcha|checking your browser|access denied|verify you are human|just a moment/i
-      .test(document.title || '') || !!document.querySelector('#challenge-form, .cf-turnstile');
+    var blocked = /captcha|checking your browser|access denied|verify you are human|just a moment|проверяем.{0,30}не бот/i
+      .test(document.title || '') || !!document.querySelector('#challenge-form, .cf-turnstile, #anubis_challenge');
     var root = document.querySelector('#cdnplayer, #cdnplayer-container, .b-post__player');
-    var gate = root?.querySelector('.b-player__premium, [data-access="premium"], [data-access="login"]');
-    data.pageState = blocked ? 'protected' : gate?.getAttribute('data-access') === 'login' ? 'login' :
-        gate ? 'premium' : data.defaultVoice || data.voices.length ? 'ready' : 'missing-metadata';
+    var access = root?.getAttribute('data-access');
+    data.pageState = blocked ? 'protected' : access === 'login' ? 'login' : access === 'premium' ? 'premium' :
+        data.defaultVoice || data.voices.length ? 'ready' : root?.querySelector('.b-player__premium') ? 'premium' : 'missing-metadata';
+    data.runtime = kinoFilmRuntime();
     data.episodes = kinoEpisodes(document);
     data.favs = (document.querySelector('#favs, input[name="favs"]')?.value ||
         document.querySelector('[data-favs]')?.getAttribute('data-favs') || '').trim();
@@ -270,7 +272,13 @@ internal fun MirrorNativePlayer(
                                     movie = parsed
                                     voice = savedSelection?.voice?.takeIf { saved ->
                                         saved == parsed.defaultVoice || parsed.voices.any { it.id == saved }
-                                    } ?: parsed.defaultVoice.ifBlank { parsed.voices.first().id }
+                                    } ?: parsed.defaultVoice.takeUnless { id ->
+                                        parsed.voices.any { it.id == id && it.requiresSubscription } &&
+                                            parsed.voices.any { !it.requiresSubscription }
+                                    }.orEmpty().ifBlank {
+                                        parsed.voices.firstOrNull { !it.requiresSubscription }?.id
+                                            ?: parsed.voices.first().id
+                                    }
                                     if (voice == parsed.defaultVoice || parsed.voices.size == 1) episodes = parsed.episodes
                                     val chosen = episodes.firstOrNull {
                                         it.season == savedSelection?.season && it.id == savedSelection?.episode
@@ -324,7 +332,7 @@ internal fun MirrorNativePlayer(
     // Attempt distinct source-provided translators in a bounded sequence.
     // No guessed translation IDs, proxy impersonation or paid stream unlocking.
     val triedVoices=remember(filmUrl, movie?.id){ mutableStateListOf<String>() }
-    val voiceAvailability = remember(filmUrl) { mutableStateMapOf<Triple<String, String, String>, Boolean>() }
+    val voiceAvailability = remember(filmUrl) { mutableStateMapOf<Triple<String, String, String>, VoiceAvailability>() }
     fun voiceKey(id: String) = Triple(season, episode, id)
     fun tryNextVoice(): Boolean {
         val available=movie?.voices.orEmpty()
@@ -351,6 +359,7 @@ internal fun MirrorNativePlayer(
         ))
         val response = raw?.let(MirrorMediaParser::objectFromWebView)
         val failure = response?.let(MirrorMediaParser::responseFailure)
+        failure?.voiceAvailability()?.let { voiceAvailability[voiceKey(voice)] = it }
         val incoming = MirrorMediaParser.parseEpisodes(response?.optJSONArray("__kinoEpisodes"))
         val listed = when {
             failure != null -> emptyList()
@@ -392,9 +401,7 @@ internal fun MirrorNativePlayer(
         val streams = result?.let(MirrorMediaParser::parseStreamInfo)
             ?: MirrorStreamInfo(emptyList(), failure = PlaybackFailure.TIMEOUT)
         if (streams.qualities.isEmpty()) {
-            if (streams.failure in setOf(PlaybackFailure.UNAVAILABLE, PlaybackFailure.PREMIUM, PlaybackFailure.DRM)) {
-                voiceAvailability[voiceKey(voice)] = false
-            }
+            streams.failure?.voiceAvailability()?.let { voiceAvailability[voiceKey(voice)] = it }
             if (streams.failure == PlaybackFailure.UNAVAILABLE && tryNextVoice()) return@LaunchedEffect
             message = ""
             error = streams.failure?.text ?: PlaybackFailure.UNAVAILABLE.text
@@ -416,6 +423,7 @@ internal fun MirrorNativePlayer(
     val episodeKey = season + "/" + episode + "/" + voice + "/" + quality
     var playbackState by remember(currentUrl, episodeKey){mutableIntStateOf(Player.STATE_IDLE)}
     var playerIssue by remember(currentUrl, episodeKey){mutableStateOf("")}
+    var acceptedStream by remember(currentUrl, episodeKey) { mutableStateOf(false) }
     var position by remember(currentUrl, episodeKey){mutableLongStateOf(resumeMs)}
     var total by remember(currentUrl, episodeKey){mutableLongStateOf(0L)}
     var paused by remember(currentUrl, episodeKey){mutableStateOf(false)}
@@ -430,6 +438,8 @@ internal fun MirrorNativePlayer(
     }
     val player=remember(currentUrl, subtitleOptions, episodeKey){
         currentUrl?.let {streamUrl ->
+            val attempt = voiceKey(voice)
+            val expectedDuration = movie?.expectedDurationMs
             val http = OkHttpDataSource.Factory(MirrorHttp.client)
                 .setUserAgent(WebSettings.getDefaultUserAgent(context))
                 .setDefaultRequestProperties(mapOf("Referer" to pageUrl))
@@ -440,10 +450,27 @@ internal fun MirrorNativePlayer(
                     addListener(object:Player.Listener {
                         override fun onPlaybackStateChanged(state:Int){
                             playbackState=state
-                            if (state == Player.STATE_READY) {
-                                voiceAvailability[voiceKey(voice)] = true
+                            if (state == Player.STATE_READY && !acceptedStream) {
+                                if (MirrorPreview.isPreview(duration, expectedDuration)) {
+                                    pause()
+                                    if (alternativeIndex < availableUrls.lastIndex) {
+                                        alternativeIndex++
+                                        message = "Проверяем другой поток этой озвучки"
+                                    } else if (!tryAnotherAvailableQuality()) {
+                                        voiceAvailability[attempt] = VoiceAvailability.PREVIEW
+                                        playerIssue = PlaybackFailure.PREVIEW.text
+                                    }
+                                    return
+                                }
+                                acceptedStream = true
+                                voiceAvailability[attempt] = VoiceAvailability.AVAILABLE
+                                if (resumeMs > 0) {
+                                    val position = if (duration > 0) resumeMs.coerceAtMost(duration) else resumeMs
+                                    seekTo(position)
+                                }
+                                playWhenReady = true
                             }
-                            if (state == Player.STATE_ENDED) endedCounter++
+                            if (state == Player.STATE_ENDED && acceptedStream) endedCounter++
                         }
 
                         override fun onPlayerError(failure: PlaybackException) {
@@ -459,7 +486,7 @@ internal fun MirrorNativePlayer(
                             if (reason in setOf(PlaybackFailure.AUTH_REQUIRED, PlaybackFailure.BLOCKED,
                                     PlaybackFailure.PREMIUM, PlaybackFailure.DRM)) {
                                 if (reason == PlaybackFailure.PREMIUM || reason == PlaybackFailure.DRM) {
-                                    voiceAvailability[voiceKey(voice)] = false
+                                    reason?.voiceAvailability()?.let { voiceAvailability[attempt] = it }
                                 }
                                 playerIssue = requireNotNull(reason).text
                             } else if (alternativeIndex < availableUrls.lastIndex) {
@@ -467,7 +494,7 @@ internal fun MirrorNativePlayer(
                                 alternativeIndex++
                                 message = "Пробуем другой доступный видеосервер"
                             } else if (!tryAnotherAvailableQuality()) {
-                                if (reason == PlaybackFailure.UNAVAILABLE) voiceAvailability[voiceKey(voice)] = false
+                                reason?.voiceAvailability()?.let { voiceAvailability[attempt] = it }
                                 playerIssue = reason?.text ?: "Не удалось воспроизвести поток: " + failure.errorCodeName
                             }
                         }
@@ -486,8 +513,6 @@ internal fun MirrorNativePlayer(
                             if(streamUrl.contains(".m3u8",true)) setMimeType(MimeTypes.APPLICATION_M3U8)
                         }.build())
                     prepare()
-                    if(resumeMs>0)seekTo(resumeMs)
-                    playWhenReady=true
                 }
         }
     }
@@ -497,7 +522,7 @@ internal fun MirrorNativePlayer(
             if (player != null) {
                 val ms=player.currentPosition.coerceAtLeast(0)
                 // Do not overwrite the next episode's position with the previous episode's end.
-                if (player.duration > 0 && ms > 0 &&
+                if (acceptedStream && player.duration > 0 && ms > 0 &&
                     EpisodeNavigator.canResumeDisposedStream(
                     attachedEpisode, season + "/" + episode + "/" + voice + "/" + quality)) {
                     resumeMs = ms
@@ -523,7 +548,7 @@ internal fun MirrorNativePlayer(
             while (true) {
                 position = player.currentPosition.coerceAtLeast(0)
                 total = player.duration.coerceAtLeast(0)
-                if (total > 0 && position > 0 &&
+                if (acceptedStream && total > 0 && position > 0 &&
                     (checkpoint < 0 ||
                         kotlin.math.abs(position - checkpoint) >= 5000L)) {
                     onSave(position)
@@ -594,7 +619,7 @@ internal fun MirrorNativePlayer(
     }
     LaunchedEffect(player, speed) { player?.setPlaybackSpeed(speed) }
     LaunchedEffect(player, controls, showSettings, paused, accelerated) {
-        if (player != null && controls && !showSettings && !paused && !accelerated) {
+        if (player != null && acceptedStream && controls && !showSettings && !paused && !accelerated) {
             delay(4800)
             controls = false
         }
@@ -618,7 +643,7 @@ internal fun MirrorNativePlayer(
                         }
                     }
                 },
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().alpha(if (acceptedStream) 1f else 0f),
                 update = {
                     it.player = player
                     it.resizeMode = when (pictureMode) {
@@ -628,7 +653,7 @@ internal fun MirrorNativePlayer(
                     }
                 }
             )
-            Box(
+            if (acceptedStream) Box(
                 Modifier.fillMaxSize()
                     .pointerInput(player, seekSeconds, holdSpeed) {
                     detectTapGestures(
@@ -678,9 +703,15 @@ internal fun MirrorNativePlayer(
                         tint = appMuted, modifier = Modifier.size(38.dp))
                     Text(error.ifBlank { "Нет доступного видеопотока" },
                         color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                    if ((movie?.voices?.size ?: 0) > 1) {
+                        TextButton(onClick = {
+                            settingsSection = "Озвучка"
+                            showSettings = true
+                        }) { Text("Выбрать озвучку") }
+                    }
                 }
             }
-        } else if (playbackState == Player.STATE_BUFFERING) {
+        } else if (playerIssue.isBlank() && (!acceptedStream || playbackState == Player.STATE_BUFFERING)) {
             CircularProgressIndicator(
                 color = appBlue, modifier = Modifier.align(Alignment.Center).size(30.dp)
             )
@@ -739,7 +770,7 @@ internal fun MirrorNativePlayer(
                 }
             }
         }
-        if (player != null && controls && playerIssue.isBlank()) {
+        if (player != null && acceptedStream && controls && playerIssue.isBlank()) {
             Row(
                 modifier = Modifier.align(Alignment.Center),
                 verticalAlignment = Alignment.CenterVertically,
@@ -789,13 +820,13 @@ internal fun MirrorNativePlayer(
                         style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(9.dp))
                     TextButton(onClick = {
-                        settingsSection = "Настройки"
+                        settingsSection = "Озвучка"
                         showSettings = true
-                    }) { Text("Другой доступный вариант") }
+                    }) { Text("Выбрать озвучку") }
                 }
             }
         }
-        if (player != null && controls) {
+        if (player != null && acceptedStream && controls) {
             Column(
                 modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .background(Color.Black.copy(alpha = .64f))
@@ -992,12 +1023,10 @@ internal fun MirrorNativePlayer(
                                 style = MaterialTheme.typography.bodyMedium)
                             if (settingsSection == "Озвучка") {
                                 val candidate = movie?.voices?.getOrNull(index)
-                                val available = candidate?.let { voiceAvailability[voiceKey(it.id)] }
-                                Text(when (available) {
-                                    true -> "Доступна"
-                                    false -> "Недоступна"
-                                    null -> "Не проверена"
-                                }, color = if (available == true) appBlue else appMuted,
+                                val availability = candidate?.let { voiceAvailability[voiceKey(it.id)] }
+                                val status = availability?.label
+                                    ?: if (candidate?.requiresSubscription == true) "Подписка" else "Не проверена"
+                                Text(status, color = if (availability == VoiceAvailability.AVAILABLE) appBlue else appMuted,
                                     style = MaterialTheme.typography.labelSmall)
                                 Spacer(Modifier.width(6.dp))
                             }

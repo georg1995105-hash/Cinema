@@ -89,8 +89,11 @@ class SourceFlowTest {
               '<div class="b-search__live_section"><ul><li><a href="/series/drama/12-brigada.html"><span class="enty">Бригада</span><small>2002, Россия, Драмы</small><img src="/static/hdrezka.png"></a></li><li><a href="/films/drama/99-other.html"><span class="enty">Другой фильм</span></a></li></ul></div>' : '<div class="b-search__live_section"><ul><li><a href="/films/drama/99-other.html"><span class="enty">Другой фильм</span></a></li></ul></div>';
             return {ok:true, url:address.href, text:async()=>html};
           }
-          return {ok:true, url:location.origin + '/series/drama/12-canonical.html',
-            text:async()=>'<div class="b-post__poster"><img src="/static/hdrezka.png" data-src="/posters/12.jpg"></div>'};
+          if (address.pathname === '/search/') {
+            const listing = '<div class="b-content__inline_item" data-url="/series/drama/12-brigada.html"><div class="b-content__inline_item-cover"><a href="/series/drama/12-brigada.html"><img src="//source.example/posters/12.jpg" alt="Бригада"></a></div><div class="b-content__inline_item-link"><a href="/series/drama/12-brigada.html">Бригада</a><div>2002, Россия, Драмы</div></div></div>';
+            return {ok:true, url:address.href, text:async()=>listing};
+          }
+          throw Error('unexpected film page request');
         };
         </script>
         """.trimIndent()
@@ -102,11 +105,9 @@ class SourceFlowTest {
         assertEquals("Бригада", matches.single().title)
         assertEquals(film, matches.single().url)
         assertEquals("2002, Россия, Драмы", matches.single().details)
-        assertTrue(matches.single().poster.isBlank())
-        evaluate(web, MirrorQuickSearch.postersJavascript(matches))
-        val resolved = MirrorQuickSearch.mergePosters(poll(web, "window.__kinoSearchPosters || null"), matches)
-        assertEquals("$origin/posters/12.jpg", resolved.single().poster)
+        assertEquals("$origin/posters/12.jpg", matches.single().poster)
         assertEquals("3", evaluate(web, "window.calls.length"))
+        assertEquals("true", evaluate(web, "window.calls[2].startsWith('/search/')"))
     }
 
     @Test fun filmDetailsUseOnlyTheCurrentTitlePlotPeopleAndRelations() = withPage(
@@ -118,10 +119,13 @@ class SourceFlowTest {
         <script type="application/ld+json">{"@graph":[
           {"@type":"WebSite","name":"Реклама","description":"Ложное описание"},
           {"@type":"TVSeries","name":"Другое","url":"/series/13-other.html","description":"Чужое описание"},
-          {"@type":"TVSeries","name":"Бригада","url":"/series/drama/12-brigada.html","description":"История четырёх друзей."}
+          {"@type":"TVSeries","name":"Бригада","url":"/series/drama/12-brigada.html","description":"История четырёх друзей.",
+           "actor":[{"@type":"Person","name":"Вторая актриса","url":"/person/41-actor.html","image":"/photos/41.jpg"}]}
         ]}</script>
         <table class="b-post__infotable">
-          <tr><td>В ролях:</td><td><a href="/person/12-actor.html">Актёр</a></td></tr>
+          <tr><th>В главных ролях</th><td><span class="person-name-item" itemprop="actors">
+          <a href="/person/12-actor.html"><span itemprop="name">Актёр</span></a>
+          <meta itemprop="image" content="/photos/12.jpg"></span></td></tr>
           <tr><td>Режиссёр:</td><td><a href="/person/13-director.html">Режиссёр</a></td></tr>
           <tr><td>Композитор:</td><td>Композитор</td></tr>
         </table>
@@ -136,7 +140,8 @@ class SourceFlowTest {
         assertEquals("Бригада", info.title)
         assertEquals("История четырёх друзей.", info.description)
         assertEquals("$origin/posters/12.jpg", info.posters.single())
-        assertEquals("Актёр", info.cast.single().name)
+        assertEquals(mapOf("Актёр" to "$origin/photos/12.jpg", "Вторая актриса" to "$origin/photos/41.jpg"),
+            info.cast.associate { it.name to it.photo })
         assertEquals("Режиссёр", info.directors.single().name)
         assertEquals("Бригада: Наследник", info.related.single().title)
     }
@@ -145,7 +150,8 @@ class SourceFlowTest {
         """
         <script type="application/x-fixture">sof.tv.initCDNSeriesEvents(12, 7, 0, 1, 0);</script>
         <ul id="translators-list"><li data-translator_id="7" class="active">Оригинал</li>
-        <li data-translator-id="8" data-ads="0">Дубляж</li></ul>
+        <li data-translator-id="8" data-ads="0" data-premium="1">Дубляж</li></ul>
+        <table class="b-post__infotable"><tr><th>Время</th><td>43 мин.</td></tr></table>
         <input id="favs" value="fixture-token">
         <script>
         window.fetch = async function(url, request) {
@@ -169,6 +175,10 @@ class SourceFlowTest {
         assertEquals("12", page.id)
         assertEquals(listOf("Оригинал", "Дубляж"), page.voices.map(MirrorVoice::name))
         assertEquals("7", page.defaultVoice)
+        assertEquals(2_580_000L, page.expectedDurationMs)
+        assertTrue(MirrorPreview.isPreview(60_000, page.expectedDurationMs))
+        assertFalse(page.voices.first().requiresSubscription)
+        assertTrue(page.voices.last().requiresSubscription)
         val episodes = runBlocking {
             withContext(Dispatchers.Main) {
                 mirrorAjax(web, film, mapOf("action" to "get_episodes", "id" to page.id, "translator_id" to page.defaultVoice))

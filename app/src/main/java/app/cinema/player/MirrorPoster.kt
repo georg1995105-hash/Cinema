@@ -26,7 +26,7 @@ internal object MirrorPoster {
           }
           if (!node) return results;
           var images = node.matches('img,meta,source') ? [node] :
-            [node, ...node.querySelectorAll('img, picture source')];
+            [node, ...node.querySelectorAll('img, picture source, meta[itemprop~="image"], link[itemprop~="image"]')];
           for (var img of images) {
             for (var attr of ['data-src', 'data-original', 'data-lazy-src', 'data-image',
                              'data-url', 'data-bg', 'data-background', 'data-cover']) {
@@ -39,10 +39,11 @@ internal object MirrorPoster {
             }
             var background = (img.getAttribute('style') || '').match(/url\(\s*(['"]?)(.*?)\1\s*\)/i);
             if (background) add(background[2]);
-            if (img.matches('img,meta,source')) {
+            if (img.matches('img,meta,source,link')) {
               add(img.currentSrc);
               add(img.getAttribute('src'));
               add(img.getAttribute('content'));
+              if (img.matches('link[itemprop~="image"]')) add(img.getAttribute('href'));
             }
           }
           var noscript = node.querySelector('noscript');

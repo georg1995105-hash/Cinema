@@ -32,7 +32,10 @@ internal object MirrorVoiceDiscovery {
         var voiceId = id(attr(['data-translator_id','data-translator-id','data-translation-id','data-id']) ||
             (node.tagName === 'OPTION' ? node.value : ''));
         if (!voiceId) continue;
-        var name = clean(attr(['data-title','title']) || row.textContent).slice(0,75);
+        var name = clean(attr(['data-title']) || row.textContent || attr(['title'])).slice(0,75);
+        var requiresSubscription = /^(?:1|true|premium)$/i.test(attr(['data-premium','data-is-premium','data-access'])) ||
+          attrs.some(function(e) {return e.matches('.b-translator__premium, [data-premium="1"], [data-access="premium"]')}) ||
+          !!row.querySelector('.b-translator__premium, [data-premium="1"], [data-access="premium"]');
         function flag(names, index) {
           var explicit = attr(names);
           if (/^[01]$/.test(explicit)) return Number(explicit);
@@ -42,7 +45,8 @@ internal object MirrorVoiceDiscovery {
           voices.push({id:voiceId, name:name,
             isCamrip:flag(['data-camrip','data-is-camrip','data-is_camrip'],4),
             isAds:flag(['data-ads','data-is-ads','data-is_ads'],5),
-            isDirector:flag(['data-director','data-is-director','data-is_director'],6)});
+            isDirector:flag(['data-director','data-is-director','data-is_director'],6),
+            requiresSubscription:requiresSubscription});
         }
         if (attrs.some(function(e) {
           return e.matches('.active, .selected, :checked, [aria-selected="true"]');

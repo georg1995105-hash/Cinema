@@ -23,7 +23,7 @@ internal object SearchRelevance {
         val q = normalized(query)
         if (q.isBlank()) return movies
         val forms = listOf(q) + alternateQuery(q).map(::normalized)
-        return movies.mapNotNull { movie ->
+        val ranked = movies.mapNotNull { movie ->
             val title = normalized(CatalogTitleCleaner.clean(movie.title, movie.details))
             val score = forms.mapIndexedNotNull { index, form ->
                 val match = when {
@@ -36,7 +36,10 @@ internal object SearchRelevance {
                 match + index
             }.minOrNull() ?: return@mapNotNull null
             score to movie
-        }.sortedWith(compareBy<Pair<Int, CatalogMovie>> { it.first }
+        }
+        val wholeWordMatches = ranked.any { it.first < 6 }
+        return ranked.filter { !wholeWordMatches || it.first < 6 }
+            .sortedWith(compareBy<Pair<Int, CatalogMovie>> { it.first }
             .thenBy { it.second.title.length })
             .map { it.second }
             .distinctBy { MirrorPostId.fromUrl(it.url)?.let { id -> URI(it.url).authority + "/" + id } ?: it.url }
