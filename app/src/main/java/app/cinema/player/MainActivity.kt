@@ -378,7 +378,8 @@ private fun HomeScreen(
                 cardsPerRow = cardsPerRow,
                 onOpen = onOpenFilm,
                 onBrowse = onBrowse,
-                onAddSource = onAddSource
+                onAddSource = onAddSource,
+                loadContent = pager.currentPage == index
             )
         }
     }

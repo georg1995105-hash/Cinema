@@ -45,6 +45,27 @@ internal data class CatalogMovie(
     val details: String
 )
 
+/** A bounded in-memory catalogue cache; no user credentials or cookies are persisted. */
+internal object CatalogMemory {
+    private data class Entry(val timestamp: Long, val movies: List<CatalogMovie>)
+    private val values = object : LinkedHashMap<String, Entry>(12, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Entry>?): Boolean =
+            size > 12
+    }
+    @Synchronized fun get(key: String): List<CatalogMovie>? {
+        val entry = values[key] ?: return null
+        if (System.currentTimeMillis() - entry.timestamp > 10 * 60 * 1000L) {
+            values.remove(key)
+            return null
+        }
+        return entry.movies
+    }
+    @Synchronized fun put(key: String, data: List<CatalogMovie>) {
+        if (data.isNotEmpty()) values[key] = Entry(System.currentTimeMillis(), data)
+    }
+    @Synchronized fun invalidate(key: String) { values.remove(key) }
+}
+
 /** Reads public catalogue metadata from a mirror chosen by the user, not video streams. */
 internal object MirrorCatalog {
     private val sections = mapOf(
@@ -120,7 +141,8 @@ internal fun CatalogGrid(
     cardsPerRow: Int,
     onOpen: (CatalogMovie) -> Unit,
     onBrowse: (String) -> Unit,
-    onAddSource: () -> Unit
+    onAddSource: () -> Unit,
+    loadContent: Boolean = true
 ) {
     if (source == null || !SourceRules.isValidHttpsUrl(source)) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -144,10 +166,13 @@ internal fun CatalogGrid(
     val requestUrl = remember(source, section, kind) {
         MirrorCatalog.requestUrl(source, section, kind)
     }
-    var movies by remember(requestUrl, attempt) { mutableStateOf<List<CatalogMovie>>(emptyList()) }
-    var pending by remember(requestUrl, attempt) { mutableStateOf(true) }
+    val cacheKey = requestUrl
+    var movies by remember(requestUrl, attempt) {
+        mutableStateOf(if (attempt == 0) CatalogMemory.get(cacheKey).orEmpty() else emptyList())
+    }
+    var pending by remember(requestUrl, attempt) { mutableStateOf(movies.isEmpty()) }
     var problem by remember(requestUrl, attempt) { mutableStateOf("") }
-    val browser = remember(context, requestUrl, attempt) {
+    val browser = if (loadContent && pending && movies.isEmpty()) remember(context, requestUrl, attempt) {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
             settings.javaScriptEnabled = true
@@ -184,6 +209,7 @@ internal fun CatalogGrid(
                                 val extracted = MirrorCatalog.parse(raw, source)
                                 if (extracted.isNotEmpty()) {
                                     movies = extracted
+                                    CatalogMemory.put(cacheKey, extracted)
                                     pending = false
                                     problem = ""
                                 } else if (index == delays.lastIndex) {
@@ -198,23 +224,23 @@ internal fun CatalogGrid(
             setTag(handler)
             loadUrl(requestUrl)
         }
-    }
+    } else null
     DisposableEffect(browser) {
         onDispose {
-            (browser.tag as? Handler)?.removeCallbacksAndMessages(null)
-            browser.stopLoading()
-            browser.destroy()
+            (browser?.tag as? Handler)?.removeCallbacksAndMessages(null)
+            browser?.stopLoading()
+            browser?.destroy()
         }
     }
     Box(Modifier.fillMaxSize()) {
         // The hidden view reads the ordinary page over the user's current network and VPN.
-        AndroidView(factory = { browser }, modifier = Modifier.size(2.dp).alpha(0.01f))
+        if (browser != null) AndroidView(factory = { browser }, modifier = Modifier.size(2.dp).alpha(0.01f))
         when {
             movies.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(movies.size.toString() + " карточек", color = appMuted,
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { attempt++ }) {
+                    TextButton(onClick = { CatalogMemory.invalidate(cacheKey); attempt++ }) {
                         Icon(Icons.Outlined.Refresh, contentDescription = null,
                             modifier = Modifier.size(17.dp))
                         Spacer(Modifier.width(5.dp))
@@ -248,7 +274,7 @@ internal fun CatalogGrid(
                 Spacer(Modifier.height(7.dp))
                 Text(problem, color = appMuted)
                 Spacer(Modifier.height(15.dp))
-                Button(onClick = { attempt++ }) { Text("Повторить") }
+                Button(onClick = { CatalogMemory.invalidate(cacheKey); attempt++ }) { Text("Повторить") }
                 TextButton(onClick = { onBrowse(source) }) { Text("Открыть зеркало") }
             }
         }
