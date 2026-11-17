@@ -105,11 +105,28 @@ internal object MirrorMediaParser {
 
     fun parseStreamResponse(raw: String): Pair<List<MirrorQuality>, String> {
         val json = objectFromWebView(raw) ?: return emptyList<MirrorQuality>() to "Ответ сервера не распознан"
-        if (json.has("error")) {
-            return emptyList<MirrorQuality>() to "Не удалось получить видео от зеркала"
+        // The source uses both boolean true and numeric 1. JSONObject.optBoolean
+        // does not reliably interpret numeric successes, so do not reject valid streams.
+        val rawError = json.opt("error")
+        val hasError = when (rawError) {
+            null, JSONObject.NULL -> false
+            is Boolean -> rawError
+            is Number -> rawError.toInt() != 0
+            is String -> rawError.isNotBlank() &&
+                rawError != "0" && !rawError.equals("false", ignoreCase = true)
+            else -> true
         }
-        if (json.has("success") && !json.optBoolean("success")) {
-            val reason = json.optString("message").take(180)
+        val rawSuccess = json.opt("success")
+        val hasFailure = if (!json.has("success") || rawSuccess == JSONObject.NULL) false
+            else when (rawSuccess) {
+                is Boolean -> !rawSuccess
+                is Number -> rawSuccess.toInt() == 0
+                is String -> rawSuccess != "1" &&
+                    !rawSuccess.equals("true", ignoreCase = true)
+                else -> true
+            }
+        if (hasError || hasFailure) {
+            val reason = json.optString("message").trim().take(180)
             return emptyList<MirrorQuality>() to
                 (reason.ifBlank { "Источник не предоставил видеопоток" })
         }

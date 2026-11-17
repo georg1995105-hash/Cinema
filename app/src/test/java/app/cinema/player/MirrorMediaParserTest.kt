@@ -31,6 +31,40 @@ class MirrorMediaParserTest {
         assertTrue(MirrorMediaParser.hasRealVoiceMetadata(list))
     }
 
+    @Test fun acceptsNumericSuccessfulVideoResponses() {
+        val raw = org.json.JSONObject.quote(
+            """{"success":1,"url":"[720p]https://media.example/video.mp4"}"""
+        )
+        assertEquals("720p", MirrorMediaParser.parseStreamResponse(raw).first.single().label)
+    }
+
+    @Test fun acceptsStringAndBooleanSuccessfulResponses() {
+        listOf("true", "\\"1\\"").forEach { success ->
+            val raw = org.json.JSONObject.quote(
+                """{"success":$success,"url":"[480p]https://media.example/video.mp4"}"""
+            )
+            assertEquals(1, MirrorMediaParser.parseStreamResponse(raw).first.size)
+        }
+    }
+
+    @Test fun emptyErrorIsNotARejection() {
+        val raw = org.json.JSONObject.quote(
+            """{"success":1,"error":null,"url":"[720p]https://media.example/video.mp4"}"""
+        )
+        assertEquals(1, MirrorMediaParser.parseStreamResponse(raw).first.size)
+    }
+
+    @Test fun realErrorsAndNumericFailureDoNotExposeVideo() {
+        val failed = org.json.JSONObject.quote(
+            """{"success":0,"url":"[720p]https://media.example/video.mp4"}"""
+        )
+        val errored = org.json.JSONObject.quote(
+            """{"error":"network","url":"[720p]https://media.example/video.mp4"}"""
+        )
+        assertTrue(MirrorMediaParser.parseStreamResponse(failed).first.isEmpty())
+        assertTrue(MirrorMediaParser.parseStreamResponse(errored).first.isEmpty())
+    }
+
     @Test fun parsesMediaResolutions() {
         val quality = MirrorMediaParser.parseQualityList(
             "[480p]https://media.example/a.mp4,[720p]https://media.example/b.mp4"
