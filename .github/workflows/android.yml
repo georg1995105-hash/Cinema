@@ -120,7 +120,8 @@ jobs:
           test -x "$APKSIGNER"
           SIGNER="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
           printf '%s\n' "$SIGNER"
-          grep -Fqx 'Signer #1 certificate SHA-256 digest: 1db504f66fa39cf51feefab727f5b8b229baef08a5ae2de80da05191514f93cb' <<< "$SIGNER"
+          CERTIFICATE="$(awk -F': ' '/certificate SHA-256 digest: /{print $NF}' <<< "$SIGNER" | sort -u)"
+          test "$CERTIFICATE" = '1db504f66fa39cf51feefab727f5b8b229baef08a5ae2de80da05191514f93cb'
           sha256sum "$APK"
       - name: Verify signed Android update from 0.4.17
         if: steps.signing.outputs.available == 'true'
