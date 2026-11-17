@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -68,3 +68,23 @@ jobs:
           name: kino-persistent-signed-apk
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+
+      - name: Publish signed update after checks
+        if: steps.signing.outputs.available == 'true' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(grep 'versionName =' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+          test -n "$VERSION"
+          TAG="v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists: not overwriting a published APK"
+            exit 0
+          fi
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Kino-$VERSION.apk"
+          gh release create "$TAG" "$RUNNER_TEMP/Kino-$VERSION.apk" \
+            --target "$GITHUB_SHA" \
+            --title "Кино $VERSION" \
+            --notes "Подписанное обновление приложения. Исправлены вход через выбранное зеркало, постеры каталога, восстановление старой истории и интерфейс плеера. Поддержка зависит от доступности выбранного источника. Автотесты, сборка и подпись проверены в CI; воспроизведение и авторизация на устройстве требуют проверки."
