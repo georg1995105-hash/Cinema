@@ -44,7 +44,9 @@ internal data class FilmInfo(
     val cast: List<FilmPerson>,
     val related: List<CatalogMovie>,
     val franchise: List<CatalogMovie> = emptyList(),
-    val franchiseResolved: Boolean = false
+    val franchiseResolved: Boolean = false,
+    val directors: List<FilmPerson> = emptyList(),
+    val voices: List<MirrorVoice> = emptyList()
 )
 
 internal object FilmInfoMemory {
@@ -109,12 +111,37 @@ internal object FilmPageParser {
            similar.push({title:name,url:absolute(a.getAttribute('href')),poster:photo,details:''});
          });
          var franchise=window.__kinoFranchiseParts || [];
+         var directors=[];
+         document.querySelectorAll('.b-post__infotable tr,.b-post__info tr').forEach(function(tr){
+           var td=tr.querySelectorAll('td');
+           if(td.length<2 || !/режисс/i.test(norm(td[0].textContent)))return;
+           var links=Array.from(td[1].querySelectorAll('a[href]'));
+           if(links.length){
+             links.slice(0,12).forEach(function(a){
+               var name=norm(a.textContent);
+               if(name && name.length<90)directors.push({name:name,url:absolute(a.getAttribute('href')),photo:''});
+             });
+           }else{
+             norm(td[1].textContent).split(/,|;/).slice(0,10).forEach(function(value){
+               var name=norm(value);
+               if(name && name.length<90)directors.push({name:name,url:'',photo:''});
+             });
+           }
+         });
+         var voices=Array.from(document.querySelectorAll(
+           '#translators-list li[data-translator_id],.b-translator__item[data-translator_id]'
+         )).map(function(item){
+           return {id:item.getAttribute('data-translator_id'),
+                   name:norm(item.getAttribute('title')||item.textContent)};
+         }).filter(function(item){return item.id&&item.name}).slice(0,45);
          return JSON.stringify({
            originalTitle:txt('.b-post__origtitle, .b-post__subtitle, .b-post__title_original'),
            description:description.substring(0,1800),
            rating:txt('.b-post__rating, .b-post__rating_tables, .b-post__ratings'),
            facts:facts.slice(0,18),
            people:people.slice(0,18),
+           directors:directors.slice(0,15),
+           voices:voices,
            related:similar.slice(0,15),
            franchise:franchise.slice(0,50),
            franchiseDone:window.__kinoFranchiseDone === true
@@ -323,6 +350,30 @@ internal object FilmPageParser {
                 if (name.isNotBlank()) add(FilmPerson(name.take(85), photo, personUrl))
             }
         }.distinctBy { it.name }
+        val directorArray=data.optJSONArray("directors")
+        val directors=buildList {
+            if(directorArray!=null)for(i in 0 until minOf(directorArray.length(),15)){
+                val item=directorArray.optJSONObject(i) ?: continue
+                val name=item.optString("name").trim()
+                if(name.length !in 2..90)continue
+                val url=item.optString("url").takeIf { value ->
+                    SourceRules.isValidHttpsUrl(value) && runCatching {
+                        URI(value).host.equals(URI(source).host,ignoreCase=true)
+                    }.getOrDefault(false)
+                }.orEmpty()
+                add(FilmPerson(name,"",url))
+            }
+        }.distinctBy { it.name }
+        val voiceArray=data.optJSONArray("voices")
+        val voices=buildList {
+            if(voiceArray!=null)for(i in 0 until minOf(voiceArray.length(),45)){
+                val item=voiceArray.optJSONObject(i) ?: continue
+                val id=item.optString("id")
+                val name=item.optString("name").trim()
+                if(id.matches(Regex("[0-9]{1,10}")) && name.length in 2..80)
+                    add(MirrorVoice(id,name))
+            }
+        }.distinctBy { it.id }
         val relatedArray = data.optJSONArray("related")
         val originalHost = URI(source).host?.lowercase() ?: return@runCatching null
         val related = buildList {
@@ -361,7 +412,9 @@ internal object FilmPageParser {
             cast = people,
             related = related,
             franchise = parts,
-            franchiseResolved = data.optBoolean("franchiseDone",false)
+            franchiseResolved = data.optBoolean("franchiseDone",false),
+            directors = directors,
+            voices = voices
         )
     }.getOrNull()
 }
