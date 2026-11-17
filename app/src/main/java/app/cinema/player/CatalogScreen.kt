@@ -207,6 +207,7 @@ internal fun CatalogGrid(
     onAddSource: () -> Unit,
     loadContent: Boolean = true,
     requestOverride: String? = null,
+    searchText: String = "",
     movieFilter: (CatalogMovie) -> Boolean = { true }
 ) {
     if (source == null || !SourceRules.isValidHttpsUrl(source)) {
@@ -242,6 +243,7 @@ internal fun CatalogGrid(
     }
     var pending by remember(requestUrl, attempt) { mutableStateOf(movies.isEmpty()) }
     var problem by remember(requestUrl, attempt) { mutableStateOf("") }
+    var quickSearchStarted by remember(requestUrl, attempt) { mutableStateOf(false) }
     fun recoverEmptyCatalog(reason: String) {
         if (!useUnfiltered && requestOverride == null && section != "Новинки") {
             useUnfiltered = true
@@ -289,17 +291,50 @@ internal fun CatalogGrid(
                 }
                 override fun onPageFinished(view: WebView, url: String) {
                     val delays = listOf(300L, 1100L, 2600L, 4800L)
+                    fun startQuickSearch() {
+                        if (searchText.isBlank() || quickSearchStarted || !pending) return
+                        quickSearchStarted = true
+                        view.evaluateJavascript(MirrorQuickSearch.javascript(searchText)) {
+                            var polls = 0
+                            fun poll() {
+                                if (!pending || view.url != url) return
+                                if (polls++ >= 14) {
+                                    recoverEmptyCatalog("Поиск зеркала не вернул совпадений по названию.")
+                                    return
+                                }
+                                view.evaluateJavascript("window.__kinoQuickSearchResult || null") { raw ->
+                                    if (!pending || view.url != url) return@evaluateJavascript
+                                    val matches = SearchRelevance.find(
+                                        MirrorCatalog.parse(raw, source), searchText
+                                    )
+                                    if (matches.isNotEmpty()) {
+                                        movies = matches
+                                        CatalogMemory.put(cacheKey, matches)
+                                        pending = false
+                                        problem = ""
+                                    } else if (raw != "null" && raw.isNotBlank()) {
+                                        recoverEmptyCatalog("По названию ничего не найдено на этом зеркале.")
+                                    } else handler.postDelayed({ poll() }, 250)
+                                }
+                            }
+                            handler.postDelayed({ poll() }, 170)
+                        }
+                    }
                     delays.forEachIndexed { index, delayMs ->
                         handler.postDelayed({
                             if (view.url != url || !pending) return@postDelayed
                             view.evaluateJavascript(MirrorCatalog.javascript) { raw ->
                                 if (!pending || view.url != url) return@evaluateJavascript
                                 val extracted = MirrorCatalog.parse(raw, source)
-                                if (extracted.isNotEmpty()) {
-                                    movies = extracted
-                                    CatalogMemory.put(cacheKey, extracted)
+                                val matches = if (searchText.isBlank()) extracted
+                                    else SearchRelevance.find(extracted, searchText)
+                                if (matches.isNotEmpty()) {
+                                    movies = matches
+                                    CatalogMemory.put(cacheKey, matches)
                                     pending = false
                                     problem = ""
+                                } else if (searchText.isNotBlank()) {
+                                    if (index >= 1) startQuickSearch()
                                 } else if (index == delays.lastIndex) {
                                     recoverEmptyCatalog(
                                         "Источник не предоставил карточки или открыл проверку доступа."
@@ -321,12 +356,14 @@ internal fun CatalogGrid(
             browser?.destroy()
         }
     }
-    val visibleMovies = movies.filter(movieFilter)
+    // Never show the mirror's default homepage cards as results for an unrelated search.
+    val visibleMovies = (if (searchText.isBlank()) movies
+        else SearchRelevance.find(movies, searchText)).filter(movieFilter)
     Box(Modifier.fillMaxSize()) {
         // The hidden view reads the ordinary page over the user's current network and VPN.
         if (browser != null) AndroidView(factory = { browser }, modifier = Modifier.size(2.dp).alpha(0.01f))
         when {
-            movies.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
+            visibleMovies.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text((if (useUnfiltered) "Общий каталог • " else "") +
                         visibleMovies.size.toString() + " результатов", color = appMuted,
@@ -360,10 +397,14 @@ internal fun CatalogGrid(
                 Icon(Icons.Outlined.CloudOff, contentDescription = null, tint = appMuted,
                     modifier = Modifier.size(39.dp))
                 Spacer(Modifier.height(14.dp))
-                Text("Не удалось получить карточки",
+                Text(if (searchText.isNotBlank()) "Совпадений не найдено"
+                    else "Не удалось получить карточки",
                     style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(7.dp))
-                Text(problem, color = appMuted)
+                Text(problem.ifBlank {
+                    if (searchText.isNotBlank()) "Зеркало не нашло фильм с таким названием."
+                    else "Источник не ответил."
+                }, color = appMuted)
                 Spacer(Modifier.height(15.dp))
                 Button(onClick = { CatalogMemory.invalidate(cacheKey); attempt++ }) { Text("Повторить") }
                 TextButton(onClick = { onBrowse(source) }) { Text("Открыть зеркало") }

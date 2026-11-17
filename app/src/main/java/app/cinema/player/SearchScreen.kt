@@ -252,6 +252,7 @@ internal fun SearchScreen(
                 onBrowse = onBrowse,
                 onAddSource = onAddSource,
                 requestOverride = url,
+                searchText = submittedQuery,
                 movieFilter = resultFilter
             )
         }
