@@ -72,6 +72,10 @@ jobs:
       - name: Run WebView and Media3 tests on Android
         shell: bash
         run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          fi
           mkdir -p app/src/androidTest/assets
           ffmpeg -hide_banner -loglevel error -f lavfi -i 'color=blue:size=160x120:rate=24' \
             -f lavfi -i 'anullsrc=channel_layout=mono:sample_rate=44100' -t 4 \
@@ -140,7 +144,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.signing.outputs.available == 'true'
         with:
-          name: kino-persistent-signed-apk
+          name: cinema-persistent-signed-apk
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
@@ -163,8 +167,8 @@ jobs:
             echo "Release $TAG already exists: not overwriting a published APK"
             exit 0
           fi
-          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Kino-$VERSION.apk"
-          gh release create "$TAG" "$RUNNER_TEMP/Kino-$VERSION.apk" \
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Cinema-$VERSION.apk"
+          gh release create "$TAG" "$RUNNER_TEMP/Cinema-$VERSION.apk" \
             --target "$GITHUB_SHA" \
-            --title "Кино $VERSION" \
+            --title "Cinema $VERSION" \
             --notes "Исправлены поиск и постеры, метаданные карточек, выбор озвучек и диагностика плеера. В GitHub Actions проверены WebView, Media3, подпись и установка обновления поверх 0.4.17. Доступность фильма и аккаунта зависит от зеркала."

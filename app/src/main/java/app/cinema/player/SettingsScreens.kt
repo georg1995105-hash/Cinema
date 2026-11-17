@@ -250,7 +250,7 @@ internal fun AboutScreen(back: () -> Unit) {
     Column {
         ScreenHeading("О приложении", null, back)
         Spacer(Modifier.height(24.dp))
-        Text("Кино", style = MaterialTheme.typography.headlineMedium,
+        Text(androidx.compose.ui.res.stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold)
         if (version != null) Text("Версия $version", color = appBlue)
         Spacer(Modifier.height(18.dp))

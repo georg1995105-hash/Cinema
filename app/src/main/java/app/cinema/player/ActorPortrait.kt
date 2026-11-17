@@ -96,7 +96,7 @@ internal object ActorPhotoLibrary {
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty(
                 "User-Agent",
-                "KinoAndroid/0.4.6 (https://github.com/georg1995105-hash/Cinema; public actor portrait lookup)"
+                "Cinema Android (https://github.com/georg1995105-hash/Cinema; public actor portrait lookup)"
             )
             if (connection.responseCode != 200) return@runCatching null
             val response = connection.inputStream.bufferedReader().use { it.readText() }

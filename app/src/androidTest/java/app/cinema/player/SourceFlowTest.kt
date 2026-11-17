@@ -181,6 +181,14 @@ class SourceFlowTest {
         assertEquals(PlaybackFailure.BLOCKED, MirrorMediaParser.parseStreamInfo(requireNotNull(denied)).failure)
     }
 
+    @Test fun launcherShowsCinemaWithAnAdaptiveIcon() {
+        val context = instrumentation.targetContext
+        val activity = context.packageManager.getActivityInfo(
+            android.content.ComponentName(context, MainActivity::class.java), 0)
+        assertEquals("Cinema", activity.loadLabel(context.packageManager).toString())
+        assertTrue(activity.loadIcon(context.packageManager) is android.graphics.drawable.AdaptiveIconDrawable)
+    }
+
     @Test fun readsExistingUserDataWithThePublishedPreferenceKeys() {
         val context = instrumentation.targetContext
         val preferences = context.getSharedPreferences("cinema_local_v1", android.content.Context.MODE_PRIVATE)
