@@ -185,6 +185,7 @@ private fun CinemaApp() {
                     onBack = { page = browseReturn })
                 Page.FILM_PLAYER -> MirrorFilmPlayer(
                     filmUrl = browsingSource ?: selectedFilm?.url.orEmpty(),
+                    title = selectedFilm?.title.orEmpty(),
                     onBack = { page = Page.MOVIE },
                     onOpenSite = {
                         browseReturn = Page.FILM_PLAYER
