@@ -3,7 +3,6 @@ package app.cinema.player
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
-import android.media.AudioManager
 
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
@@ -21,7 +20,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -139,7 +137,9 @@ internal fun MirrorNativePlayer(
     startPositionMs: Long,
     seekSeconds: Int,
     holdSpeed: Int,
+    savedSelection: PlaybackSelection?,
     onSave: (Long)->Unit,
+    onSaveSelection: (PlaybackSelection)->Unit,
     onClose: ()->Unit
 ) {
     if(!SourceRules.isValidHttpsUrl(filmUrl)) {
@@ -160,6 +160,7 @@ internal fun MirrorNativePlayer(
     var options by remember(filmUrl){mutableStateOf<List<MirrorQuality>>(emptyList())}
     var quality by remember(filmUrl){mutableStateOf("")}
     var resumeMs by remember(filmUrl){mutableLongStateOf(startPositionMs)}
+    var endedCounter by remember(filmUrl) { mutableIntStateOf(0) }
     var expanded by remember(filmUrl) { mutableStateOf(true) }
     BackHandler { if (expanded) expanded = false else onClose() }
     DisposableEffect(expanded) {
@@ -208,10 +209,14 @@ internal fun MirrorNativePlayer(
                             error="Источник не предоставил данные для запуска встроенного плеера"
                         }else{
                             movie=parsed
-                            voice=parsed.voices.first().id
+                            voice=parsed.voices.firstOrNull { it.id == savedSelection?.voice }?.id
+                                ?: parsed.voices.first().id
                             episodes=parsed.episodes
-                            season=parsed.episodes.firstOrNull()?.season.orEmpty()
-                            episode=parsed.episodes.firstOrNull()?.id.orEmpty()
+                            val chosen=parsed.episodes.firstOrNull {
+                                it.season == savedSelection?.season && it.id == savedSelection.episode
+                            } ?: parsed.episodes.firstOrNull()
+                            season=chosen?.season.orEmpty()
+                            episode=chosen?.id.orEmpty()
                         }
                     }
                 }
@@ -239,9 +244,12 @@ internal fun MirrorNativePlayer(
         val response=raw?.let(MirrorMediaParser::objectFromWebView)
         val incoming=MirrorMediaParser.parseEpisodes(response?.optJSONArray("__kinoEpisodes"))
         if(incoming.isNotEmpty()){
+            val chosen=incoming.firstOrNull { it.season == season && it.id == episode }
+                ?: incoming.firstOrNull { it.season == savedSelection?.season && it.id == savedSelection.episode }
+                ?: incoming.first()
             episodes=incoming
-            season=incoming.first().season
-            episode=incoming.first().id
+            season=chosen.season
+            episode=chosen.id
         }else if(episodes.isEmpty()){
             season="1";episode="1"
         }
@@ -250,6 +258,7 @@ internal fun MirrorNativePlayer(
     LaunchedEffect(movie,voice,readyVoice,season,episode){
         val item=movie?:return@LaunchedEffect
         if(voice.isBlank()||(item.isSeries&&(readyVoice!=voice||season.isBlank()||episode.isBlank())))return@LaunchedEffect
+        val desiredQuality = quality.ifBlank { savedSelection?.quality.orEmpty() }
         options=emptyList();quality="";error=""
         message="Получаем доступные видеопотоки"
         val request=mutableMapOf("id" to item.id,"translator_id" to voice,
@@ -260,7 +269,8 @@ internal fun MirrorNativePlayer(
         else{
             val (available,reason)=MirrorMediaParser.parseStreamResponse(result)
             options=available
-            quality=available.firstOrNull()?.label.orEmpty()
+            quality=available.firstOrNull { it.label == desiredQuality }?.label
+                ?: available.firstOrNull()?.label.orEmpty()
             error=reason
             message=""
         }
@@ -292,8 +302,12 @@ internal fun MirrorNativePlayer(
                                     pause()
                                 }
                             }
-                            if (state == Player.STATE_ENDED && currentPosition < 150_000L) {
-                                playerIssue="Видеопоток завершился слишком быстро: вероятно, зеркало вернуло рекламный ролик."
+                            if (state == Player.STATE_ENDED) {
+                                if (currentPosition < 150_000L) {
+                                    playerIssue="Источник завершил короткое видео. Выберите другой доступный вариант."
+                                } else {
+                                    endedCounter++
+                                }
                             }
                         }
                         override fun onPlayerError(failure:PlaybackException){
@@ -330,35 +344,13 @@ internal fun MirrorNativePlayer(
     var settingsSection by remember { mutableStateOf("Настройки") }
     var speed by remember { mutableFloatStateOf(1f) }
     val speeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
-    val audioManager = remember(context) {
-        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    }
-    val originalWindowBrightness = remember(context) {
-        findHostingActivity(context)?.window?.attributes?.screenBrightness ?: -1f
-    }
-    var brightness by remember(context) {
-        mutableFloatStateOf(originalWindowBrightness.takeIf { it >= 0f } ?: 0.5f)
-    }
-    var mediaVolume by remember(context) {
-        mutableIntStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC))
-    }
-    val maxVolume = remember(audioManager) {
-        audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-    }
-    var gestureHint by remember { mutableStateOf("") }
-    LaunchedEffect(gestureHint) {
-        if (gestureHint.isNotEmpty()) {
-            delay(1100)
-            gestureHint = ""
-        }
-    }
-    DisposableEffect(context) {
-        onDispose {
-            findHostingActivity(context)?.window?.let { window ->
-                val attributes = window.attributes
-                attributes.screenBrightness = originalWindowBrightness
-                window.attributes = attributes
-            }
+    val playbackPreferences = remember(context) { LocalStore(context) }
+    var autoNextEpisode by remember { mutableStateOf(playbackPreferences.autoNextEpisode()) }
+    var episodeNotice by remember { mutableStateOf("") }
+    LaunchedEffect(episodeNotice) {
+        if (episodeNotice.isNotBlank()) {
+            delay(2300)
+            episodeNotice = ""
         }
     }
     val pictureModes = listOf("По размеру", "Заполнить", "Растянуть")
@@ -411,43 +403,6 @@ internal fun MirrorNativePlayer(
             )
             Box(
                 Modifier.fillMaxSize()
-                    .pointerInput(player, audioManager, maxVolume) {
-                        var left = false
-                        var delta = 0f
-                        detectVerticalDragGestures(
-                            onDragStart = { start ->
-                                left = start.x < size.width * 0.5f
-                                delta = 0f
-                            },
-                            onVerticalDrag = { change, amount ->
-                                change.consume()
-                                if (left) {
-                                    brightness = (brightness - amount / size.height.coerceAtLeast(1) * 1.7f)
-                                        .coerceIn(0.05f, 1f)
-                                    findHostingActivity(context)?.window?.let { window ->
-                                        val attrs = window.attributes
-                                        attrs.screenBrightness = brightness
-                                        window.attributes = attrs
-                                    }
-                                    gestureHint = "Яркость " + (brightness * 100).toInt() + "%"
-                                } else {
-                                    delta -= amount
-                                    val step = (size.height / (maxVolume.toFloat() * 1.6f)).coerceAtLeast(4f)
-                                    val offset = (delta / step).toInt()
-                                    if (offset != 0) {
-                                        delta -= offset * step
-                                        mediaVolume = (mediaVolume + offset).coerceIn(0, maxVolume)
-                                        runCatching {
-                                            audioManager.setStreamVolume(
-                                                AudioManager.STREAM_MUSIC, mediaVolume, 0
-                                            )
-                                        }
-                                    }
-                                    gestureHint = "Громкость " + (100 * mediaVolume / maxVolume) + "%"
-                                }
-                            }
-                        )
-                    }
                     .pointerInput(player, seekSeconds, holdSpeed) {
                     detectTapGestures(
                         onTap = { controls = !controls },
@@ -502,16 +457,6 @@ internal fun MirrorNativePlayer(
             CircularProgressIndicator(
                 color = appBlue, modifier = Modifier.align(Alignment.Center).size(30.dp)
             )
-        }
-        if (gestureHint.isNotBlank()) {
-            Surface(
-                color = Color.Black.copy(alpha = .75f),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.align(Alignment.Center).padding(12.dp)
-            ) {
-                Text(gestureHint, color = Color.White,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
-            }
         }
         if (accelerated) {
             Surface(
