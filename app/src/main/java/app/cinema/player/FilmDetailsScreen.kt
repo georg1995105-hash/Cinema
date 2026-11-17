@@ -769,8 +769,11 @@ internal fun FilmDetails(
                 ) {
                     Text("Источник", style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold)
-                    val host = runCatching { URI(source).host.orEmpty() }
-                        .getOrDefault("")
+                    Text("Rezka", color = appBlue,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 3.dp))
+                    Text("Зеркало Rezka", style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         (listOf(source) + sources).filter(SourceRules::isValidHttpsUrl)
