@@ -89,7 +89,7 @@ private val playerMetaJs = """
     );
     return JSON.stringify({
       id:String(id),series:!!((init&&init[1]==='Series')||document.querySelector('#simple-episodes-tabs')),
-      voice:String(init?init[3]:'0'),voices:voices,episodes:episodes,
+      voice:String(init?init[3]:'0'),voiceFromScript:!!init,voices:voices,episodes:episodes,
       pageState:id?'ready':
         /captcha|checking your browser|access denied|verify you are human|anubis|cloudflare/i
           .test((document.title||'')+' '+(document.body?.innerText||'').slice(0,600))
@@ -242,14 +242,14 @@ internal fun MirrorNativePlayer(
                     message="Определяем доступный плеер"
                     // onPageFinished is not the same as completion of deferred site JavaScript.
                     // Re-query briefly instead of treating one early null as a permanent failure.
-                    val delays=listOf(450L,1300L,2700L,4800L,7800L)
+                    val delays=listOf(350L,950L,1800L,3300L,5700L)
                     delays.forEachIndexed { index, waitMs ->
                         metadataHandler.postDelayed({
                             if (view.url!=url || movie!=null) return@postDelayed
                             view.evaluateJavascript(playerMetaJs){ raw ->
                                 if (view.url!=url || movie!=null) return@evaluateJavascript
                                 val parsed=MirrorMediaParser.pageFromWebView(raw)
-                                if (parsed!=null) {
+                                if (parsed!=null && MirrorMediaParser.hasRealVoiceMetadata(raw)) {
                                     movie=parsed
                                     message=""
                                     error=""
@@ -265,7 +265,9 @@ internal fun MirrorNativePlayer(
                                     metadataHandler.removeCallbacksAndMessages(null)
                                 } else if (index==delays.lastIndex) {
                                     message=""
-                                    error=MirrorMediaParser.pageFailureReason(raw)
+                                    error=if(parsed!=null)
+                                        "Сайт не предоставил идентификаторы озвучек. Выберите другое зеркало."
+                                    else MirrorMediaParser.pageFailureReason(raw)
                                 }
                             }
                         },waitMs)
@@ -295,6 +297,36 @@ internal fun MirrorNativePlayer(
             message = ""
             error = "Источник не загрузил сведения плеера. Проверьте доступность выбранного зеркала."
         }
+    }
+    // Attempt distinct source-provided translators in a bounded sequence.
+    // No guessed translation IDs, proxy impersonation or paid stream unlocking.
+    val triedVoices=remember(filmUrl, movie?.id){ mutableStateListOf<String>() }
+    val verifiedVoices=remember(filmUrl){ mutableStateListOf<String>() }
+    fun tryNextVoice(): Boolean {
+        val available=movie?.voices.orEmpty()
+        val next=AutoVoicePolicy.next(available,voice,triedVoices)?:return false
+        if(voice.isNotBlank() && voice !in triedVoices)triedVoices.add(voice)
+        voice=next.id
+        readyVoice=""
+        anonymousRequest=false
+        resumeMs=0L
+        options=emptyList()
+        subtitleOptions=emptyList()
+        quality=""
+        error=""
+        message="Проверяем озвучку: "+next.name
+        return true
+    }
+    fun tryPublicGuestStream(): Boolean {
+        if (anonymousTried || anonymousRequest) return false
+        anonymousTried = true
+        anonymousRequest = true
+        resumeMs = 0L
+        options = emptyList()
+        quality = ""
+        error = ""
+        message = "Проверяем открытый гостевой поток"
+        return true
     }
     LaunchedEffect(movie,voice){
         val item=movie?:return@LaunchedEffect
@@ -327,20 +359,28 @@ internal fun MirrorNativePlayer(
             "action" to (if(item.isSeries)"get_stream" else "get_movie"))
         if(item.isSeries){request["season"]=season;request["episode"]=episode}
         val result=mirrorAjax(web,request,anonymous=anonymousRequest)
-        if(result==null){message="";error="Источник не ответил"}
-        else{
+        if(result==null){
+            if(!tryNextVoice() && !tryPublicGuestStream()){
+                message=""
+                error="Зеркало не ответило на запрос потоков."
+            }
+        } else {
             val streams=MirrorMediaParser.parseStreamInfo(result)
             val available=streams.qualities
-            val reason=streams.error
-            subtitleOptions=streams.subtitles
-            subtitleIndex=-1
-            options=available
-            quality=available.firstOrNull { it.label == desiredQuality }?.label
-                ?: available.firstOrNull()?.label.orEmpty()
-            error=if (anonymousRequest && available.isEmpty())
-                "Зеркало не предоставило открытый гостевой видеопоток."
-                else reason
-            message=""
+            if(available.isEmpty()){
+                if(!tryNextVoice() && !tryPublicGuestStream()){
+                    message=""
+                    error=streams.error.ifBlank { "Доступного потока не обнаружено." }
+                }
+            } else {
+                subtitleOptions=streams.subtitles
+                subtitleIndex=-1
+                options=available
+                quality=available.firstOrNull { it.label == desiredQuality }?.label
+                    ?: available.firstOrNull()?.label.orEmpty()
+                error=""
+                message=""
+            }
         }
     }
     val selected=options.firstOrNull {it.label==quality}?:options.firstOrNull()
@@ -363,19 +403,7 @@ internal fun MirrorNativePlayer(
             ?: return false
         resumeMs = 0L
         quality = next.label
-        onSaveSelection(PlaybackSelection(season,episode,voice,next.label,0L))
         message = "Пробуем доступное качество " + next.label
-        return true
-    }
-    fun tryPublicGuestStream(): Boolean {
-        if (anonymousTried || anonymousRequest) return false
-        anonymousTried = true
-        anonymousRequest = true
-        resumeMs = 0L
-        options = emptyList()
-        quality = ""
-        error = ""
-        message = "Проверяем открытый гостевой поток"
         return true
     }
     val player=remember(currentUrl, subtitleOptions, episodeKey){
@@ -402,12 +430,15 @@ internal fun MirrorNativePlayer(
                             playbackState=state
                             if (state == Player.STATE_READY) {
                                 val length=duration
+                                if (length > 150_000L && voice !in verifiedVoices) {
+                                    verifiedVoices.add(voice)
+                                }
                                 if (PublicStreamRetryPolicy.isShortPreview(length)) {
                                     if (alternativeIndex < availableUrls.lastIndex) {
                                         alternativeIndex++
                                         message="Проверяем другой доступный сервер"
                                     } else if (!tryAnotherAvailableQuality() &&
-                                        !tryPublicGuestStream()) {
+                                        !tryNextVoice() && !tryPublicGuestStream()) {
                                         playerIssue="Источник вернул короткий ролик. Открытого полного видео здесь нет."
                                         pause()
                                     }
@@ -418,7 +449,7 @@ internal fun MirrorNativePlayer(
                                     if (alternativeIndex < availableUrls.lastIndex) {
                                         alternativeIndex++
                                     } else if (!tryAnotherAvailableQuality() &&
-                                        !tryPublicGuestStream()) {
+                                        !tryNextVoice() && !tryPublicGuestStream()) {
                                         playerIssue="Короткий ролик завершён. Полного доступного потока нет."
                                     }
                                 } else {
@@ -431,7 +462,7 @@ internal fun MirrorNativePlayer(
                                 alternativeIndex++
                                 message="Пробуем другой доступный видеосервер"
                             } else if (!tryAnotherAvailableQuality() &&
-                                !tryPublicGuestStream()) {
+                                !tryNextVoice() && !tryPublicGuestStream()) {
                                 playerIssue="Ошибка воспроизведения: "+failure.errorCodeName
                             }
                         }
@@ -510,6 +541,8 @@ internal fun MirrorNativePlayer(
         resumeMs = 0L
         anonymousRequest = false
         anonymousTried = false
+        triedVoices.clear()
+        verifiedVoices.clear()
         season = target.season
         episode = target.id
         options = emptyList()
@@ -812,7 +845,7 @@ internal fun MirrorNativePlayer(
             Surface(
                 modifier = Modifier.align(Alignment.TopEnd)
                     .padding(top = 60.dp, end = 12.dp, bottom = 8.dp)
-                    .width(270.dp).fillMaxHeight(.78f),
+                    .width(242.dp).fillMaxHeight(.68f),
                 shape = RoundedCornerShape(15.dp),
                 color = Color(0xF222272E),
                 shadowElevation = 8.dp
@@ -922,6 +955,7 @@ internal fun MirrorNativePlayer(
                                     "Озвучка" -> {
                                         val newVoice = movie?.voices?.getOrNull(index)
                                         if (newVoice != null && voice != newVoice.id) {
+                                            triedVoices.clear()
                                             voice = newVoice.id
                                             anonymousRequest = false
                                             anonymousTried = false
@@ -945,7 +979,13 @@ internal fun MirrorNativePlayer(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(label, modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyLarge)
+                                style = MaterialTheme.typography.bodyMedium)
+                            if (settingsSection == "Озвучка" &&
+                                movie?.voices?.getOrNull(index)?.id in verifiedVoices) {
+                                Text("Проверено",color=appBlue,
+                                    style=MaterialTheme.typography.labelSmall)
+                                Spacer(Modifier.width(6.dp))
+                            }
                             if (index == currentIndex) {
                                 Icon(Icons.Outlined.Check, contentDescription = "Выбрано",
                                     tint = appBlue, modifier = Modifier.size(22.dp))

@@ -42,6 +42,20 @@ internal object MirrorMediaParser {
         }
     }
 
+    /** A post ID is not proof that the site has loaded its real translator list. */
+    fun hasRealVoiceMetadata(raw: String): Boolean {
+        val json = objectFromWebView(raw) ?: return false
+        val voices = json.optJSONArray("voices")
+        if (voices != null) for (i in 0 until minOf(voices.length(), 80)) {
+            val item = voices.optJSONObject(i) ?: continue
+            if (item.optString("id").matches(Regex("[0-9]{1,12}")) &&
+                item.optString("name").isNotBlank()) return true
+        }
+        val fallback = json.optString("voice")
+        return fallback.matches(Regex("[0-9]{1,12}")) &&
+            (json.optBoolean("voiceFromScript") || fallback != "0")
+    }
+
     fun pageFromWebView(raw: String): MirrorMoviePage? {
         val json = objectFromWebView(raw) ?: return null
         val id = json.optString("id").trim()

@@ -17,6 +17,15 @@ class MirrorMediaParserTest {
         assertEquals("4",page?.voices?.singleOrNull()?.id)
     }
 
+    @Test fun rejectsPrematureInventedVoiceZero() {
+        val early = org.json.JSONObject.quote("""{"id":"40","voice":"0","voices":[]}""")
+        assertFalse(MirrorMediaParser.hasRealVoiceMetadata(early))
+        val ready = org.json.JSONObject.quote("""{"id":"40","voice":"0","voiceFromScript":true,"voices":[]}""")
+        assertTrue(MirrorMediaParser.hasRealVoiceMetadata(ready))
+        val list = org.json.JSONObject.quote("""{"id":"40","voice":"0","voices":[{"id":"0","name":"Оригинал"}]}""")
+        assertTrue(MirrorMediaParser.hasRealVoiceMetadata(list))
+    }
+
     @Test fun parsesMediaResolutions() {
         val quality = MirrorMediaParser.parseQualityList(
             "[480p]https://media.example/a.mp4,[720p]https://media.example/b.mp4"
