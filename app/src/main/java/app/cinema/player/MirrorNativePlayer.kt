@@ -68,6 +68,7 @@ private val playerMetaJs = """
     function clean(s){return(s||'').replace(/\s+/g,' ').trim();}
     var js=Array.from(document.scripts).map(function(x){return x.textContent||'';}).join('\n');
     var init=js.match(/initCDN(Series|Movies)Events\s*\(\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?(\d{1,12})/i);
+    var scriptId=(js.match(/(?:post_id|news_id|postId)\s*[:=]\s*['"]?(\d{1,12})/i)||[])[1]||'';
     var numeric=function(v){var x=String(v||'').trim();return /^\d{1,12}$/.test(x)?x:'';};
     var idCandidates=[
        document.querySelector('input[name="post_id"]')?.value,
@@ -78,18 +79,38 @@ private val playerMetaJs = """
        document.querySelector('.b-userset__fav_holder')?.getAttribute('data-post_id'),
        (document.querySelector('.b-post')?.id||'').replace(/^post-/,''),
        init?init[2]:'',
+       scriptId,
        window.post_id,window.postId
     ];
     var id=idCandidates.map(numeric).find(Boolean)||'';
-    var voices=Array.from(document.querySelectorAll('#translators-list li[data-translator_id], .b-translator__item[data-translator_id]')).map(
-      function(x){return {id:x.getAttribute('data-translator_id'),name:clean(x.getAttribute('title')||x.textContent)}}
-    ).filter(function(x){return x.id && x.name});
+    var voices=Array.from(document.querySelectorAll(
+      '#translators-list [data-translator_id], #translators-list [data-translator-id], '+
+      '.b-translator__item, [data-translator_id], [data-translator-id]'
+    )).map(function(node){
+      var x=node.closest('li, .b-translator__item')||node;
+      var id=numeric(node.getAttribute('data-translator_id')||
+        node.getAttribute('data-translator-id')||
+        x.getAttribute('data-translator_id')||
+        x.getAttribute('data-translator-id')||
+        node.getAttribute('data-id')||
+        x.getAttribute('data-id'));
+      var name=clean(node.getAttribute('title')||x.getAttribute('title')||
+        node.textContent||x.textContent);
+      return {id:id,name:name.slice(0,75)};
+    }).filter(function(item){return item.id&&item.name;})
+      .filter(function(item,index,array){return array.findIndex(function(v){return v.id===item.id})===index;});
+    var activeVoice=Array.from(document.querySelectorAll(
+      '[data-translator_id].active, [data-translator-id].active, .b-translator__item.active'
+    )).map(function(x){return numeric(x.getAttribute('data-translator_id')||
+        x.getAttribute('data-translator-id')||x.getAttribute('data-id'));}).find(Boolean)||'';
+    var initVoice=numeric(init?init[3]:'');
+    var defaultVoice=activeVoice||initVoice||(voices.length===1?voices[0].id:'');
     var episodes=Array.from(document.querySelectorAll('.b-simple_episode__item[data-episode_id]')).map(
       function(x){return{season:x.getAttribute('data-season_id')||x.closest('ul[id^="simple-episodes-list-"]')?.id.replace('simple-episodes-list-','')||'1',episode:x.getAttribute('data-episode_id'),label:clean(x.textContent)}}
     );
     return JSON.stringify({
       id:String(id),series:!!((init&&init[1]==='Series')||document.querySelector('#simple-episodes-tabs')),
-      voice:String(init?init[3]:'0'),voiceFromScript:!!init,voices:voices,episodes:episodes,
+      voice:defaultVoice,voiceFromScript:!!init,voices:voices,episodes:episodes,
       pageState:id?'ready':
         /captcha|checking your browser|access denied|verify you are human|anubis|cloudflare/i
           .test((document.title||'')+' '+(document.body?.innerText||'').slice(0,600))
@@ -237,8 +258,8 @@ internal fun MirrorNativePlayer(
                     return req.url.scheme!="https"||(h!=host&&!h.endsWith(".$host"))
                 }
                 override fun onPageFinished(view:WebView,url:String){
-                    if (runCatching { URI(url).host.equals(host,ignoreCase=true) }
-                            .getOrDefault(false).not()) return
+                    val responseHost=runCatching { URI(url).host?.lowercase() }.getOrNull()
+                    if (responseHost!=host && responseHost?.endsWith(".$host")!=true) return
                     message="Определяем доступный плеер"
                     // onPageFinished is not the same as completion of deferred site JavaScript.
                     // Re-query briefly instead of treating one early null as a permanent failure.
