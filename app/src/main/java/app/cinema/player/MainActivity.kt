@@ -38,7 +38,7 @@ internal val appBlue = Color(0xFF80C5E7)
 internal val appMuted = Color(0xFFADB8C0)
 private val appWhite = Color(0xFFF4F7F8)
 
-internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE, MOVIE }
+internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE, MOVIE, FILM_PLAYER }
 private data class Destination(val page: Page, val label: String, val icon: ImageVector)
 private val destinations = listOf(
     Destination(Page.HOME, "Главная", Icons.Outlined.Home),
@@ -99,6 +99,7 @@ private fun CinemaApp() {
     fun back() {
         if (page == Page.SITE) { page = browseReturn; return }
         if (page == Page.MOVIE) { page = Page.HOME; return }
+        if (page == Page.FILM_PLAYER) { page = Page.MOVIE; return }
         page = if (page in listOf(Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST, Page.UPDATES))
             Page.SETTINGS else Page.HOME
     }
@@ -119,7 +120,7 @@ private fun CinemaApp() {
     Scaffold(
         containerColor = appBackground,
         bottomBar = {
-            if (page != Page.SITE && page != Page.MOVIE) BoxWithConstraints(
+            if (page != Page.SITE && page != Page.MOVIE && page != Page.FILM_PLAYER) BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -182,13 +183,27 @@ private fun CinemaApp() {
                 Page.UPDATES -> UpdatesScreen()
                 Page.SITE -> BrowserScreen(browsingSource ?: activeSource.orEmpty(),
                     onBack = { page = browseReturn })
+                Page.FILM_PLAYER -> MirrorFilmPlayer(
+                    filmUrl = browsingSource ?: selectedFilm?.url.orEmpty(),
+                    onBack = { page = Page.MOVIE },
+                    onOpenSite = {
+                        browseReturn = Page.FILM_PLAYER
+                        page = Page.SITE
+                    }
+                )
                 Page.MOVIE -> selectedFilm?.let { movie ->
-                    FilmDetails(movie, activeSource.orEmpty(), onBack = { page = Page.HOME },
+                    FilmDetails(
+                        movie = movie,
+                        source = activeSource.orEmpty(),
+                        isFavourite = movie.url in favourites,
+                        onToggleFavourite = { toggleFavourite(movie.url) },
+                        onBack = { page = Page.HOME },
                         onWatch = { url ->
                             browsingSource = url
-                            browseReturn = Page.MOVIE
-                            page = Page.SITE
-                        })
+                            page = Page.FILM_PLAYER
+                        },
+                        onRelated = { next -> selectedFilm = next }
+                    )
                 }
                 Page.ABOUT -> AboutScreen(::back)
                 Page.TEST -> VideoTestScreen(::back) { playing = it }
