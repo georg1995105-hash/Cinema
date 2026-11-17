@@ -715,25 +715,24 @@ internal fun MirrorNativePlayer(
         if (showSettings) {
             Box(
                 modifier = Modifier.fillMaxSize()
-                    .background(Color.Black.copy(alpha = .50f))
+                    .background(Color.Black.copy(alpha = .12f))
                     .clickable {
                         showSettings = false
                         settingsSection = "Настройки"
                     }
             )
             Surface(
-                modifier = Modifier.align(Alignment.CenterEnd)
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .fillMaxWidth(.90f).widthIn(max = 390.dp)
-                    .heightIn(max = 520.dp),
-                shape = RoundedCornerShape(18.dp),
-                color = Color(0xFF262A32),
+                modifier = Modifier.align(Alignment.TopEnd)
+                    .padding(top = 60.dp, end = 12.dp, bottom = 8.dp)
+                    .width(270.dp).fillMaxHeight(.78f),
+                shape = RoundedCornerShape(15.dp),
+                color = Color(0xF222272E),
                 shadowElevation = 8.dp
             ) {
                 Column(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight()
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 18.dp, vertical = 8.dp),
+                        .padding(horizontal = 13.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -742,7 +741,7 @@ internal fun MirrorNativePlayer(
                     }) {
                         Icon(Icons.Outlined.ArrowBack, contentDescription = "Назад")
                     }
-                    Text(settingsSection, style = MaterialTheme.typography.titleMedium,
+                    Text(settingsSection, style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.weight(1f))
                     IconButton(onClick = {
                         settingsSection = "Настройки"
@@ -772,7 +771,7 @@ internal fun MirrorNativePlayer(
                         Row(
                             modifier = Modifier.fillMaxWidth()
                                 .clickable { settingsSection = heading }
-                                .padding(vertical = 13.dp),
+                                .padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(heading, modifier = Modifier.weight(1f),
@@ -852,7 +851,7 @@ internal fun MirrorNativePlayer(
                                 showSettings = false
                                 settingsSection = "Настройки"
                                 controls = true
-                            }.padding(vertical = 11.dp),
+                            }.padding(vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(label, modifier = Modifier.weight(1f),
