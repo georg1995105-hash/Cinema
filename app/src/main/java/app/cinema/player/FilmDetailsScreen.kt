@@ -73,12 +73,33 @@ internal object FilmPageParser {
            var value=norm(cells[1].textContent);
            if (label && value && value.length<220) facts.push([label,value]);
          });
-         var details=document.querySelector('.b-post__description_text, .b-post__description, [itemprop="description"]');
-         var description=details ? norm(details.textContent) : '';
-         if (!description) {
-           var meta=document.querySelector('meta[name="description"], meta[property="og:description"]');
-           if(meta) description=norm(meta.getAttribute('content'));
-         }
+         var descriptions=[];
+         document.querySelectorAll(
+           '.b-post__description_text, .b-post__description, [itemprop="description"]'
+         ).forEach(function(node) {
+           var value=norm(node.textContent);
+           if(value && descriptions.indexOf(value)<0)descriptions.push(value);
+         });
+         document.querySelectorAll('script[type="application/ld+json"]').forEach(function(script) {
+           try {
+             var json=JSON.parse(script.textContent);
+             var parts=Array.isArray(json)?json:[json];
+             parts.forEach(function(entry) {
+               var rows=(entry && Array.isArray(entry['@graph']))?entry['@graph']:[entry];
+               rows.forEach(function(row) {
+                 var value=norm(typeof row?.description==='string'?row.description:'');
+                 if(value && value.length<2000 && descriptions.indexOf(value)<0)
+                   descriptions.push(value);
+               });
+             });
+           } catch(e) {}
+         });
+         document.querySelectorAll('meta[name="description"], meta[property="og:description"]')
+           .forEach(function(meta){
+             var value=norm(meta.getAttribute('content'));
+             if(value && descriptions.indexOf(value)<0)descriptions.push(value);
+           });
+         var description=descriptions[0]||'';
          var people=[];
          document.querySelectorAll('.b-post__people_item, .b-post__actors_item, .b-post__person_item, .persons-list-holder .person-name-item').forEach(function(e){
            var img=e.querySelector('img');
@@ -167,6 +188,7 @@ internal object FilmPageParser {
          return JSON.stringify({
            originalTitle:txt('.b-post__origtitle, .b-post__subtitle, .b-post__title_original'),
            description:description.substring(0,1800),
+           descriptions:descriptions.slice(0,12),
            rating:txt('.b-post__rating, .b-post__rating_tables, .b-post__ratings'),
            facts:facts.slice(0,18),
            people:people.slice(0,18),
@@ -448,7 +470,12 @@ internal object FilmPageParser {
         val parts=FranchiseParts.validate(items,source)
         FilmInfo(
             originalTitle = data.optString("originalTitle").trim().take(130),
-            description = FilmTextSanitizer.description(data.optString("description")),
+            description = buildList {
+                val candidates = data.optJSONArray("descriptions")
+                if (candidates != null) for (i in 0 until minOf(candidates.length(), 12))
+                    add(candidates.optString(i))
+                add(data.optString("description"))
+            }.map(FilmTextSanitizer::description).firstOrNull { it.isNotBlank() }.orEmpty(),
             facts = facts,
             rating = data.optString("rating").replace(Regex("\\s+"), " ").trim().take(130),
             cast = people,

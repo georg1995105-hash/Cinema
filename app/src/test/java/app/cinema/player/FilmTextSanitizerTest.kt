@@ -4,6 +4,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FilmTextSanitizerTest {
+    @Test fun choosesRealPlotOverPremiumSeoWhenProvidedByMirror() {
+        val raw = org.json.JSONObject.quote(
+            """{"description":"Подписка HDRezka Premium — смотреть без рекламы","descriptions":["Подписка HDRezka Premium — смотреть без рекламы","После исчезновения друга герой раскрывает старую тайну."]}"""
+        )
+        val info = FilmPageParser.parse(raw, "https://mirror.example.com")
+        assertEquals("После исчезновения друга герой раскрывает старую тайну.",info?.description)
+    }
     @Test fun hidesLongPremiumAdvertisements() {
         assertEquals("", FilmTextSanitizer.description(
             "Подписка HDRezka Premium: фильмы и сериалы в озвучке HDRezka Studio, " +
