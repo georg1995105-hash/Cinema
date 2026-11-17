@@ -196,7 +196,7 @@ internal fun AboutScreen(back: () -> Unit) {
         Spacer(Modifier.height(24.dp))
         Text("Кино", style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold)
-        Text("Версия 0.2.0", color = appBlue)
+        Text("Версия 0.2.1", color = appBlue)
         Spacer(Modifier.height(18.dp))
         Text("Независимое приложение. Каталог и вход в сторонний сервис пока не подключены.",
             color = appMuted)

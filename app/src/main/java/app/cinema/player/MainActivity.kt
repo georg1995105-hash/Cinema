@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -105,80 +106,67 @@ private fun CinemaApp() {
     }
     BackHandler(enabled = page != Page.HOME) { back() }
 
-    Scaffold(containerColor = appBackground, bottomBar = {
-        if (!tablet) NavigationBar(containerColor = appPanel) {
-            destinations.forEach { destination ->
-                NavigationBarItem(
-                    selected = page == destination.page,
-                    onClick = { page = destination.page },
-                    icon = { Icon(destination.icon, contentDescription = destination.label) },
-                    label = { Text(destination.label) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = appBlue, selectedTextColor = appBlue,
-                        indicatorColor = appCard, unselectedIconColor = appMuted,
-                        unselectedTextColor = appMuted
-                    )
-                )
-            }
-        }
-    }) { insets ->
-        Row(Modifier.fillMaxSize().padding(insets)) {
-            if (tablet) SideRail(page) { page = it }
-            Box(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 24.dp, vertical = 16.dp)) {
-                when (page) {
-                    Page.HOME -> HomeScreen { page = Page.SECTIONS }
-                    Page.SEARCH -> SearchScreen(history, favourites) { playing = it }
-                    Page.SECTIONS -> SectionsScreen()
-                    Page.LIBRARY -> LibraryScreen(history, favourites, { playing = it },
-                        ::toggleFavourite, { url ->
-                            history.removeAll { it.url == url }
-                            local.saveHistory(history.toList())
-                        })
-                    Page.SETTINGS -> SettingsScreen { page = it }
-                    Page.SOURCES -> SourcesScreen(sources, activeSource, ::saveSources,
-                        { selected -> activeSource = selected; local.saveActiveSource(selected) }, ::back)
-                    Page.PLAYER -> PlayerSettingsScreen(local, ::back) { page = Page.TEST }
-                    Page.APPEARANCE -> AppearanceScreen(::back)
-                    Page.ABOUT -> AboutScreen(::back)
-                    Page.TEST -> VideoTestScreen(::back) { playing = it }
+    Scaffold(
+        containerColor = appBackground,
+        bottomBar = {
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                val width = if (maxWidth > 640.dp) 616.dp else maxWidth - 24.dp
+                NavigationBar(
+                    modifier = Modifier.width(width).clip(RoundedCornerShape(22.dp)),
+                    containerColor = appPanel,
+                    tonalElevation = 0.dp
+                ) {
+                    destinations.forEach { destination ->
+                        val selected = page == destination.page ||
+                            (destination.page == Page.SETTINGS && page in listOf(
+                                Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST
+                            ))
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick = { page = destination.page },
+                            icon = {
+                                Icon(destination.icon, contentDescription = destination.label)
+                            },
+                            label = { Text(destination.label, maxLines = 1) },
+                            alwaysShowLabel = true,
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = appBlue,
+                                selectedTextColor = appWhite,
+                                indicatorColor = appBlue.copy(alpha = .15f),
+                                unselectedIconColor = appMuted,
+                                unselectedTextColor = appMuted
+                            )
+                        )
+                    }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun SideRail(activePage: Page, onSelect: (Page) -> Unit) {
-    Column(
-        Modifier.width(78.dp).fillMaxHeight().background(appPanel),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(Modifier.height(18.dp))
+    ) { insets ->
         Box(
-            Modifier.size(46.dp).clip(RoundedCornerShape(15.dp))
-                .background(appBlue.copy(alpha = .16f)),
-            contentAlignment = Alignment.Center
-        ) { Icon(Icons.Outlined.Movie, contentDescription = "Кино", tint = appBlue) }
-        Spacer(Modifier.height(38.dp))
-        destinations.forEach { destination ->
-            val selected = activePage == destination.page ||
-                (destination.page == Page.SETTINGS && activePage in listOf(
-                    Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST
-                ))
-            Box(
-                Modifier.padding(vertical = 8.dp).size(52.dp).clip(RoundedCornerShape(16.dp))
-                    .background(if (selected) appBlue.copy(alpha = .17f) else Color.Transparent)
-                    .clickable { onSelect(destination.page) },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(destination.icon, contentDescription = destination.label,
-                    tint = if (selected) appBlue else appMuted,
-                    modifier = Modifier.size(25.dp))
+            Modifier.fillMaxSize().padding(insets)
+                .padding(horizontal = if (tablet) 30.dp else 16.dp, vertical = 12.dp)
+        ) {
+            when (page) {
+                Page.HOME -> HomeScreen()
+                Page.SEARCH -> SearchScreen(history, favourites) { playing = it }
+                Page.SECTIONS -> SectionsScreen()
+                Page.LIBRARY -> LibraryScreen(history, favourites, { playing = it },
+                    ::toggleFavourite, { url ->
+                        history.removeAll { it.url == url }
+                        local.saveHistory(history.toList())
+                    })
+                Page.SETTINGS -> SettingsScreen { page = it }
+                Page.SOURCES -> SourcesScreen(sources, activeSource, ::saveSources,
+                    { selected -> activeSource = selected; local.saveActiveSource(selected) }, ::back)
+                Page.PLAYER -> PlayerSettingsScreen(local, ::back) { page = Page.TEST }
+                Page.APPEARANCE -> AppearanceScreen(::back)
+                Page.ABOUT -> AboutScreen(::back)
+                Page.TEST -> VideoTestScreen(::back) { playing = it }
             }
         }
-        Spacer(Modifier.weight(1f))
-        Text("Гость", color = appBlue, style = MaterialTheme.typography.labelSmall)
-        Spacer(Modifier.height(20.dp))
     }
 }
 
@@ -202,7 +190,9 @@ internal fun ScreenHeading(title: String, subtitle: String? = null, back: (() ->
     }
 }
 
-private val feeds = listOf("Смотрят сейчас", "Новинки", "Последние поступления", "Популярное", "В ожидании")
+private val feeds = listOf(
+    "Горячие", "Смотрят сейчас", "Новинки", "Последние поступления", "Популярное", "В ожидании"
+)
 private val genres = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы", "Аниме")
 
 @Composable
@@ -229,66 +219,66 @@ internal fun SimpleTabs(items: List<String>, selected: String, onSelected: (Stri
 }
 
 @Composable
-private fun HomeScreen(openSections: () -> Unit) {
-    var feed by remember { mutableStateOf(feeds.first()) }
-    var genre by remember { mutableStateOf(genres.first()) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Кино", style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold)
-                Text("Фильмы и сериалы", color = appMuted)
-            }
-            Surface(color = appBlue.copy(alpha = .13f), shape = RoundedCornerShape(24.dp)) {
-                Text("Гостевой режим", color = appBlue,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelMedium)
-            }
-        }
-        Spacer(Modifier.height(20.dp))
-        SimpleTabs(feeds, feed) { feed = it }
-        Spacer(Modifier.height(7.dp))
-        SimpleTabs(genres, genre) { genre = it }
-        Spacer(Modifier.height(19.dp))
-        Surface(color = appPanel, shape = RoundedCornerShape(22.dp)) {
-            Row(Modifier.fillMaxWidth().padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(54.dp).clip(RoundedCornerShape(16.dp))
-                    .background(appBlue.copy(alpha = .13f)), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.Movie, contentDescription = null, tint = appBlue)
+private fun HomeScreen() {
+    var feed by rememberSaveable { mutableStateOf(feeds.first()) }
+    Column(Modifier.fillMaxSize()) {
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(26.dp),
+            contentPadding = PaddingValues(start = 2.dp, end = 20.dp)
+        ) {
+            items(feeds) { section ->
+                val active = feed == section
+                Column(
+                    Modifier.clickable { feed = section }
+                        .padding(top = 15.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        section,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (active) appWhite else appMuted,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1
+                    )
+                    Spacer(Modifier.height(13.dp))
+                    Box(
+                        Modifier.fillMaxWidth().height(3.dp)
+                            .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                            .background(if (active) appBlue else Color.Transparent)
+                    )
                 }
-                Spacer(Modifier.width(18.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Здесь появятся фильмы", style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(6.dp))
-                    Text("Каталог ещё не подключён. Ниже — расположение будущих афиш.",
-                        color = appMuted)
-                }
-                TextButton(onClick = openSections) { Text("Разделы") }
             }
         }
-        Spacer(Modifier.height(23.dp))
-        Text("Афиши", style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(5.dp))
-        Text("Предварительный вид сетки", color = appMuted,
-            style = MaterialTheme.typography.bodySmall)
-        Spacer(Modifier.height(12.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            items(6) {
-                Column(Modifier.width(142.dp)) {
-                    Box(Modifier.fillMaxWidth().height(188.dp).clip(RoundedCornerShape(14.dp))
-                        .background(appCard), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Outlined.Movie, contentDescription = null,
-                            tint = appMuted.copy(alpha = .23f), modifier = Modifier.size(35.dp))
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Box(Modifier.fillMaxWidth(.8f).height(10.dp).clip(RoundedCornerShape(5.dp))
-                        .background(appCard))
-                    Spacer(Modifier.height(7.dp))
-                    Box(Modifier.fillMaxWidth(.48f).height(8.dp).clip(RoundedCornerShape(5.dp))
-                        .background(appCard))
-                }
+        HorizontalDivider(color = appMuted.copy(alpha = .13f))
+        // Content will be populated by a catalogue provider. Do not show fake posters.
+        Box(
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Icon(
+                    Icons.Outlined.Movie,
+                    contentDescription = null,
+                    tint = appMuted.copy(alpha = .55f),
+                    modifier = Modifier.size(44.dp)
+                )
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    "Каталог пока пуст",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = appWhite,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    "Фильмы появятся после подключения источника.",
+                    color = appMuted,
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
         }
     }
