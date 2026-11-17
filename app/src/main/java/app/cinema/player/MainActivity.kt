@@ -8,6 +8,9 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -25,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import java.net.URI
 
 internal val appBackground = Color(0xFF13181C)
@@ -223,26 +227,39 @@ internal fun SimpleTabs(items: List<String>, selected: String, onSelected: (Stri
 
 @Composable
 private fun HomeScreen() {
-    var feed by rememberSaveable { mutableStateOf(feeds.first()) }
     var kind by rememberSaveable { mutableStateOf(contentKinds.first()) }
     var options by remember { mutableStateOf(false) }
+    val pager = rememberPagerState(initialPage = 0, pageCount = { feeds.size })
+    val tabList = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(pager.currentPage) {
+        if (tabList.layoutInfo.visibleItemsInfo.none { it.index == pager.currentPage }) {
+            tabList.animateScrollToItem(pager.currentPage)
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             LazyRow(
+                state = tabList,
                 modifier = Modifier.weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
                 contentPadding = PaddingValues(start = 2.dp, end = 12.dp)
             ) {
-                items(feeds) { section ->
-                    val active = feed == section
+                items(feeds.size) { index ->
+                    val active = pager.currentPage == index
                     Column(
                         Modifier.width(IntrinsicSize.Max)
-                            .clickable { feed = section }
+                            .clickable {
+                                scope.launch { pager.animateScrollToPage(index) }
+                            }
                             .padding(top = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            section, color = if (active) appWhite else appMuted,
+                            feeds[index],
+                            color = if (active) appWhite else appMuted,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
                             maxLines = 1
@@ -257,39 +274,107 @@ private fun HomeScreen() {
                 }
             }
             Box {
-                TextButton(onClick = { options = true }) {
-                    Text(kind, maxLines = 1, color = appBlue)
-                    Icon(Icons.Outlined.ArrowDropDown, contentDescription = "Тип контента", tint = appBlue)
+                Surface(
+                    color = appPanel,
+                    shape = RoundedCornerShape(13.dp),
+                    modifier = Modifier.padding(start = 8.dp),
+                ) {
+                    TextButton(
+                        onClick = { options = true },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            kind,
+                            maxLines = 1,
+                            color = appBlue,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        Spacer(Modifier.width(3.dp))
+                        Icon(
+                            Icons.Outlined.ArrowDropDown,
+                            contentDescription = "Выбрать тип контента",
+                            tint = appBlue
+                        )
+                    }
                 }
-                DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
+                DropdownMenu(
+                    expanded = options,
+                    onDismissRequest = { options = false },
+                    shape = RoundedCornerShape(16.dp),
+                    containerColor = appPanel,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.widthIn(min = 180.dp)
+                ) {
                     contentKinds.forEach { item ->
+                        val selected = kind == item
                         DropdownMenuItem(
-                            text = { Text(item) },
-                            onClick = { kind = item; options = false },
+                            text = {
+                                Text(
+                                    item,
+                                    color = if (selected) appBlue else appWhite,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            },
                             leadingIcon = {
-                                if (item == kind) Icon(Icons.Outlined.Check, contentDescription = null)
-                            }
+                                if (selected) {
+                                    Icon(
+                                        Icons.Outlined.Check,
+                                        contentDescription = null,
+                                        tint = appBlue
+                                    )
+                                } else {
+                                    Spacer(Modifier.size(24.dp))
+                                }
+                            },
+                            onClick = { kind = item; options = false },
+                            colors = MenuDefaults.itemColors(
+                                textColor = if (selected) appBlue else appWhite,
+                                leadingIconColor = appBlue
+                            )
                         )
                     }
                 }
             }
         }
         HorizontalDivider(color = appMuted.copy(alpha = .13f))
-        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(22.dp)) {
-                Icon(Icons.Outlined.Movie, contentDescription = null,
-                    tint = appMuted.copy(alpha = .5f), modifier = Modifier.size(43.dp))
-                Spacer(Modifier.height(12.dp))
-                Text("Каталог пока пуст", style = MaterialTheme.typography.titleMedium,
-                    color = appWhite, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(6.dp))
-                Text("Фильмы появятся после подключения источника.",
-                    color = appMuted, style = MaterialTheme.typography.bodyMedium)
+        HorizontalPager(
+            state = pager,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            key = { index -> feeds[index] }
+        ) { index ->
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(22.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.Movie, contentDescription = null,
+                        tint = appMuted.copy(alpha = .5f),
+                        modifier = Modifier.size(43.dp)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Каталог пока пуст",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = appWhite,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Фильмы появятся после подключения источника.",
+                        color = appMuted,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
             }
         }
     }
 }
+
 @Composable
 internal fun EmptyPanel(title: String, explanation: String, icon: ImageVector) {
     Surface(color = appPanel, shape = RoundedCornerShape(22.dp),
