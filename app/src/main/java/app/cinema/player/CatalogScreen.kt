@@ -43,7 +43,8 @@ internal data class CatalogMovie(
     val url: String,
     val title: String,
     val poster: String,
-    val details: String
+    val details: String,
+    val posterAlternatives: List<String> = emptyList()
 )
 
 /** A bounded in-memory catalogue cache; no user credentials or cookies are persisted. */
@@ -110,10 +111,18 @@ internal object MirrorCatalog {
             if (host != origin && !host.endsWith("." + origin)) continue
             val title = item.optString("title").trim().take(130)
             if (title.isBlank() || !seen.add(url)) continue
-            val poster = item.optString("poster").trim()
-                .takeIf(SourceRules::isValidHttpsUrl).orEmpty()
+            val pictures = buildList {
+                val primary = item.optString("poster").trim()
+                if (SourceRules.isValidHttpsUrl(primary)) add(primary)
+                val raw = item.optJSONArray("posters")
+                if (raw != null) for (n in 0 until minOf(raw.length(), 12)) {
+                    val link = raw.optString(n).trim()
+                    if (SourceRules.isValidHttpsUrl(link) && link !in this) add(link)
+                }
+            }
+            val poster = pictures.firstOrNull().orEmpty()
             val details = item.optString("details").replace(Regex("\\s+"), " ").trim().take(110)
-            list.add(CatalogMovie(url, title, poster, details))
+            list.add(CatalogMovie(url, title, poster, details, pictures.drop(1)))
         }
         list
     }.getOrDefault(emptyList())
@@ -125,13 +134,50 @@ internal object MirrorCatalog {
             var a = item.querySelector('.b-content__inline_item-link a[href]');
             if (!a) return null;
             var link = item.querySelector('.b-content__inline_item-link');
-            var img = item.querySelector('.b-content__inline_item-cover img');
-            var name = (a.textContent || a.getAttribute('title') || '').trim();
-            var image = img ? (img.getAttribute('data-src') || img.getAttribute('data-original') ||
-                              img.getAttribute('data-lazy-src') || img.getAttribute('src') || '') : '';
-            function absolute(s) {try{return new URL(s,document.baseURI).href;}catch(e){return '';}}
+            var img = item.querySelector('.b-content__inline_item-cover img') || item.querySelector('img');
+            var cover = item.querySelector('.b-content__inline_item-cover');
+            var name = (a.textContent || a.getAttribute('title') || img?.getAttribute('alt') || '').trim();
+            function absolute(s) {
+              try { return new URL(s,document.baseURI).href; } catch(e) { return ''; }
+            }
+            var posters = [];
+            function add(s) {
+              if (!s) return;
+              var u=absolute(s.trim());
+              if (!u.startsWith('https://') || /(?:placeholder|spacer|blank\.|data:image|\/1x1\.)/i.test(u)) return;
+              if(posters.indexOf(u)===-1)posters.push(u);
+            }
+            function srcset(text) {
+              if(!text)return;
+              text.split(',').reverse().forEach(function(entry) {
+                 add((entry||'').trim().split(/\s+/)[0]);
+              });
+            }
+            if(img) {
+              ['data-src','data-original','data-lazy-src','data-image','data-url',
+                'data-srcset','srcset','src'].forEach(function(key) {
+                 var v=img.getAttribute(key);
+                 if(key.indexOf('srcset')>=0)srcset(v); else add(v);
+              });
+              add(img.currentSrc);
+              var picture=img.closest('picture');
+              if(picture)Array.from(picture.querySelectorAll('source')).forEach(function(e) {
+                 srcset(e.getAttribute('srcset')||e.getAttribute('data-srcset'));
+              });
+            }
+            if(cover) {
+              var css=cover.style.backgroundImage || getComputedStyle(cover).backgroundImage || '';
+              var found=css.match(/url\(['"]?(.*?)['"]?\)/i);
+              if(found)add(found[1]);
+              var noscript=cover.querySelector('noscript');
+              if(noscript) {
+                var n=noscript.textContent.match(/src=['"]([^'"]+)/i);
+                if(n)add(n[1]);
+              }
+            }
             var data = link ? link.querySelector('div') : null;
-            return {url:absolute(a.getAttribute('href')),title:name,poster:absolute(image),
+            return {url:absolute(a.getAttribute('href')),title:name,poster:posters[0]||'',
+                    posters:posters.slice(0,8),
                     details:data ? (data.textContent || '').trim() : ''};
           }).filter(function(x){return x && x.title && x.url;});
           return JSON.stringify({cards:cards});
@@ -294,20 +340,33 @@ internal fun CatalogGrid(
 @Composable
 internal fun FilmPoster(movie: CatalogMovie, source: String, onClick: () -> Unit) {
     val context = LocalContext.current
-    val image = remember(movie.poster, source) {
-        ImageRequest.Builder(context).data(movie.poster)
-            .addHeader("Referer", source)
-            // Third-party poster CDNs never receive the site's private cookies.
+    val candidates = remember(movie.poster, movie.posterAlternatives) {
+        (listOf(movie.poster) + movie.posterAlternatives).filter(SourceRules::isValidHttpsUrl).distinct()
+    }
+    var imageIndex by remember(movie.url, candidates) { mutableIntStateOf(0) }
+    val url = candidates.getOrNull(imageIndex)
+    val image = remember(url, source) {
+        ImageRequest.Builder(context)
+            .data(url)
+            .addHeader("Referer", source.trimEnd('/') + "/")
+            .addHeader("User-Agent", WebSettings.getDefaultUserAgent(context))
             .crossfade(true).build()
     }
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Box(Modifier.fillMaxWidth().aspectRatio(.70f).clip(RoundedCornerShape(14.dp))
             .background(appCard), contentAlignment = Alignment.Center) {
-            if (movie.poster.isNotEmpty()) AsyncImage(
-                model = image, contentDescription = movie.title, contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            ) else Icon(Icons.Outlined.Movie, contentDescription = null,
-                tint = appMuted.copy(alpha = .5f), modifier = Modifier.size(38.dp))
+            if (url != null) {
+                AsyncImage(
+                    model = image, contentDescription = movie.title,
+                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                    onError = {
+                        if (imageIndex < candidates.lastIndex) imageIndex++
+                    }
+                )
+            } else {
+                Icon(Icons.Outlined.Movie, contentDescription = null,
+                    tint = appMuted.copy(alpha = .5f), modifier = Modifier.size(38.dp))
+            }
         }
         Spacer(Modifier.height(7.dp))
         Text(movie.title, style = MaterialTheme.typography.bodyMedium,
@@ -319,4 +378,3 @@ internal fun FilmPoster(movie: CatalogMovie, source: String, onClick: () -> Unit
         }
     }
 }
-
