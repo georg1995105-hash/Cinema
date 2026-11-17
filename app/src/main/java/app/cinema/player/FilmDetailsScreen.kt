@@ -447,10 +447,31 @@ internal fun FilmDetails(
     }
 
     val primary = MaterialTheme.colorScheme.onSurface
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wide = maxWidth >= 730.dp
         if (webView != null) AndroidView(factory = { webView }, modifier = Modifier.size(2.dp).alpha(.01f))
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            if (wide) {
+                val posterWidth = (maxWidth * .35f).coerceIn(250.dp, 420.dp)
+                Box(Modifier.width(posterWidth).fillMaxHeight()
+                    .clip(RoundedCornerShape(17.dp)).background(appCard),
+                    contentAlignment = Alignment.TopCenter) {
+                    if (movie.poster.isNotBlank()) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context).data(movie.poster)
+                                .addHeader("Referer", source).build(),
+                            contentDescription = movie.title,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(Icons.Outlined.Movie, contentDescription = null,
+                            tint = appMuted, modifier = Modifier.size(52.dp))
+                    }
+                }
+            }
+            LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxHeight(),
             contentPadding = PaddingValues(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
@@ -466,23 +487,25 @@ internal fun FilmDetails(
             }
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                    Box(Modifier.width(142.dp).aspectRatio(.70f)
-                        .clip(RoundedCornerShape(16.dp)).background(appCard),
-                        contentAlignment = Alignment.Center) {
-                        if (movie.poster.isNotBlank()) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(context).data(movie.poster)
-                                    .addHeader("Referer", source).build(),
-                                contentDescription = movie.title,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Icon(Icons.Outlined.Movie, contentDescription = null,
-                                modifier = Modifier.size(42.dp), tint = appMuted)
+                    if (!wide) {
+                        Box(Modifier.width(142.dp).aspectRatio(.70f)
+                            .clip(RoundedCornerShape(16.dp)).background(appCard),
+                            contentAlignment = Alignment.Center) {
+                            if (movie.poster.isNotBlank()) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context).data(movie.poster)
+                                        .addHeader("Referer", source).build(),
+                                    contentDescription = movie.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Icon(Icons.Outlined.Movie, contentDescription = null,
+                                    modifier = Modifier.size(42.dp), tint = appMuted)
+                            }
                         }
+                        Spacer(Modifier.width(16.dp))
                     }
-                    Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                         Text(movie.title, style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold)
@@ -637,6 +660,7 @@ internal fun FilmDetails(
                         color = appMuted)
                 }
             }
+        }
         }
     }
 }
