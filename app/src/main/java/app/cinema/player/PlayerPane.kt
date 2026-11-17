@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -18,8 +19,9 @@ import androidx.media3.ui.PlayerView
 fun PlayerPane(
     url: String,
     startPositionMs: Long,
+    seekSeconds: Int,
     onClose: () -> Unit,
-    onSave: (Long) -> Unit,
+    onSave: (Long) -> Unit
 ) {
     val context = LocalContext.current
     val player = remember(url) {
@@ -36,16 +38,18 @@ fun PlayerPane(
             player.release()
         }
     }
-    BackHandler { onClose() }
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .padding(16.dp)
-    ) {
-        TextButton(onClick = onClose) { Text("← Вернуться") }
-        Spacer(Modifier.height(12.dp))
+    BackHandler(onBack = onClose)
+    Column(Modifier.fillMaxSize().background(Color.Black).padding(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onClose) { Text("← Назад") }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = {
+                player.seekTo((player.currentPosition - seekSeconds * 1000L).coerceAtLeast(0))
+            }) { Text("−$seekSeconds с") }
+            TextButton(onClick = {
+                player.seekTo(player.currentPosition + seekSeconds * 1000L)
+            }) { Text("+$seekSeconds с") }
+        }
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
@@ -56,10 +60,7 @@ fun PlayerPane(
             },
             modifier = Modifier.fillMaxWidth().weight(1f)
         )
-        Text(
-            text = "Воспроизведение HTTPS-видео. Доступ зависит от источника.",
-            color = Color.LightGray,
-            style = MaterialTheme.typography.bodySmall
-        )
+        Text("Встроенный плеер. Доступность видео зависит от источника.",
+            color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
     }
 }
