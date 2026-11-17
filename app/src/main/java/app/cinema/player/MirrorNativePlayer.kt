@@ -85,7 +85,9 @@ private val playerMetaJs = """
 })()
 """.trimIndent()
 
-private suspend fun mirrorAjax(web: WebView, payload: Map<String,String>): String? =
+private suspend fun mirrorAjax(
+    web: WebView, payload: Map<String,String>, anonymous: Boolean = false
+): String? =
     withTimeoutOrNull(16000L) {
         suspendCancellableCoroutine { continuation ->
             val handler=Handler(Looper.getMainLooper())
@@ -95,7 +97,7 @@ private suspend fun mirrorAjax(web: WebView, payload: Map<String,String>): Strin
             (function(){
                window['$marker']=null;
                fetch('/ajax/get_cdn_series/?t='+Date.now(),{
-                 method:'POST',credentials:'same-origin',
+                 method:'POST',credentials:'${if (anonymous) "omit" else "same-origin"}',
                  headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
                    'X-Requested-With':'XMLHttpRequest'},
                  body:new URLSearchParams($body).toString()
@@ -170,6 +172,10 @@ internal fun MirrorNativePlayer(
     var subtitleOptions by remember(filmUrl){mutableStateOf<List<MirrorSubtitle>>(emptyList())}
     var subtitleIndex by remember(filmUrl){mutableIntStateOf(-1)}
     var quality by remember(filmUrl){mutableStateOf("")}
+    // One bounded attempt to use the mirror's publicly accessible guest response.
+    // This never forges a premium account or bypasses a server-side entitlement check.
+    var anonymousRequest by remember(filmUrl) { mutableStateOf(false) }
+    var anonymousTried by remember(filmUrl) { mutableStateOf(false) }
     var resumeMs by remember(filmUrl){mutableLongStateOf(startPositionMs)}
     var endedCounter by remember(filmUrl) { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
@@ -270,7 +276,7 @@ internal fun MirrorNativePlayer(
         }
         readyVoice=voice
     }
-    LaunchedEffect(movie,voice,readyVoice,season,episode){
+    LaunchedEffect(movie,voice,readyVoice,season,episode,anonymousRequest){
         val item=movie?:return@LaunchedEffect
         if(voice.isBlank()||(item.isSeries&&(readyVoice!=voice||season.isBlank()||episode.isBlank())))return@LaunchedEffect
         val desiredQuality = quality.ifBlank { savedSelection?.quality.orEmpty() }
@@ -279,7 +285,7 @@ internal fun MirrorNativePlayer(
         val request=mutableMapOf("id" to item.id,"translator_id" to voice,
             "action" to (if(item.isSeries)"get_stream" else "get_movie"))
         if(item.isSeries){request["season"]=season;request["episode"]=episode}
-        val result=mirrorAjax(web,request)
+        val result=mirrorAjax(web,request,anonymous=anonymousRequest)
         if(result==null){message="";error="Источник не ответил"}
         else{
             val streams=MirrorMediaParser.parseStreamInfo(result)
@@ -290,7 +296,9 @@ internal fun MirrorNativePlayer(
             options=available
             quality=available.firstOrNull { it.label == desiredQuality }?.label
                 ?: available.firstOrNull()?.label.orEmpty()
-            error=reason
+            error=if (anonymousRequest && available.isEmpty())
+                "Зеркало не предоставило открытый гостевой видеопоток."
+                else reason
             message=""
         }
     }
@@ -300,7 +308,8 @@ internal fun MirrorNativePlayer(
         mutableIntStateOf(0)
     }
     val currentUrl = availableUrls.getOrNull(alternativeIndex)
-    val episodeKey = season + "/" + episode + "/" + voice + "/" + quality
+    val episodeKey = season + "/" + episode + "/" + voice + "/" + quality +
+        (if (anonymousRequest) "/guest" else "/session")
     var playbackState by remember(currentUrl, episodeKey){mutableIntStateOf(Player.STATE_IDLE)}
     var playerIssue by remember(currentUrl, episodeKey){mutableStateOf("")}
     var position by remember(currentUrl, episodeKey){mutableLongStateOf(resumeMs)}
@@ -317,11 +326,32 @@ internal fun MirrorNativePlayer(
         message = "Пробуем доступное качество " + next.label
         return true
     }
+    fun tryPublicGuestStream(): Boolean {
+        if (anonymousTried || anonymousRequest) return false
+        anonymousTried = true
+        anonymousRequest = true
+        resumeMs = 0L
+        options = emptyList()
+        quality = ""
+        error = ""
+        message = "Проверяем открытый гостевой поток"
+        return true
+    }
     val player=remember(currentUrl, subtitleOptions, episodeKey){
         currentUrl?.let {streamUrl ->
+            val headers = mutableMapOf("Referer" to filmUrl)
+            // Only the same-host source can receive its own site session.
+            // Do not leak account cookies to externally hosted video/CDN domains.
+            if (!anonymousRequest && runCatching {
+                    URI(streamUrl).host.equals(URI(filmUrl).host, ignoreCase = true)
+                }.getOrDefault(false)) {
+                CookieManager.getInstance().getCookie(filmUrl)?.let {
+                    if (it.isNotBlank()) headers["Cookie"] = it
+                }
+            }
             val http=DefaultHttpDataSource.Factory()
                 .setUserAgent(WebSettings.getDefaultUserAgent(context))
-                .setDefaultRequestProperties(mapOf("Referer" to filmUrl))
+                .setDefaultRequestProperties(headers)
             val data=DefaultDataSource.Factory(context,http)
             ExoPlayer.Builder(context,DefaultRenderersFactory(context).setEnableDecoderFallback(true))
                 .setMediaSourceFactory(DefaultMediaSourceFactory(data))
@@ -331,22 +361,24 @@ internal fun MirrorNativePlayer(
                             playbackState=state
                             if (state == Player.STATE_READY) {
                                 val length=duration
-                                if (length in 1..150_000L) {
+                                if (PublicStreamRetryPolicy.isShortPreview(length)) {
                                     if (alternativeIndex < availableUrls.lastIndex) {
                                         alternativeIndex++
                                         message="Проверяем другой доступный сервер"
-                                    } else if (!tryAnotherAvailableQuality()) {
-                                        playerIssue="Источник передал короткий ролик вместо полного видео. Проверьте другую доступную озвучку."
+                                    } else if (!tryAnotherAvailableQuality() &&
+                                        !tryPublicGuestStream()) {
+                                        playerIssue="Источник вернул короткий ролик. Открытого полного видео здесь нет."
                                         pause()
                                     }
                                 }
                             }
                             if (state == Player.STATE_ENDED) {
-                                if (currentPosition < 150_000L) {
+                                if (PublicStreamRetryPolicy.isShortPreview(currentPosition)) {
                                     if (alternativeIndex < availableUrls.lastIndex) {
                                         alternativeIndex++
-                                    } else if (!tryAnotherAvailableQuality()) {
-                                        playerIssue="Источник завершил короткий ролик. Полный поток недоступен."
+                                    } else if (!tryAnotherAvailableQuality() &&
+                                        !tryPublicGuestStream()) {
+                                        playerIssue="Короткий ролик завершён. Полного доступного потока нет."
                                     }
                                 } else {
                                     endedCounter++
@@ -357,7 +389,8 @@ internal fun MirrorNativePlayer(
                             if (alternativeIndex < availableUrls.lastIndex) {
                                 alternativeIndex++
                                 message="Пробуем другой доступный видеосервер"
-                            } else if (!tryAnotherAvailableQuality()) {
+                            } else if (!tryAnotherAvailableQuality() &&
+                                !tryPublicGuestStream()) {
                                 playerIssue="Ошибка воспроизведения: "+failure.errorCodeName
                             }
                         }
@@ -387,7 +420,8 @@ internal fun MirrorNativePlayer(
             if (player != null) {
                 val ms=player.currentPosition.coerceAtLeast(0)
                 // Do not overwrite the next episode's position with the previous episode's end.
-                if (ms > 0 && EpisodeNavigator.canResumeDisposedStream(
+                if (PublicStreamRetryPolicy.shouldSaveProgress(player.duration, ms) &&
+                    EpisodeNavigator.canResumeDisposedStream(
                     attachedEpisode, season + "/" + episode + "/" + voice + "/" + quality)) {
                     resumeMs = ms
                     onSave(ms)
@@ -412,7 +446,8 @@ internal fun MirrorNativePlayer(
             while (true) {
                 position = player.currentPosition.coerceAtLeast(0)
                 total = player.duration.coerceAtLeast(0)
-                if (position > 0L && (checkpoint < 0 ||
+                if (PublicStreamRetryPolicy.shouldSaveProgress(total, position) &&
+                    (checkpoint < 0 ||
                         kotlin.math.abs(position - checkpoint) >= 5000L)) {
                     onSave(position)
                     onSaveSelection(PlaybackSelection(season, episode, voice, quality, position))
@@ -432,6 +467,8 @@ internal fun MirrorNativePlayer(
             onSaveSelection(PlaybackSelection(season, episode, voice, quality, oldPosition))
         }
         resumeMs = 0L
+        anonymousRequest = false
+        anonymousTried = false
         season = target.season
         episode = target.id
         options = emptyList()
@@ -845,6 +882,8 @@ internal fun MirrorNativePlayer(
                                         val newVoice = movie?.voices?.getOrNull(index)
                                         if (newVoice != null && voice != newVoice.id) {
                                             voice = newVoice.id
+                                            anonymousRequest = false
+                                            anonymousTried = false
                                             readyVoice = ""
                                             options = emptyList()
                                             message = "Меняем озвучку"
