@@ -26,6 +26,7 @@ internal object MirrorPlaybackRequest {
             fields["episode"] = episode
         } else {
             val selected = movie.voices.firstOrNull { it.id == translatorId }
+                ?: movie.defaultFlags?.takeIf { it.id == translatorId }
             fields["is_camrip"] = (selected?.isCamrip ?: 0).toString()
             fields["is_ads"] = (selected?.isAds ?: 0).toString()
             fields["is_director"] = (selected?.isDirector ?: 0).toString()

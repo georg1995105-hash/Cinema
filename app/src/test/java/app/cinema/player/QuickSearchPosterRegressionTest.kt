@@ -1,22 +1,27 @@
 package app.cinema.player
 
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
 class QuickSearchPosterRegressionTest {
-    @Test fun missingPosterUsesSameOriginFilmPageWithTimeout() {
-        val js=MirrorQuickSearch.javascript("бригада")
-        assertTrue(js.contains("fetch(card.url"))
-        assertTrue(js.contains("!sameOrigin(response.url)"))
-        assertTrue(js.contains("controller.abort()"))
-        assertTrue(js.contains("slice(0,8)"))
-        assertTrue(js.contains("meta[property="))
-        assertTrue(js.contains("b-post__cover img"))
+    private val source = "https://example.org"
+    private val brigada = CatalogMovie("$source/series/drama/12-brigada.html", "Бригада", "", "2002")
+
+    @Test fun rejectsMirrorLogoAndKeepsRealAlternatives() {
+        val candidate = JSONObject().put("poster", "$source/assets/hdrezka.png")
+            .put("posters", JSONArray(listOf("$source/img/no_poster.jpg", "$source/img/12.jpg")))
+        assertEquals(listOf("$source/img/12.jpg"), MirrorCatalog.readPosters(candidate))
     }
-    @Test fun unsafeTextIsQuotedAsData() {
-        val js=MirrorQuickSearch.javascript("бригада');alert(1);//")
-        assertTrue(js.contains("var q = "))
-        assertTrue(js.contains("encodeURIComponent(q)"))
-        assertFalse(js.contains("fetch('https://"))
+
+    @Test fun posterEnrichmentJoinsTheIdenticalFilmUrl() {
+        val response = JSONArray()
+            .put(JSONObject().put("url", "$source/series/drama/13-other.html")
+                .put("posters", JSONArray(listOf("$source/img/13.jpg"))))
+            .put(JSONObject().put("url", brigada.url)
+                .put("posters", JSONArray(listOf("$source/img/12.jpg"))))
+        val result = MirrorQuickSearch.mergePosters(JSONObject.quote(response.toString()), listOf(brigada))
+        assertEquals(listOf(brigada.copy(poster = "$source/img/12.jpg")), result)
     }
 }

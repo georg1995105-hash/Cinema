@@ -243,12 +243,16 @@ internal fun AppearanceScreen(local: LocalStore, back: () -> Unit) {
 
 @Composable
 internal fun AboutScreen(back: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val version = remember(context) {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+    }
     Column {
         ScreenHeading("О приложении", null, back)
         Spacer(Modifier.height(24.dp))
-        Text("Кино", style = MaterialTheme.typography.headlineMedium,
+        Text(androidx.compose.ui.res.stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold)
-        Text("Версия 0.4.9", color = appBlue)
+        if (version != null) Text("Версия $version", color = appBlue)
         Spacer(Modifier.height(18.dp))
         Text("Независимое приложение с каталогом выбранного зеркала, локальной историей и необязательным входом в аккаунт источника.",
             color = appMuted)

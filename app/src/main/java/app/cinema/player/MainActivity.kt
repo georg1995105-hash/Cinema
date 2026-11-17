@@ -271,12 +271,14 @@ private fun CinemaApp() {
                         savedVoice = local.playbackSelection(movie.url)?.voice.orEmpty(),
                         onWatch = { url, voice ->
                             val previous = local.playbackSelection(url) ?: PlaybackSelection()
-                            // Empty voice deliberately requests automatic selection.
-                            local.savePlaybackSelection(url, previous.copy(voice = voice))
+                            if (voice.isNotBlank() && voice != previous.voice) {
+                                local.savePlaybackSelection(url, previous.copy(voice = voice))
+                            }
                             browsingSource = url
                             page = Page.FILM_PLAYER
                         },
                         onRelated = { next -> local.rememberMovie(next); selectedFilm = next },
+                        onMetadata = { refined -> local.rememberMovie(refined); selectedFilm = refined },
                         onPerson = { person ->
                             selectedPerson = person
                             previousFilm = selectedFilm
@@ -569,7 +571,7 @@ private fun LibraryScreen(
                         uri.scheme + "://" + uri.authority
                     }.getOrDefault(url)
                     Column(Modifier.fillMaxWidth()) {
-                        FilmPoster(film, origin) { onOpen(film) }
+                        FilmPoster(film) { onOpen(film) }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,

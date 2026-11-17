@@ -46,7 +46,7 @@ internal object MirrorTransportDecoder {
         }
         return runCatching {
             val decoded = String(Base64.getDecoder().decode(encoded), Charsets.UTF_8)
-            if ((decoded.startsWith("[") || decoded.startsWith("https://")) &&
+            if ((decoded.startsWith("[") || decoded.startsWith("https://") || decoded.startsWith("//")) &&
                 decoded.length <= 150_000) decoded else ""
         }.getOrDefault("")
     }

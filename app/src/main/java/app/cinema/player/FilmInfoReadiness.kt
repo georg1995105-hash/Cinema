@@ -6,10 +6,8 @@ internal object FilmInfoReadiness {
         data.description.isNotBlank() || data.facts.isNotEmpty() ||
         data.cast.isNotEmpty() || data.directors.isNotEmpty() ||
         data.voices.isNotEmpty() || data.related.isNotEmpty() ||
-        data.franchise.isNotEmpty()
+        data.franchise.isNotEmpty() || data.title.isNotBlank() || data.posters.isNotEmpty()
 
     fun canFinish(data: FilmInfo): Boolean =
-        hasContent(data) && data.franchiseResolved &&
-        data.cast.all { it.photo.isNotBlank() || it.url.isBlank() } &&
-        data.directors.all { it.photo.isNotBlank() || it.url.isBlank() }
+        hasContent(data) && data.franchiseResolved && data.description.isNotBlank()
 }

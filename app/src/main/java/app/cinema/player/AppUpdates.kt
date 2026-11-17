@@ -68,7 +68,7 @@ internal object AppUpdates {
         val c = URL(api).openConnection() as HttpURLConnection
         c.connectTimeout = 12000; c.readTimeout = 12000
         c.setRequestProperty("Accept", "application/vnd.github+json")
-        c.setRequestProperty("User-Agent", "Kino-Android")
+        c.setRequestProperty("User-Agent", "Cinema-Android")
         try {
             if (c.responseCode != 200) error("Недоступен список версий")
             val releases = JSONArray(c.inputStream.bufferedReader().use { it.readText() })
@@ -100,7 +100,7 @@ internal object AppUpdates {
         downloading = true; progress = 0; downloadedFile = null; message = "Загрузка обновления"
         downloadTask = scope.launch {
             val folder = File(context.cacheDir, "updates").apply { mkdirs() }
-            val destination = File(folder, "Kino-" + release.version + ".apk")
+            val destination = File(folder, "Cinema-" + release.version + ".apk")
             try {
                 withContext(Dispatchers.IO) {
                     val c = URL(release.url).openConnection() as HttpURLConnection
