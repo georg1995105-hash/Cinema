@@ -42,8 +42,18 @@ internal object MirrorVoiceDiscovery {
            group.getAttribute('data-title')||
            node.textContent||group.textContent).slice(0,75);
         if(!name)return;
+        function flag(attr) {
+          var value=node.getAttribute(attr);
+          if(value===null)value=group.getAttribute(attr);
+          return value==='0'||value==='1' ? Number(value) : null;
+        }
         if(!found.some(function(x){return x.id===id;}))
-          found.push({id:id,name:name});
+          found.push({
+            id:id,name:name,
+            isCamrip:flag('data-camrip'),
+            isAds:flag('data-ads'),
+            isDirector:flag('data-director')
+          });
         if(node.matches('.active, .selected, :checked') ||
            group.matches('.active, .selected') ||
            node.getAttribute('aria-selected')==='true')selected=id;

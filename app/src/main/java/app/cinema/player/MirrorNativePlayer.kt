@@ -69,6 +69,10 @@ private val playerMetaJs = """
     ${MirrorVoiceDiscovery.javascript}
     var js=Array.from(document.scripts).map(function(x){return x.textContent||'';}).join('\n');
     var init=js.match(/initCDN(Series|Movies)Events\s*\(\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?(\d{1,12})/i);
+    var flags=js.match(/initCDN(?:Series|Movies)Events\s*\(\s*['"]?\d{1,12}['"]?\s*,\s*['"]?\d{1,12}['"]?\s*,\s*([01])\s*,\s*([01])(?:\s*,\s*([01]))?/i);
+    var defaultCamrip=flags?Number(flags[1]):0;
+    var defaultAds=flags?Number(flags[2]):0;
+    var defaultDirector=flags&&flags[3]?Number(flags[3]):0;
     var scriptId=(js.match(/(?:post_id|news_id|postId)\s*[:=]\s*['"]?(\d{1,12})/i)||[])[1]||'';
     var numeric=function(v){var x=String(v||'').trim();return /^\d{1,12}$/.test(x)?x:'';};
     var idCandidates=[
@@ -85,7 +89,13 @@ private val playerMetaJs = """
     ];
     var id=idCandidates.map(numeric).find(Boolean)||'';
     var discovered=kinoDiscoverVoices();
-    var voices=discovered.voices;
+    var voices=discovered.voices.map(function(v){
+      return Object.assign({},v,{
+        isCamrip:v.isCamrip===null?defaultCamrip:v.isCamrip,
+        isAds:v.isAds===null?defaultAds:v.isAds,
+        isDirector:v.isDirector===null?defaultDirector:v.isDirector
+      });
+    });
     var activeVoice=discovered.selected;
     var initVoice=numeric(init?init[3]:'');
     var defaultVoice=activeVoice||initVoice||(voices.length===1?voices[0].id:'');
@@ -97,14 +107,17 @@ private val playerMetaJs = """
         if(cells.length<2 || !/в переводе|озвучк/i.test(clean(cells[0].textContent)))return '';
         return clean(cells[1].textContent);
       }).find(Boolean)||'';
-      voices.push({id:defaultVoice,name:(translation||('Перевод '+defaultVoice)).slice(0,75)});
+      voices.push({id:defaultVoice,name:(translation||('Перевод '+defaultVoice)).slice(0,75),
+        isCamrip:defaultCamrip,isAds:defaultAds,isDirector:defaultDirector});
     }
     var episodes=Array.from(document.querySelectorAll('.b-simple_episode__item[data-episode_id]')).map(
       function(x){return{season:x.getAttribute('data-season_id')||x.closest('ul[id^="simple-episodes-list-"]')?.id.replace('simple-episodes-list-','')||'1',episode:x.getAttribute('data-episode_id'),label:clean(x.textContent)}}
     );
+    var favs=(document.querySelector('[data-favs]')?.getAttribute('data-favs')||'').trim();
+    if(!/^[A-Za-z0-9_+=\/-]{1,256}$/.test(favs))favs='';
     return JSON.stringify({
       id:String(id),series:!!((init&&init[1]==='Series')||document.querySelector('#simple-episodes-tabs')),
-      voice:defaultVoice,voiceFromScript:!!init,voices:voices,episodes:episodes,
+      voice:defaultVoice,voiceFromScript:!!init,voices:voices,episodes:episodes,favs:favs,
       pageState:id?'ready':
         /captcha|checking your browser|access denied|verify you are human|anubis|cloudflare/i
           .test((document.title||'')+' '+(document.body?.innerText||'').slice(0,600))
@@ -370,9 +383,7 @@ internal fun MirrorNativePlayer(
         val desiredQuality = quality.ifBlank { savedSelection?.quality.orEmpty() }
         options=emptyList();quality="";error=""
         message="Получаем доступные видеопотоки"
-        val request=mutableMapOf("id" to item.id,"translator_id" to voice,
-            "action" to (if(item.isSeries)"get_stream" else "get_movie"))
-        if(item.isSeries){request["season"]=season;request["episode"]=episode}
+        val request=MirrorPlaybackRequest.stream(item,voice,season,episode)
         val result=mirrorAjax(web,request,anonymous=anonymousRequest)
         if(result==null){
             if(!tryNextVoice() && !tryPublicGuestStream()){

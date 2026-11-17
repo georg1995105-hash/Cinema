@@ -6,7 +6,10 @@ import org.json.JSONTokener
 import java.net.URI
 import java.util.Base64
 
-internal data class MirrorVoice(val id: String, val name: String)
+internal data class MirrorVoice(
+    val id: String, val name: String,
+    val isCamrip: Int = 0, val isAds: Int = 0, val isDirector: Int = 0
+)
 internal data class MirrorEpisode(val season: String, val id: String, val label: String)
 internal data class MirrorQuality(val label: String, val url: String, val alternatives: List<String> = emptyList())
 internal data class MirrorSubtitle(val title: String, val url: String, val language: String)
@@ -17,7 +20,8 @@ internal data class MirrorMoviePage(
     val id: String,
     val isSeries: Boolean,
     val voices: List<MirrorVoice>,
-    val episodes: List<MirrorEpisode>
+    val episodes: List<MirrorEpisode>,
+    val favs: String = ""
 )
 
 /**
@@ -67,7 +71,10 @@ internal object MirrorMediaParser {
             id,
             json.optBoolean("series"),
             voices,
-            parseEpisodes(json.optJSONArray("episodes"))
+            parseEpisodes(json.optJSONArray("episodes")),
+            json.optString("favs").takeIf {
+                it.matches(Regex("[A-Za-z0-9_+=/-]{1,256}"))
+            }.orEmpty()
         )
     }
 
@@ -78,7 +85,11 @@ internal object MirrorMediaParser {
             val id = item.optString("id").trim()
             val name = item.optString("name").trim().take(75)
             if (id.matches(Regex("[0-9]{1,12}")) && name.isNotBlank() &&
-                list.none { it.id == id }) list += MirrorVoice(id, name)
+                list.none { it.id == id }) {
+                fun flag(key: String) = item.optInt(key, 0).coerceIn(0, 1)
+                list += MirrorVoice(id, name, flag("isCamrip"),
+                    flag("isAds"), flag("isDirector"))
+            }
         }
         // Do not fabricate translator 0. A fallback is allowed only when the
         // selected mirror explicitly published its numeric translator ID.
