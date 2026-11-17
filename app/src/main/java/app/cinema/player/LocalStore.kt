@@ -31,6 +31,21 @@ class LocalStore(context: Context) {
         prefs.edit().putString(key, array.toString()).apply()
     }
 
+    internal fun searchHistory(): List<String> = runCatching {
+        val history = JSONArray(prefs.getString("search_history_v1", "[]") ?: "[]")
+        (0 until minOf(history.length(), 12)).map(history::getString).filter(String::isNotBlank)
+    }.getOrDefault(emptyList())
+
+    internal fun saveSearch(query: String): List<String> {
+        val value = query.trim().take(120)
+        if (value.isBlank()) return searchHistory()
+        val history = (listOf(value) + searchHistory().filterNot { it.equals(value, true) }).take(12)
+        prefs.edit().putString("search_history_v1", JSONArray(history).toString()).apply()
+        return history
+    }
+
+    internal fun clearSearchHistory() { prefs.edit().remove("search_history_v1").apply() }
+
     fun sources(): List<String> = strings("sources")
     fun saveSources(values: List<String>) = saveStrings("sources", values)
     fun favourites(): List<String> = strings("favourites")

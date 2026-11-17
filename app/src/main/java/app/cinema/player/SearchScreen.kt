@@ -45,6 +45,7 @@ private val genres = listOf(
 @Composable
 internal fun SearchScreen(
     source: String?,
+    local: LocalStore,
     cardsPerRow: Int,
     onOpen: (CatalogMovie) -> Unit,
     onAddSource: () -> Unit,
@@ -52,10 +53,20 @@ internal fun SearchScreen(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var submittedQuery by rememberSaveable { mutableStateOf("") }
+    var recent by remember { mutableStateOf(local.searchHistory()) }
+    fun submit(value: String) {
+        query = value.trim()
+        submittedQuery = query
+        recent = local.saveSearch(query)
+    }
     var type by rememberSaveable { mutableStateOf("Все") }
     LaunchedEffect(query) {
         delay(300)
         submittedQuery = query.trim()
+        if (submittedQuery.isNotBlank()) {
+            delay(1200)
+            recent = local.saveSearch(submittedQuery)
+        }
     }
     val countries = remember { mutableStateListOf<String>() }
     val selectedGenres = remember { mutableStateListOf<String>() }
@@ -74,8 +85,7 @@ internal fun SearchScreen(
                 ?.firstOrNull()
             if (!text.isNullOrBlank()) {
                 val recognized = VoiceSearchQuery.clean(text)
-                query = recognized
-                submittedQuery = recognized
+                submit(recognized)
                 showFilters = false
                 speechError = ""
             }
@@ -106,7 +116,7 @@ internal fun SearchScreen(
                 value = query, onValueChange = { query = it },
                 placeholder = { Text("Фильм или сериал", maxLines = 1) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { submittedQuery = query.trim() }),
+                keyboardActions = KeyboardActions(onSearch = { submit(query) }),
                 singleLine = true,
                 modifier = Modifier.weight(1f),
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
@@ -236,9 +246,24 @@ internal fun SearchScreen(
                 Spacer(Modifier.height(5.dp))
             }
         } else if (submittedQuery.isBlank()) {
-            Text("Введите название или нажмите микрофон",
-                color = appMuted, style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp))
+            if (recent.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Недавние запросы", modifier = Modifier.weight(1f))
+                    TextButton(onClick = { local.clearSearchHistory(); recent = emptyList() }) {
+                        Text("Очистить")
+                    }
+                }
+                LazyColumn(Modifier.weight(1f)) {
+                    items(recent) { term ->
+                        Row(Modifier.fillMaxWidth().clickable { submit(term) }.padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.History, contentDescription = null, tint = appMuted)
+                            Spacer(Modifier.width(12.dp))
+                            Text(term)
+                        }
+                    }
+                }
+            }
         } else {
             val url = remember(source, submittedQuery) {
                 source?.let { MirrorCatalog.searchUrl(it, submittedQuery) }
@@ -248,7 +273,7 @@ internal fun SearchScreen(
                 section = "Поиск",
                 kind = "Все",
                 cardsPerRow = cardsPerRow,
-                onOpen = onOpen,
+                onOpen = { movie -> recent = local.saveSearch(submittedQuery); onOpen(movie) },
                 onBrowse = onBrowse,
                 onAddSource = onAddSource,
                 requestOverride = url,

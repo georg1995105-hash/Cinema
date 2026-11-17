@@ -25,7 +25,12 @@ import java.net.URI
  * Does not bypass the site's access requirements or provide a native catalogue.
  */
 @Composable
-internal fun BrowserScreen(url: String, onBack: () -> Unit, accountMode: Boolean = false) {
+internal fun BrowserScreen(
+    url: String,
+    onBack: () -> Unit,
+    accountMode: Boolean = false,
+    readFilmMetadata: Boolean = false
+) {
     if (!SourceRules.isValidHttpsUrl(url)) {
         Column {
             ScreenHeading("Просмотр сайта", "Выберите зеркало в настройках", onBack)
@@ -56,6 +61,7 @@ internal fun BrowserScreen(url: String, onBack: () -> Unit, accountMode: Boolean
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
+                    if (readFilmMetadata && MirrorPostId.canOpen(url, request.url.toString())) return false
                     val scheme = request.url.scheme ?: return true
                     val host = request.url.host?.lowercase() ?: return true
                     return scheme != "https" || !(host == originHost || host.endsWith("." + originHost))
@@ -69,6 +75,14 @@ internal fun BrowserScreen(url: String, onBack: () -> Unit, accountMode: Boolean
                 override fun onPageFinished(view: WebView, target: String) {
                     loading = false
                     currentTitle = view.title?.take(70)?.ifBlank { "Зеркало сайта" } ?: "Зеркало сайта"
+                    if (readFilmMetadata && MirrorPostId.canOpen(url, target) && view.url == target) {
+                        view.evaluateJavascript(FilmPageParser.javascript) { raw ->
+                            if (view.url == target) {
+                                FilmPageParser.parse(raw, target)?.takeIf(FilmInfoReadiness::hasContent)
+                                    ?.let { FilmInfoMemory.put(url, it) }
+                            }
+                        }
+                    }
                 }
 
                 override fun onReceivedError(

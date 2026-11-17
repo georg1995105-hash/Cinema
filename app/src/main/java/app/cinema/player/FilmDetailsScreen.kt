@@ -376,6 +376,7 @@ internal fun FilmDetails(
     isFavourite: Boolean,
     onToggleFavourite: () -> Unit,
     onBack: () -> Unit,
+    onBrowse: () -> Unit,
     savedVoice: String,
     onWatch: (String, String) -> Unit,
     onRelated: (CatalogMovie) -> Unit,
@@ -408,16 +409,18 @@ internal fun FilmDetails(
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
-                    val blocked = !MirrorPostId.isSameFilm(movie.url, request.url.toString())
+                    val blocked = !MirrorPostId.canOpen(movie.url, request.url.toString())
                     if (blocked) {
-                        loadError = "Источник перенаправил на другую страницу."
+                        loadError = if (request.url.path.orEmpty().contains("login", true) &&
+                            SourceRules.sameOrigin(movie.url, request.url.toString())) "Сайт требует входа в аккаунт."
+                        else "Зеркало открыло другую страницу. Подробности фильма не получены."
                         loadDone = true
                     }
                     return blocked
                 }
 
                 private fun scan(view: WebView, pageUrl: String) {
-                    if (loadDone || scanningUrl == pageUrl || !MirrorPostId.isSameFilm(movie.url, pageUrl)) return
+                    if (loadDone || scanningUrl == pageUrl || !MirrorPostId.canOpen(movie.url, pageUrl)) return
                     scanningUrl = pageUrl
                     val timings = listOf(100L, 480L, 1200L, 2450L, 4400L, 6800L)
                     timings.forEachIndexed { index, wait ->
@@ -426,7 +429,7 @@ internal fun FilmDetails(
                             view.evaluateJavascript(FilmPageParser.franchiseJavascript) {}
                             view.evaluateJavascript(FilmPageParser.javascript) { raw ->
                                 if (loadDone || view.url != pageUrl) return@evaluateJavascript
-                                val parsed = FilmPageParser.parse(raw, source)
+                                val parsed = FilmPageParser.parse(raw, pageUrl)
                                 if (parsed != null && FilmInfoReadiness.hasContent(parsed)) {
                                     info = parsed
                                     if (FilmInfoReadiness.canFinish(parsed) && parsed.portraitsResolved && (parsed.cast.isNotEmpty() || index >= 4)) {
@@ -692,6 +695,7 @@ internal fun FilmDetails(
                 item {
                     Text(loadError.ifBlank { "Подробные сведения на выбранном зеркале сейчас недоступны." },
                         color = appMuted)
+                    TextButton(onClick = onBrowse) { Text("Открыть страницу на сайте") }
                 }
             }
         }
@@ -713,9 +717,14 @@ internal fun FilmDetails(
                             .getOrDefault("Выбранное зеркало"),
                         color = appMuted, style = MaterialTheme.typography.labelSmall)
                     if (info?.voices.isNullOrEmpty()) {
-                        Text("Зеркало пока не предоставило список озвучек.",
+                        Text(if (!loadDone) "Загружаем озвучки…" else loadError.ifBlank {
+                            "Источник не предоставил список озвучек."
+                        },
                             color = appMuted, style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(vertical = 8.dp))
+                    }
+                    if (loadDone && info == null) {
+                        TextButton(onClick = { showWatchMenu = false; onBrowse() }) { Text("Открыть страницу на сайте") }
                     }
                     info?.voices.orEmpty().forEach { candidate ->
                         HorizontalDivider(color = appMuted.copy(alpha = .10f))

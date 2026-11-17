@@ -1,0 +1,46 @@
+package app.cinema.player
+
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import org.junit.Rule
+import org.junit.Test
+
+class NavigationFlowTest {
+    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+
+    @Test fun mainTabsOpenAndRecentSearchCanBeReused() {
+        val store = LocalStore(compose.activity)
+        store.saveSearch("Бригада")
+        try {
+            compose.onNodeWithText("Добавьте зеркало").assertIsDisplayed()
+            compose.onNode(hasText("Поиск") and hasClickAction()).performClick()
+            compose.onNodeWithText("Недавние запросы").assertIsDisplayed()
+            compose.onNodeWithText("Бригада").performClick()
+            compose.onNodeWithText("Добавьте зеркало").assertIsDisplayed()
+            compose.onNodeWithText("Обновить").assertDoesNotExist()
+
+            compose.onNode(hasText("Моё") and hasClickAction()).performClick()
+            compose.onNodeWithText("Просмотров пока нет").assertIsDisplayed()
+            compose.onNodeWithText("Избранное").performClick()
+            compose.onNodeWithText("Избранное пока пусто").assertIsDisplayed()
+
+            compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
+            compose.onNodeWithText("Источники и зеркала").performClick()
+            compose.onNodeWithText("Адрес сайта").assertIsDisplayed()
+            compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
+            compose.onNodeWithText("Внешний вид").performClick()
+            compose.onNodeWithText("Тёмная тема").assertIsDisplayed()
+            compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
+            compose.onNodeWithText("Плеер").performClick()
+            compose.onNodeWithText("Шаг перемотки").assertIsDisplayed()
+            compose.onNode(hasText("Главная") and hasClickAction()).performClick()
+            compose.onNodeWithText("Добавьте зеркало").assertIsDisplayed()
+        } finally {
+            store.clearSearchHistory()
+        }
+    }
+}
