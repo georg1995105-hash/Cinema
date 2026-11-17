@@ -284,7 +284,7 @@ internal fun FilmDetails(
     val context = LocalContext.current
     var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
     var loadDone by remember(movie.url) { mutableStateOf(info != null) }
-    val webView = if (info == null && !loadDone) remember(context, movie.url) {
+    val webView = if (!loadDone) remember(context, movie.url) {
         val handler = Handler(Looper.getMainLooper())
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
@@ -321,9 +321,9 @@ internal fun FilmDetails(
                                         FilmInfoMemory.put(movie.url, parsed)
                                     }
                                 }
-                                if (index == delays.lastIndex || parsed?.cast?.all {
-                                        it.photo.isNotBlank() || it.url.isBlank()
-                                    } == true) loadDone = true
+                                if (index == delays.lastIndex || (parsed?.cast?.isNotEmpty() == true &&
+                                    parsed.cast.all { it.photo.isNotBlank() || it.url.isBlank() }))
+                                    loadDone = true
                             }
                         }, delay)
                     }
