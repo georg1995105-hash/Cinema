@@ -16,6 +16,8 @@ import android.webkit.WebViewClient
 import android.webkit.WebSettings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -32,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
@@ -122,7 +125,7 @@ private suspend fun mirrorAjax(web: WebView, payload: Map<String,String>): Strin
         }
     }
 
-@OptIn(UnstableApi::class)
+@OptIn(UnstableApi::class, ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 internal fun MirrorNativePlayer(
@@ -317,157 +320,366 @@ internal fun MirrorNativePlayer(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(appBackground)){
-        // WebView must be attached to an Android window to run the site's session JavaScript.
-        AndroidView(factory={web},modifier=Modifier.size(2.dp).alpha(0.01f))
-        if(!expanded)Row(verticalAlignment=Alignment.CenterVertically){
-            IconButton(onClick=onClose){Icon(Icons.Outlined.ArrowBack,contentDescription="Назад")}
-            Column(Modifier.weight(1f)){
-                Text(filmTitle,maxLines=1,style=MaterialTheme.typography.titleMedium)
-                Text("Встроенный плеер",color=appMuted,style=MaterialTheme.typography.bodySmall)
-            }
-            IconButton(onClick={expanded=true}){Icon(Icons.Outlined.Maximize,contentDescription="Развернуть")}
+    // All playback controls are overlaid on the video, including quality, audio and speed.
+    var showSettings by remember { mutableStateOf(false) }
+    var settingsSection by remember { mutableStateOf("Настройки") }
+    var speed by remember { mutableFloatStateOf(1f) }
+    val speeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
+    LaunchedEffect(player, speed) { player?.setPlaybackSpeed(speed) }
+    LaunchedEffect(player, controls, showSettings, paused, accelerated) {
+        if (player != null && controls && !showSettings && !paused && !accelerated) {
+            delay(4800)
+            controls = false
         }
-        Box(
-            (if(expanded)Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f/9f))
-                .background(Color.Black),
-            contentAlignment=Alignment.Center
-        ){
-            if(player!=null){
-                AndroidView(factory={ctx->PlayerView(ctx).apply{
-                    this.player=player;useController=false;keepScreenOn=true
-                }},modifier=Modifier.fillMaxSize(),update={it.player=player})
-                Box(Modifier.fillMaxSize().pointerInput(player,seekSeconds,holdSpeed){
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        // The source-session WebView is only an invisible bridge to the mirror.
+        AndroidView(factory = { web }, modifier = Modifier.size(2.dp).alpha(0.01f))
+        if (player != null) {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        this.player = player
+                        useController = false
+                        keepScreenOn = true
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+                update = { it.player = player }
+            )
+            Box(
+                Modifier.fillMaxSize().pointerInput(player, seekSeconds, holdSpeed) {
                     detectTapGestures(
-                        onTap={controls=!controls},
-                        onDoubleTap={tap->
-                            val jump=seekSeconds*1000L
-                            val next=if(tap.x<size.width/2f)(player.currentPosition-jump).coerceAtLeast(0)
-                                else player.currentPosition+jump
-                            player.seekTo(if(player.duration>0)next.coerceAtMost(player.duration)else next)
-                            controls=true
+                        onTap = { controls = !controls },
+                        onDoubleTap = { tap ->
+                            val jump = seekSeconds * 1000L
+                            val next = if (tap.x < size.width / 2f)
+                                (player.currentPosition - jump).coerceAtLeast(0)
+                            else player.currentPosition + jump
+                            player.seekTo(if (player.duration > 0) next.coerceAtMost(player.duration) else next)
+                            controls = true
                         },
-                        onPress={
-                            coroutineScope{
-                                var active=false
-                                val before=player.playbackParameters.speed
-                                val task=launch{
+                        onPress = {
+                            coroutineScope {
+                                var activated = false
+                                val previous = player.playbackParameters.speed
+                                val speedJob = launch {
                                     delay(425)
-                                    active=true
+                                    activated = true
                                     player.setPlaybackSpeed(holdSpeed.toFloat())
-                                    accelerated=true
+                                    accelerated = true
                                 }
-                                try{tryAwaitRelease()}finally{
-                                    task.cancel()
-                                    if(active){player.setPlaybackSpeed(before);accelerated=false}
+                                try { tryAwaitRelease() } finally {
+                                    speedJob.cancel()
+                                    if (activated) {
+                                        player.setPlaybackSpeed(previous)
+                                        accelerated = false
+                                    }
                                 }
                             }
                         }
                     )
-                })
-                if(controls)FilledIconButton(onClick={
-                    if(player.isPlaying)player.pause()else player.play()
-                }){
-                    Icon(if(paused)Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
-                        contentDescription=if(paused)"Продолжить"else"Пауза")
                 }
-                if(accelerated)Text(holdSpeed.toString()+"×",color=Color.White,
-                    modifier=Modifier.align(Alignment.TopEnd).padding(12.dp))
-                if(playbackState==Player.STATE_BUFFERING||playbackState==Player.STATE_IDLE)
-                    CircularProgressIndicator(color=appBlue,modifier=Modifier.size(29.dp))
-                if(playerIssue.isNotBlank())Surface(color=Color.Black.copy(alpha=.94f)){
-                    Text(playerIssue,color=Color.White,modifier=Modifier.padding(15.dp))
-                }
-            }else{
-                Column(horizontalAlignment=Alignment.CenterHorizontally,
-                    modifier=Modifier.padding(16.dp)){
-                    if(message.isNotBlank()){
-                        CircularProgressIndicator(color=appBlue,modifier=Modifier.size(30.dp))
-                        Spacer(Modifier.height(12.dp))
-                        Text(message,color=Color.White)
-                    }else{
-                        Icon(Icons.Outlined.VideocamOff,contentDescription=null,
-                            tint=appMuted,modifier=Modifier.size(35.dp))
-                        Spacer(Modifier.height(11.dp))
-                        Text(error.ifBlank{"Нет доступного видеопотока"},
-                            color=Color.White,style=MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-            if(expanded)IconButton(
-                onClick={expanded=false},
-                modifier=Modifier.align(Alignment.TopEnd)
-            ){Icon(Icons.Outlined.Minimize,contentDescription="Свернуть",tint=Color.White)}
+            )
         }
-        if(!expanded){
-            if(player!=null)Row(verticalAlignment=Alignment.CenterVertically){
-                TextButton(onClick={
-                    player.seekTo((player.currentPosition-seekSeconds*1000L).coerceAtLeast(0))
-                }){Text("−"+seekSeconds+" с")}
-                Slider(
-                    value=if(total>0)(position.toFloat()/total).coerceIn(0f,1f)else 0f,
-                    onValueChange={if(total>0)player.seekTo((it*total).toLong())},
-                    modifier=Modifier.weight(1f)
-                )
-                TextButton(onClick={
-                    val next=player.currentPosition+seekSeconds*1000L
-                    player.seekTo(if(total>0)next.coerceAtMost(total)else next)
-                }){Text("+"+seekSeconds+" с")}
-            }
+        if (player == null) {
             Column(
-                Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
-                    .padding(horizontal=12.dp,vertical=10.dp),
-                verticalArrangement=Arrangement.spacedBy(9.dp)
-            ){
-                val info=movie
-                if(info!=null){
-                    Text("Озвучка",style=MaterialTheme.typography.titleSmall)
-                    LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)){
-                        items(info.voices,key={it.id}){item->
-                            FilterChip(selected=voice==item.id,onClick={
-                                if(voice!=item.id){
-                                    voice=item.id;readyVoice="";options=emptyList()
-                                    message="Переключаем озвучку"
-                                }
-                            },label={Text(item.name,maxLines=1)})
-                        }
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (message.isNotBlank()) {
+                    CircularProgressIndicator(color = appBlue, modifier = Modifier.size(34.dp))
+                    Text(message, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    Icon(Icons.Outlined.VideocamOff, contentDescription = null,
+                        tint = appMuted, modifier = Modifier.size(38.dp))
+                    Text(error.ifBlank { "Нет доступного видеопотока" },
+                        color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        } else if (playbackState == Player.STATE_BUFFERING) {
+            CircularProgressIndicator(
+                color = appBlue, modifier = Modifier.align(Alignment.Center).size(30.dp)
+            )
+        }
+        if (accelerated) {
+            Surface(
+                color = Color.Black.copy(alpha = .65f),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp)
+            ) {
+                Text(holdSpeed.toString() + "×", color = Color.White,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp))
+            }
+        }
+        if (controls || player == null) {
+            Row(
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                    .background(Color.Black.copy(alpha = .63f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = {
+                    if (expanded) expanded = false else onClose()
+                }) {
+                    Icon(Icons.Outlined.ArrowBack, contentDescription = "Назад", tint = Color.White)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(filmTitle.ifBlank { "Воспроизведение" }, color = Color.White,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleMedium)
+                    if (player != null) Text(
+                        listOfNotNull(quality.takeIf { it.isNotBlank() },
+                            speed.takeIf { it != 1f }?.let { it.toString() + "×" }).joinToString(" · "),
+                        color = Color.LightGray, style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                IconButton(onClick = {
+                    settingsSection = "Настройки"
+                    showSettings = true
+                }) {
+                    Icon(Icons.Outlined.Settings, contentDescription = "Настройки плеера",
+                        tint = Color.White)
+                }
+            }
+        }
+        if (player != null && controls && playerIssue.isBlank()) {
+            Row(
+                modifier = Modifier.align(Alignment.Center),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                IconButton(
+                    onClick = { player.seekTo((player.currentPosition - seekSeconds * 1000L).coerceAtLeast(0)) },
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    Icon(Icons.Outlined.Replay10, contentDescription = "Назад на " + seekSeconds + " секунд",
+                        tint = Color.White, modifier = Modifier.size(34.dp))
+                }
+                FilledIconButton(
+                    onClick = { if (player.isPlaying) player.pause() else player.play() },
+                    modifier = Modifier.size(64.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = appBlue, contentColor = Color.Black
+                    )
+                ) {
+                    Icon(if (paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
+                        contentDescription = if (paused) "Воспроизвести" else "Пауза",
+                        modifier = Modifier.size(34.dp))
+                }
+                IconButton(
+                    onClick = {
+                        val next = player.currentPosition + seekSeconds * 1000L
+                        player.seekTo(if (player.duration > 0) next.coerceAtMost(player.duration) else next)
+                    },
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    Icon(Icons.Outlined.Forward10,
+                        contentDescription = "Вперёд на " + seekSeconds + " секунд",
+                        tint = Color.White, modifier = Modifier.size(34.dp))
+                }
+            }
+        }
+        if (player != null && playerIssue.isNotBlank()) {
+            Surface(
+                modifier = Modifier.align(Alignment.Center).padding(20.dp),
+                color = Color.Black.copy(alpha = .92f),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(Icons.Outlined.ReportProblem, contentDescription = null, tint = appBlue)
+                    Spacer(Modifier.height(10.dp))
+                    Text(playerIssue, color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(12.dp))
+                    TextButton(onClick = {
+                        settingsSection = "Настройки"
+                        showSettings = true
+                    }) { Text("Выбрать другой вариант") }
+                }
+            }
+        }
+        if (player != null && controls) {
+            Column(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .background(Color.Black.copy(alpha = .64f))
+                    .padding(horizontal = 12.dp, vertical = 5.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(formatVideoTime(position), color = Color.White,
+                        style = MaterialTheme.typography.labelMedium)
+                    Slider(
+                        value = if (total > 0L) (position.toFloat() / total).coerceIn(0f, 1f) else 0f,
+                        onValueChange = { if (total > 0L) player.seekTo((it * total).toLong()) },
+                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
+                    )
+                    Text(if (total > 0L) formatVideoTime(total) else "—:—",
+                        color = Color.White, style = MaterialTheme.typography.labelMedium)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        settingsSection = "Качество"
+                        showSettings = true
+                    }) {
+                        Text(quality.ifBlank { "Авто" }, color = Color.White)
+                    }
+                    TextButton(onClick = {
+                        settingsSection = "Скорость"
+                        showSettings = true
+                    }) {
+                        Text(speed.toString() + "×", color = Color.White)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = {
+                        settingsSection = "Настройки"
+                        showSettings = true
+                    }) {
+                        Icon(Icons.Outlined.Tune, contentDescription = "Озвучка, серии и качество",
+                            tint = Color.White)
+                    }
+                    IconButton(onClick = { expanded = !expanded }) {
+                        Icon(
+                            if (expanded) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
+                            contentDescription = if (expanded) "Выйти из полного экрана" else "Полный экран",
+                            tint = Color.White
+                        )
                     }
                 }
-                if(info?.isSeries==true){
-                    Text("Сезон",style=MaterialTheme.typography.titleSmall)
-                    LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)){
-                        items(episodes.map{it.season}.distinct()){s->
-                            FilterChip(selected=season==s,onClick={
-                                season=s;episode=episodes.firstOrNull{it.season==s}?.id.orEmpty()
-                            },label={Text(s)})
-                        }
-                    }
-                    Text("Серия",style=MaterialTheme.typography.titleSmall)
-                    LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)){
-                        items(episodes.filter{it.season==season}){e->
-                            FilterChip(selected=episode==e.id,onClick={episode=e.id},
-                                label={Text(e.label)})
-                        }
-                    }
-                }
-                if(options.isNotEmpty()){
-                    Text("Качество",style=MaterialTheme.typography.titleSmall)
-                    LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)){
-                        items(options,key={it.label}){q->
-                            FilterChip(selected=quality==q.label,onClick={
-                                resumeMs=player?.currentPosition?.coerceAtLeast(0)?:resumeMs
-                                quality=q.label
-                            },label={Text(q.label)})
-                        }
-                    }
-                }
-                if(error.isNotBlank()&&player==null)
-                    Text(error,color=MaterialTheme.colorScheme.error)
-                Text("Воспроизводятся только потоки, доступные для вашего подключения.",
-                    color=appMuted,style=MaterialTheme.typography.bodySmall)
             }
         }
     }
+
+    if (showSettings) {
+        ModalBottomSheet(
+            onDismissRequest = { showSettings = false; settingsSection = "Настройки" },
+            containerColor = appCard,
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 450.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (settingsSection != "Настройки") IconButton(onClick = {
+                        settingsSection = "Настройки"
+                    }) {
+                        Icon(Icons.Outlined.ArrowBack, contentDescription = "Назад")
+                    }
+                    Text(settingsSection, style = MaterialTheme.typography.titleLarge)
+                }
+                Spacer(Modifier.height(9.dp))
+                if (settingsSection == "Настройки") {
+                    val audio = movie?.voices?.firstOrNull { it.id == voice }?.name ?: "По умолчанию"
+                    val menuRows = listOf(
+                        "Качество" to quality.ifBlank { "Авто" },
+                        "Скорость" to (speed.toString() + "×"),
+                        "Озвучка" to audio
+                    ) + if (movie?.isSeries == true) listOf(
+                        "Сезон" to season.ifBlank { "—" },
+                        "Серия" to (episodes.firstOrNull { it.id == episode && it.season == season }
+                            ?.label ?: episode.ifBlank { "—" })
+                    ) else emptyList()
+                    menuRows.forEach { (heading, value) ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable { settingsSection = heading }
+                                .padding(vertical = 13.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(heading, modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyLarge)
+                            Text(value, color = appMuted, maxLines = 1,
+                                modifier = Modifier.widthIn(max = 160.dp),
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.width(7.dp))
+                            Icon(Icons.Outlined.ChevronRight, contentDescription = null,
+                                tint = appMuted)
+                        }
+                        HorizontalDivider(color = appMuted.copy(alpha = .16f))
+                    }
+                } else {
+                    val choices = when (settingsSection) {
+                        "Качество" -> options.map { it.label }
+                        "Скорость" -> speeds.map { it.toString() + "×" }
+                        "Озвучка" -> movie?.voices?.map { it.name }.orEmpty()
+                        "Сезон" -> episodes.map { it.season }.distinct().map { "Сезон " + it }
+                        "Серия" -> episodes.filter { it.season == season }.map { it.label }
+                        else -> emptyList()
+                    }
+                    val currentIndex = when (settingsSection) {
+                        "Качество" -> options.indexOfFirst { it.label == quality }
+                        "Скорость" -> speeds.indexOf(speed)
+                        "Озвучка" -> movie?.voices?.indexOfFirst { it.id == voice } ?: -1
+                        "Сезон" -> episodes.map { it.season }.distinct().indexOf(season)
+                        "Серия" -> episodes.filter { it.season == season }.indexOfFirst { it.id == episode }
+                        else -> -1
+                    }
+                    if (choices.isEmpty()) Text(
+                        "Нет доступных вариантов",
+                        color = appMuted,
+                        modifier = Modifier.padding(vertical = 17.dp)
+                    )
+                    choices.forEachIndexed { index, label ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                when (settingsSection) {
+                                    "Качество" -> {
+                                        resumeMs = player?.currentPosition?.coerceAtLeast(0) ?: resumeMs
+                                        quality = options[index].label
+                                    }
+                                    "Скорость" -> speed = speeds[index]
+                                    "Озвучка" -> {
+                                        val newVoice = movie?.voices?.getOrNull(index)
+                                        if (newVoice != null && voice != newVoice.id) {
+                                            voice = newVoice.id
+                                            readyVoice = ""
+                                            options = emptyList()
+                                            message = "Меняем озвучку"
+                                        }
+                                    }
+                                    "Сезон" -> {
+                                        val id = episodes.map { it.season }.distinct()[index]
+                                        season = id
+                                        episode = episodes.firstOrNull { it.season == id }?.id.orEmpty()
+                                    }
+                                    "Серия" -> {
+                                        episode = episodes.filter { it.season == season }[index].id
+                                    }
+                                }
+                                showSettings = false
+                                settingsSection = "Настройки"
+                                controls = true
+                            }.padding(vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(label, modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyLarge)
+                            RadioButton(selected = index == currentIndex, onClick = null)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+            }
+        }
+    }
+}
+private fun formatVideoTime(milliseconds: Long): String {
+    val seconds = (milliseconds / 1000L).coerceAtLeast(0L)
+    val hours = seconds / 3600L
+    val minutes = seconds / 60L % 60L
+    val remain = seconds % 60L
+    return if (hours > 0) {
+        hours.toString() + ":" + minutes.toString().padStart(2, '0') +
+            ":" + remain.toString().padStart(2, '0')
+    } else minutes.toString().padStart(2, '0') + ":" + remain.toString().padStart(2, '0')
 }
 
 private fun findHostingActivity(context: Context): Activity? = when (context) {
