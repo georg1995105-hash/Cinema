@@ -287,10 +287,7 @@ internal fun FilmPoster(movie: CatalogMovie, source: String, onClick: () -> Unit
     val image = remember(movie.poster, source) {
         ImageRequest.Builder(context).data(movie.poster)
             .addHeader("Referer", source)
-            .apply {
-                val cookie = CookieManager.getInstance().getCookie(source)
-                if (!cookie.isNullOrBlank()) addHeader("Cookie", cookie)
-            }
+            // Third-party poster CDNs never receive the site's private cookies.
             .crossfade(true).build()
     }
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {

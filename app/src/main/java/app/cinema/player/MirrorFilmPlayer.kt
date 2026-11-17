@@ -172,14 +172,16 @@ internal fun MirrorFilmPlayer(
             contentAlignment = Alignment.Center) {
             AndroidView(factory = { player }, modifier = Modifier.fillMaxSize())
             if (checking && !playerReady) {
-                Column(
-                    modifier = Modifier.background(Color.Black.copy(alpha = .95f))
-                        .padding(18.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    CircularProgressIndicator(color = appBlue, modifier = Modifier.size(32.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text("Загружаем плеер", color = Color.White)
+                Surface(color = Color.Black, modifier = Modifier.fillMaxSize()) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(color = appBlue, modifier = Modifier.size(32.dp))
+                        Spacer(Modifier.height(12.dp))
+                        Text("Загружаем плеер", color = Color.White)
+                    }
                 }
             }
             if (!checking && error.isNotBlank() && !playerReady) {
