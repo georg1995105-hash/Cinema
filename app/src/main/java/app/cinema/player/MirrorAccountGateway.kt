@@ -2,7 +2,6 @@ package app.cinema.player
 
 import android.content.Context
 import android.webkit.CookieManager
-import android.webkit.WebSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -41,7 +40,8 @@ internal class MirrorAccountGateway(private val context: Context) {
         return listOf("dle_user_id=", "dle_password=").all { c.contains(it) }
     }
 
-    suspend fun signIn(source: String, username: String, password: String): MirrorLoginResult =
+    suspend fun signIn(source: String, username: String, password: String,
+                       userAgent: String): MirrorLoginResult =
         withContext(Dispatchers.IO) {
             val origin = origin(source)
                 ?: return@withContext MirrorLoginResult(false, "Выберите защищённое зеркало.")
@@ -62,8 +62,7 @@ internal class MirrorAccountGateway(private val context: Context) {
                     connection.setRequestProperty("X-Requested-With", "XMLHttpRequest")
                     connection.setRequestProperty("Origin", origin)
                     connection.setRequestProperty("Referer", "$origin/")
-                    connection.setRequestProperty("User-Agent",
-                        WebSettings.getDefaultUserAgent(context))
+                    connection.setRequestProperty("User-Agent", userAgent)
                     connection.setRequestProperty("Content-Type",
                         "application/x-www-form-urlencoded; charset=UTF-8")
                     cookieManager.getCookie(origin)?.let {
@@ -80,7 +79,11 @@ internal class MirrorAccountGateway(private val context: Context) {
                     connection.outputStream.use { it.write(form.toByteArray(Charsets.UTF_8)) }
                     val status = connection.responseCode
                     val body = if (status == 200)
-                        connection.inputStream.bufferedReader().use { it.readText().take(12000) }
+                        connection.inputStream.bufferedReader().use { reader ->
+                            val buffer=CharArray(12000)
+                            val size=reader.read(buffer)
+                            if(size>0) String(buffer,0,size) else ""
+                        }
                     else ""
                     val outcome = MirrorLoginProtocol.decode(status, body)
                     if (!outcome.success) return@withContext outcome

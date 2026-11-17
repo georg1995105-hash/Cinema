@@ -36,6 +36,9 @@ internal fun MirrorAccountScreen(
 ) {
     val context = LocalContext.current
     val gateway = remember(context) { MirrorAccountGateway(context.applicationContext) }
+    val userAgent = remember(context) {
+        android.webkit.WebSettings.getDefaultUserAgent(context)
+    }
     val scope = rememberCoroutineScope()
     var login by remember(selected) { mutableStateOf("") }
     var password by remember(selected) { mutableStateOf("") }
@@ -165,7 +168,7 @@ internal fun MirrorAccountScreen(
                             onClick = {
                                 busy = true
                                 scope.launch {
-                                    val result = gateway.signIn(selected, login, password)
+                                    val result = gateway.signIn(selected, login, password, userAgent)
                                     busy = false
                                     signedIn = result.success
                                     message = result.message
