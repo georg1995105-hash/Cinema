@@ -110,7 +110,11 @@ internal object MirrorMediaParser {
             val alternatives = match.groupValues[2].trim().trimEnd(',')
                 .split(" or ", ignoreCase = true)
             // Prefer a normal MP4 link where available. Media3 also accepts real HLS URLs.
-            val candidates = alternatives.mapNotNull { normalizeMediaUrl(it) }
+            val candidates = alternatives.mapNotNull { normalizeMediaUrl(it) }.filterNot {
+                val lower = it.lowercase()
+                listOf("/premium/", "/promo/", "/preroll/", "/advert/", "premium-promo",
+                    "ad-preview", "premium_ad").any(lower::contains)
+            }
             val chosen = candidates.firstOrNull { it.endsWith(".mp4", true) || ".mp4?" in it.lowercase() }
                 ?: candidates.firstOrNull { ".m3u8" in it.lowercase() }
                 ?: candidates.firstOrNull()

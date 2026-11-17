@@ -275,7 +275,19 @@ internal fun MirrorNativePlayer(
                 .setMediaSourceFactory(DefaultMediaSourceFactory(data))
                 .build().apply {
                     addListener(object:Player.Listener {
-                        override fun onPlaybackStateChanged(state:Int){playbackState=state}
+                        override fun onPlaybackStateChanged(state:Int){
+                            playbackState=state
+                            if (state == Player.STATE_READY) {
+                                val length=duration
+                                if (length in 1..150_000L) {
+                                    playerIssue="Источник передал короткий ролик вместо полного видео. Проверьте другую доступную озвучку или качество."
+                                    pause()
+                                }
+                            }
+                            if (state == Player.STATE_ENDED && currentPosition < 150_000L) {
+                                playerIssue="Видеопоток завершился слишком быстро: вероятно, зеркало вернуло рекламный ролик."
+                            }
+                        }
                         override fun onPlayerError(failure:PlaybackException){
                             playerIssue="Ошибка воспроизведения: "+failure.errorCodeName
                         }
