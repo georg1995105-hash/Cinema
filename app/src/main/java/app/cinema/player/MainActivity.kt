@@ -531,11 +531,17 @@ private fun LibraryScreen(
     val isTablet = LocalConfiguration.current.screenWidthDp >= 600
     val columns = if (isTablet) cardsPerRow.coerceIn(3,8)
         else cardsPerRow.coerceIn(2,3)
+    var metadataRevision by remember { mutableIntStateOf(0) }
     val list = if (selected == "История") history.map { it.url } else favourites
+    val missing = (history.map { it.url } + favourites).distinct()
+        .filter { local.savedMovie(it) == null }.take(16)
     val visible = if (sort == "По названию")
         list.sortedBy { local.savedMovie(it)?.title?.lowercase() ?: it } else list
 
     Column(Modifier.fillMaxSize()) {
+        if (missing.isNotEmpty()) {
+            RecoverLibraryCards(missing, local) { metadataRevision++ }
+        }
         ScreenHeading("Моё")
         Spacer(Modifier.height(14.dp))
         SimpleTabs(listOf("История", "Избранное"), selected) { selected = it }
@@ -558,8 +564,10 @@ private fun LibraryScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 gridItems(visible, key = { it }) { url ->
+                    // Read revision so a recovered title/poster repaints its existing grid cell.
+                    val revision = metadataRevision
                     val film = local.savedMovie(url) ?: CatalogMovie(
-                        url, "Сохранённый фильм", "", "")
+                        url, if (revision >= 0) "Загружаем карточку…" else "", "", "")
                     val position = history.firstOrNull { it.url == url }?.positionMs
                     val origin = runCatching {
                         val uri = URI(url)
