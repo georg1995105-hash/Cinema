@@ -248,9 +248,9 @@ internal fun AboutScreen(back: () -> Unit) {
         Spacer(Modifier.height(24.dp))
         Text("Кино", style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold)
-        Text("Версия 0.4.8", color = appBlue)
+        Text("Версия 0.4.9", color = appBlue)
         Spacer(Modifier.height(18.dp))
-        Text("Независимое приложение. Каталог и вход в сторонний сервис пока не подключены.",
+        Text("Независимое приложение с каталогом выбранного зеркала, локальной историей и необязательным входом в аккаунт источника.",
             color = appMuted)
     }
 }
