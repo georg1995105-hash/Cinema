@@ -187,6 +187,7 @@ internal fun MirrorNativePlayer(
     var movie by remember(filmUrl){mutableStateOf<MirrorMoviePage?>(null)}
     var message by remember(filmUrl){mutableStateOf("Получаем данные фильма")}
     var error by remember(filmUrl){mutableStateOf("")}
+    var rejectedNavigation by remember(filmUrl) { mutableStateOf("") }
     var voice by remember(filmUrl){mutableStateOf("")}
     var episodes by remember(filmUrl){mutableStateOf<List<MirrorEpisode>>(emptyList())}
     var readyVoice by remember(filmUrl){mutableStateOf("")}
@@ -249,11 +250,10 @@ internal fun MirrorNativePlayer(
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
-                    val url = request.url.toString()
-                    if (MirrorPostId.canOpen(filmUrl, url)) return false
-                    fail(if (SourceRules.sameOrigin(filmUrl, url) && request.url.path.orEmpty().contains("login", true))
-                        PlaybackFailure.AUTH_REQUIRED.text else PlaybackFailure.REDIRECT.text)
-                    return true
+                    val decision = FilmNavigationPolicy.decide(filmUrl, request.url.toString())
+                    if (!decision.allow) rejectedNavigation = decision.failureMessage
+                    // A blocked navigation attempt must not kill the already loaded film page.
+                    return !decision.allow
                 }
 
                 private fun scan(view: WebView, url: String) {
@@ -267,18 +267,18 @@ internal fun MirrorNativePlayer(
                             view.evaluateJavascript(mirrorPlayerMetadataJavascript) { result ->
                                 if (failed || view.url != url || movie != null) return@evaluateJavascript
                                 val parsed = MirrorMediaParser.pageFromWebView(result, url)
-                                if (parsed != null && (parsed.voices.isNotEmpty() || index >= 2)) {
+                                if (parsed != null && (parsed.voices.isNotEmpty() ||
+                                        parsed.defaultVoice.isNotBlank())) {
+                                    val candidate = MirrorVoiceSelection.choose(
+                                        parsed, savedSelection?.voice)
+                                    if (candidate.isBlank()) {
+                                        if (index == timings.lastIndex)
+                                            fail("Источник не предоставил действительные озвучки.")
+                                        return@evaluateJavascript
+                                    }
                                     pageUrl = url
                                     movie = parsed
-                                    voice = savedSelection?.voice?.takeIf { saved ->
-                                        saved == parsed.defaultVoice || parsed.voices.any { it.id == saved }
-                                    } ?: parsed.defaultVoice.takeUnless { id ->
-                                        parsed.voices.any { it.id == id && it.requiresSubscription } &&
-                                            parsed.voices.any { !it.requiresSubscription }
-                                    }.orEmpty().ifBlank {
-                                        parsed.voices.firstOrNull { !it.requiresSubscription }?.id
-                                            ?: parsed.voices.first().id
-                                    }
+                                    voice = candidate
                                     if (voice == parsed.defaultVoice || parsed.voices.size == 1) episodes = parsed.episodes
                                     val chosen = episodes.firstOrNull {
                                         it.season == savedSelection?.season && it.id == savedSelection?.episode
@@ -289,7 +289,9 @@ internal fun MirrorNativePlayer(
                                     episode = chosen?.id.orEmpty()
                                     metadataHandler.removeCallbacksAndMessages(null)
                                 } else if (index == timings.lastIndex) {
-                                    fail(MirrorMediaParser.pageFailureReason(result))
+                                    fail(rejectedNavigation.ifBlank {
+                                         MirrorMediaParser.pageFailureReason(result)
+                                     })
                                 }
                             }
                         }, wait)
@@ -326,7 +328,9 @@ internal fun MirrorNativePlayer(
         delay(10000)
         if (movie == null && error.isBlank()) {
             message = ""
-            error = "Источник не загрузил сведения плеера. Проверьте доступность выбранного зеркала."
+            error = rejectedNavigation.ifBlank {
+                "Источник не загрузил сведения плеера. Проверьте доступность выбранного зеркала."
+            }
         }
     }
     // Attempt distinct source-provided translators in a bounded sequence.
