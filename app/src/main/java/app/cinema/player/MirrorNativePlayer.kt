@@ -1,6 +1,11 @@
 package app.cinema.player
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import android.view.View
 import android.graphics.Color as AndroidColor
 import android.os.Handler
 import android.os.Looper
@@ -129,7 +134,6 @@ internal fun MirrorNativePlayer(
     onSave: (Long)->Unit,
     onClose: ()->Unit
 ) {
-    BackHandler(onBack=onClose)
     if(!SourceRules.isValidHttpsUrl(filmUrl)) {
         ScreenHeading("Просмотр", back=onClose)
         Text("Неверная ссылка на фильм")
@@ -149,6 +153,26 @@ internal fun MirrorNativePlayer(
     var quality by remember(filmUrl){mutableStateOf("")}
     var resumeMs by remember(filmUrl){mutableLongStateOf(startPositionMs)}
     var expanded by remember {mutableStateOf(false)}
+    BackHandler { if (expanded) expanded = false else onClose() }
+    DisposableEffect(expanded) {
+        val activity = findHostingActivity(context)
+        val root = activity?.window?.decorView
+        val oldFlags = root?.systemUiVisibility ?: 0
+        val oldOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if (expanded) {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            root?.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        }
+        onDispose {
+            if (expanded) {
+                root?.systemUiVisibility = oldFlags
+                activity?.requestedOrientation = oldOrientation
+            }
+        }
+    }
 
     val web=remember(context,filmUrl) {
         WebView(context).apply {
@@ -432,4 +456,10 @@ internal fun MirrorNativePlayer(
             }
         }
     }
+}
+
+private fun findHostingActivity(context: Context): Activity? = when (context) {
+    is Activity -> context
+    is ContextWrapper -> findHostingActivity(context.baseContext)
+    else -> null
 }
