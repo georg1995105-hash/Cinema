@@ -306,10 +306,15 @@ class SourceFlowTest {
                     playbackError.get()?.let { throw AssertionError("Media3 HTTPS playback failed", it) }
                     assertTrue("Media3 rendered a video frame", frame.await(15, TimeUnit.SECONDS))
                     playbackError.get()?.let { throw AssertionError("Media3 HTTPS frame failed", it) }
-                    Thread.sleep(700)
+                    val deadline = android.os.SystemClock.elapsedRealtime() + 15_000
                     var position = 0L
-                    instrumentation.runOnMainSync { position = requireNotNull(player).currentPosition }
-                    assertTrue("Playback advanced", position > 200)
+                    do {
+                        instrumentation.runOnMainSync { position = requireNotNull(player).currentPosition }
+                        playbackError.get()?.let { throw AssertionError("Media3 stopped during playback", it) }
+                        if (position > 200) break
+                        Thread.sleep(150)
+                    } while (android.os.SystemClock.elapsedRealtime() < deadline)
+                    assertTrue("Playback advanced beyond 200 ms, last position: $position", position > 200)
                     val originRequest = requireNotNull(mirror.takeRequest(5, TimeUnit.SECONDS))
                     assertEquals(filmPage, originRequest.getHeader("Referer"))
                     assertTrue(originRequest.getHeader("Cookie").orEmpty().contains("cinema_fixture=active"))
