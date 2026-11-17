@@ -73,7 +73,7 @@ class LocalStore(context: Context) {
         prefs.edit().putString("watch_history", array.toString()).apply()
     }
     /** Bounded device-only poster/title index for history and bookmarks. */
-    fun rememberMovie(movie: CatalogMovie) {
+    internal fun rememberMovie(movie: CatalogMovie) {
         if (!SourceRules.isValidHttpsUrl(movie.url)) return
         val all = runCatching {
             JSONArray(prefs.getString("movie_index_v1", "[]") ?: "[]")
@@ -92,7 +92,7 @@ class LocalStore(context: Context) {
         prefs.edit().putString("movie_index_v1",items.toString()).apply()
     }
 
-    fun savedMovie(url: String): CatalogMovie? = runCatching {
+    internal fun savedMovie(url: String): CatalogMovie? = runCatching {
         val array = JSONArray(prefs.getString("movie_index_v1","[]") ?: "[]")
         val item = (0 until array.length())
             .mapNotNull(array::optJSONObject)
