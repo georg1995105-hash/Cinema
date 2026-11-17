@@ -22,7 +22,7 @@ internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         ScreenHeading("Настройки", "Только нужное")
         Spacer(Modifier.height(24.dp))
-        MenuItem("Аккаунт зеркала", "Войти на сайте или продолжить как гость",
+        MenuItem("Аккаунт", "Вход, гостевой режим и выбранное зеркало",
             Icons.Outlined.AccountCircle, onAccount)
         MenuItem("Источники и зеркала", "Добавление и проверка адресов", Icons.Outlined.Link) {
             open(Page.SOURCES)
@@ -40,7 +40,7 @@ internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
             open(Page.ABOUT)
         }
         Spacer(Modifier.height(18.dp))
-        Text("Вход необязателен. Данные аккаунта вводятся на сайте выбранного зеркала.",
+        Text("Вход необязателен. Пароль не сохраняется приложением.",
             color = appMuted, style = MaterialTheme.typography.bodySmall)
     }
 }

@@ -38,7 +38,7 @@ internal val appBlue = Color(0xFF80C5E7)
 internal val appMuted = Color(0xFFADB8C0)
 private val appWhite = Color(0xFFF4F7F8)
 
-internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE, MOVIE, FILM_PLAYER, PERSON }
+internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE, MOVIE, FILM_PLAYER, PERSON, ACCOUNT }
 private data class Destination(val page: Page, val label: String, val icon: ImageVector)
 private val destinations = listOf(
     Destination(Page.HOME, "Главная", Icons.Outlined.Home),
@@ -104,7 +104,7 @@ private fun CinemaApp() {
         if (page == Page.MOVIE) { page = movieBack; return }
         if (page == Page.PERSON) { selectedFilm = previousFilm; page = Page.MOVIE; return }
         if (page == Page.FILM_PLAYER) { page = Page.MOVIE; return }
-        page = if (page in listOf(Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST, Page.UPDATES))
+        page = if (page in listOf(Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST, Page.UPDATES, Page.ACCOUNT))
             Page.SETTINGS else Page.HOME
     }
     playing?.let { url ->
@@ -137,7 +137,7 @@ private fun CinemaApp() {
                     destinations.forEach { destination ->
                         val selected = page == destination.page ||
                             (destination.page == Page.SETTINGS && page in listOf(
-                                Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST, Page.UPDATES
+                                Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST, Page.UPDATES, Page.ACCOUNT
                             ))
                         NavigationBarItem(
                             selected = selected,
@@ -187,15 +187,22 @@ private fun CinemaApp() {
                     })
                 Page.SETTINGS -> SettingsScreen(
                     open = { page = it },
-                    onAccount = {
-                        if (activeSource != null) {
-                            browsingSource = activeSource
-                            browseReturn = Page.SETTINGS
-                            page = Page.SITE
-                        } else {
-                            page = Page.SOURCES
-                        }
-                    }
+                    onAccount = { page = Page.ACCOUNT }
+                )
+                Page.ACCOUNT -> MirrorAccountScreen(
+                    sources = sources,
+                    selected = activeSource,
+                    onSelect = { selected ->
+                        activeSource = selected
+                        local.saveActiveSource(selected)
+                    },
+                    onSources = { page = Page.SOURCES },
+                    onRegistration = { mirror ->
+                        browsingSource = MirrorAccountGateway.origin(mirror)?.plus("/index.php?do=register")
+                        browseReturn = Page.ACCOUNT
+                        page = Page.SITE
+                    },
+                    onBack = ::back
                 )
                 Page.SOURCES -> SourcesScreen(sources, activeSource, ::saveSources,
                     { selected -> activeSource = selected; local.saveActiveSource(selected) }, ::back,
@@ -206,7 +213,7 @@ private fun CinemaApp() {
                 Page.SITE -> BrowserScreen(
                     browsingSource ?: activeSource.orEmpty(),
                     onBack = { page = browseReturn },
-                    accountMode = browseReturn == Page.SETTINGS
+                    accountMode = browseReturn == Page.ACCOUNT
                 )
                 Page.FILM_PLAYER -> MirrorNativePlayer(
                     filmUrl = browsingSource ?: selectedFilm?.url.orEmpty(),
