@@ -192,7 +192,7 @@ internal object MirrorMediaParser {
     }
 
     fun parseQualityList(data: String): List<MirrorQuality> {
-        val expanded = unpackPlainUrlList(data.trim())
+        val expanded = MirrorTransportDecoder.decode(data.trim())
         if (expanded.isBlank()) return emptyList()
         val matches = Regex("""\[([^\]]{1,180})\]([^\[]+)""").findAll(expanded)
         val output = mutableListOf<MirrorQuality>()
@@ -233,6 +233,8 @@ internal object MirrorMediaParser {
 
     private fun normalizeMediaUrl(raw: String): String? {
         var url = raw.trim().trimEnd(',', ';').trim()
+        if (url.startsWith("//") && !url.startsWith("///"))
+            url = "https:" + url
         if (url.endsWith(":hls:manifest.m3u8")) {
             // CDN's variant suffix is not a valid HLS file path; the base URL is MP4.
             url = url.removeSuffix(":hls:manifest.m3u8")
@@ -244,27 +246,5 @@ internal object MirrorMediaParser {
         }.getOrNull()
     }
 
-    private fun unpackPlainUrlList(data: String): String {
-        if (!data.startsWith("#h")) return data
-        // This is only the legacy non-cryptographic transport encoding of URL strings,
-        // not DRM, entitlement checks or a means of acquiring restricted quality.
-        var encoded = data.removePrefix("#h")
-        val known = listOf(
-            "IyMjI14hISMjIUBA", "QEBAQEAhIyMhXl5e",
-            "JCQhIUAkJEBeIUAjJCRA", "JCQjISFAIyFAIyM=", "Xl5eIUAjIyEhIyM="
-        )
-        repeat(48) {
-            val index = encoded.indexOf("//_//")
-            if (index < 0) return@repeat
-            val remaining = encoded.substring(index + 5)
-            val salt = known.firstOrNull(remaining::startsWith)
-            // Unrecognized layouts are not guessed: avoid malformed URLs.
-            if (salt == null) return ""
-            encoded = encoded.substring(0, index) + remaining.drop(salt.length)
-        }
-        return runCatching {
-            val restored = String(Base64.getDecoder().decode(encoded), Charsets.UTF_8)
-            if (restored.startsWith("[") || restored.startsWith("https://")) restored else ""
-        }.getOrDefault("")
-    }
+
 }
