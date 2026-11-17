@@ -77,8 +77,8 @@ internal object FilmPageParser {
          function absolute(s) {try {return new URL(s,document.baseURI).href;} catch(e) {return '';}}
          var facts=[];
          document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(tr) {
-           var cells=tr.querySelectorAll('td');
-           if (cells.length<2) return;
+           var cells=tr.cells;
+           if (!cells || cells.length<2) return;
            var label=norm(cells[0].textContent).replace(/:$/,'');
            var value=norm(cells[1].textContent);
            if (label && value && value.length<220) facts.push([label,value]);
@@ -97,6 +97,7 @@ internal object FilmPageParser {
          if (!descriptions.length) {
            var section = document.querySelector('.b-post__description');
            section?.querySelectorAll('p').forEach(function(paragraph){addDescription(paragraph.textContent)});
+           if (!descriptions.length && section) addDescription(section.textContent);
          }
          var localTitle = norm(document.querySelector('.b-post__title h1, h1.b-post__title, h1[itemprop="name"], .b-post__title')?.textContent);
          var id = function(url) { return new URL(url,location.href).pathname.match(/\/(\d{1,12})-[^/]+\.html$/i)?.[1]; };
@@ -385,11 +386,15 @@ internal fun FilmDetails(
 ) {
     val context = LocalContext.current
     var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
-    var loadDone by remember(movie.url) { mutableStateOf(info?.franchiseResolved == true) }
+    var loadDone by remember(movie.url) {
+        mutableStateOf(info?.let { FilmInfoReadiness.canFinish(it) && it.portraitsResolved } == true)
+    }
     var loadError by remember(movie.url) { mutableStateOf("") }
     LaunchedEffect(movie.url) {
         if (!loadDone) {
             delay(9500)
+            if (info == null && loadError.isBlank())
+                loadError = "Зеркало не предоставило сведения о фильме."
             loadDone = true
         }
     }
@@ -409,14 +414,10 @@ internal fun FilmDetails(
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
-                    val blocked = !MirrorPostId.canOpen(movie.url, request.url.toString())
-                    if (blocked) {
-                        loadError = if (request.url.path.orEmpty().contains("login", true) &&
-                            SourceRules.sameOrigin(movie.url, request.url.toString())) "Сайт требует входа в аккаунт."
-                        else "Зеркало открыло другую страницу. Подробности фильма не получены."
-                        loadDone = true
-                    }
-                    return blocked
+                    val decision = FilmNavigationPolicy.decide(movie.url, request.url.toString())
+                    if (!decision.allow && info == null) loadError = decision.failureMessage
+                    // Block unrelated navigation, but do NOT destroy the original film page.
+                    return !decision.allow
                 }
 
                 private fun scan(view: WebView, pageUrl: String) {
@@ -431,9 +432,13 @@ internal fun FilmDetails(
                                 if (loadDone || view.url != pageUrl) return@evaluateJavascript
                                 val parsed = FilmPageParser.parse(raw, pageUrl)
                                 if (parsed != null && FilmInfoReadiness.hasContent(parsed)) {
-                                    info = parsed
-                                    if (FilmInfoReadiness.canFinish(parsed) && parsed.portraitsResolved && (parsed.cast.isNotEmpty() || index >= 4)) {
-                                        FilmInfoMemory.put(movie.url, parsed)
+                                    val merged = FilmInfoMerger.merge(info, parsed)
+                                    info = merged
+                                    FilmInfoMemory.put(movie.url, merged)
+                                    if (FilmInfoReadiness.canFinish(merged) &&
+                                        merged.portraitsResolved &&
+                                        (merged.cast.isNotEmpty() || merged.directors.isNotEmpty() ||
+                                            index >= 4)) {
                                         loadDone = true
                                     }
                                 }
@@ -454,15 +459,15 @@ internal fun FilmDetails(
 
                 override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: android.webkit.WebResourceResponse) {
                     if (request.isForMainFrame) {
-                        loadError = "Источник вернул HTTP ${response.statusCode}."
-                        loadDone = true
+                        if (info == null)
+                            loadError = "Источник вернул HTTP ${response.statusCode}."
                     }
                 }
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                     if (request.isForMainFrame) {
-                        loadError = "Не удалось загрузить страницу фильма."
-                        loadDone = true
+                        if (info == null)
+                            loadError = "Не удалось загрузить страницу фильма."
                     }
                 }
             }
@@ -691,10 +696,14 @@ internal fun FilmDetails(
                         Text("Загружаем сведения о фильме", color = appMuted)
                     }
                 }
-            } else if (info == null) {
+            } else if (info == null || (loadDone && info?.description.isNullOrBlank())) {
                 item {
-                    Text(loadError.ifBlank { "Подробные сведения на выбранном зеркале сейчас недоступны." },
-                        color = appMuted)
+                    Text(
+                        if (info == null) loadError.ifBlank {
+                            "Подробные сведения на выбранном зеркале сейчас недоступны."
+                        } else "Описание не предоставлено выбранным зеркалом.",
+                        color = appMuted
+                    )
                     TextButton(onClick = onBrowse) { Text("Открыть страницу на сайте") }
                 }
             }
