@@ -339,7 +339,8 @@ internal fun MirrorNativePlayer(
         if (player != null) {
             AndroidView(
                 factory = { ctx ->
-                    PlayerView(ctx).apply {
+                    (android.view.LayoutInflater.from(ctx)
+                        .inflate(R.layout.cinema_player_view, null, false) as PlayerView).apply {
                         this.player = player
                         useController = false
                         keepScreenOn = true
