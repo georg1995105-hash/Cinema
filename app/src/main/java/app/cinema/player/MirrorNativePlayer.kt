@@ -161,25 +161,29 @@ internal fun MirrorNativePlayer(
     var quality by remember(filmUrl){mutableStateOf("")}
     var resumeMs by remember(filmUrl){mutableLongStateOf(startPositionMs)}
     var endedCounter by remember(filmUrl) { mutableIntStateOf(0) }
-    var expanded by remember(filmUrl) { mutableStateOf(true) }
-    BackHandler { if (expanded) expanded = false else onClose() }
-    DisposableEffect(expanded) {
+    var showSettings by remember { mutableStateOf(false) }
+    var settingsSection by remember { mutableStateOf("Настройки") }
+
+    BackHandler {
+        if (showSettings) {
+            if (settingsSection != "Настройки") settingsSection = "Настройки"
+            else showSettings = false
+        } else onClose()
+    }
+    DisposableEffect(context, filmUrl) {
         val activity = findHostingActivity(context)
         val root = activity?.window?.decorView
-        val oldFlags = root?.systemUiVisibility ?: 0
-        val oldOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        if (expanded) {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            root?.systemUiVisibility =
-                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        }
+        val originalFlags = root?.systemUiVisibility ?: 0
+        val originalOrientation = activity?.requestedOrientation
+            ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        root?.systemUiVisibility =
+            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
         onDispose {
-            if (expanded) {
-                root?.systemUiVisibility = oldFlags
-                activity?.requestedOrientation = oldOrientation
-            }
+            root?.systemUiVisibility = originalFlags
+            activity?.requestedOrientation = originalOrientation
         }
     }
 
@@ -372,8 +376,6 @@ internal fun MirrorNativePlayer(
         }
     }
 
-    var showSettings by remember { mutableStateOf(false) }
-    var settingsSection by remember { mutableStateOf("Настройки") }
     val nextEpisode = EpisodeNavigator.next(episodes, season, episode)
 
     fun switchEpisode(target: MirrorEpisode) {
@@ -543,7 +545,7 @@ internal fun MirrorNativePlayer(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = {
-                    if (expanded) expanded = false else onClose()
+                    onClose()
                 }) {
                     Icon(Icons.Outlined.ArrowBack, contentDescription = "Назад", tint = Color.White)
                 }
@@ -669,37 +671,49 @@ internal fun MirrorNativePlayer(
                         Icon(Icons.Outlined.Tune, contentDescription = "Озвучка, серии и качество",
                             tint = Color.White)
                     }
-                    IconButton(onClick = { expanded = !expanded }) {
-                        Icon(
-                            if (expanded) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
-                            contentDescription = if (expanded) "Выйти из полного экрана" else "Полный экран",
-                            tint = Color.White
-                        )
-                    }
+
                 }
             }
         }
-    }
-
-    if (showSettings) {
-        ModalBottomSheet(
-            onDismissRequest = { showSettings = false; settingsSection = "Настройки" },
-            containerColor = appCard,
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 450.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+        // Player settings are part of the same immersive screen, not a separate modal window.
+        if (showSettings) {
+            Box(
+                modifier = Modifier.fillMaxSize()
+                    .background(Color.Black.copy(alpha = .50f))
+                    .clickable {
+                        showSettings = false
+                        settingsSection = "Настройки"
+                    }
+            )
+            Surface(
+                modifier = Modifier.align(Alignment.CenterEnd)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .fillMaxWidth(.90f).widthIn(max = 390.dp)
+                    .heightIn(max = 520.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = Color(0xFF262A32),
+                shadowElevation = 8.dp
             ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 18.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (settingsSection != "Настройки") IconButton(onClick = {
                         settingsSection = "Настройки"
                     }) {
                         Icon(Icons.Outlined.ArrowBack, contentDescription = "Назад")
                     }
-                    Text(settingsSection, style = MaterialTheme.typography.titleLarge)
+                    Text(settingsSection, style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f))
+                    IconButton(onClick = {
+                        settingsSection = "Настройки"
+                        showSettings = false
+                    }) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Закрыть настройки")
+                    }
                 }
                 Spacer(Modifier.height(9.dp))
                 if (settingsSection == "Настройки") {
@@ -804,14 +818,21 @@ internal fun MirrorNativePlayer(
                         ) {
                             Text(label, modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodyLarge)
-                            RadioButton(selected = index == currentIndex, onClick = null)
+                            if (index == currentIndex) {
+                                Icon(Icons.Outlined.Check, contentDescription = "Выбрано",
+                                    tint = appBlue, modifier = Modifier.size(22.dp))
+                            }
                         }
                     }
                 }
                 Spacer(Modifier.height(18.dp))
+
+                }
             }
         }
+
     }
+
 }
 private fun formatVideoTime(milliseconds: Long): String {
     val seconds = (milliseconds / 1000L).coerceAtLeast(0L)
