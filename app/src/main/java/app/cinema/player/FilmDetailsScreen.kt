@@ -63,6 +63,7 @@ internal object FilmPageParser {
     val javascript = """
        (function() {
          function norm(s) {return (s || '').replace(/\s+/g,' ').trim();}
+         ${MirrorVoiceDiscovery.javascript}
          function txt(s) {var e=document.querySelector(s);return e?norm(e.textContent):'';}
          function absolute(s) {try {return new URL(s,document.baseURI).href;} catch(e) {return '';}}
          var facts=[];
@@ -158,23 +159,7 @@ internal object FilmPageParser {
              });
            }
          });
-         var voices=Array.from(document.querySelectorAll(
-           '#translators-list [data-translator_id], #translators-list [data-translator-id], '+
-           '.b-translator__item, [data-translator_id], [data-translator-id]'
-         )).map(function(item){
-           var group=item.closest('li, .b-translator__item')||item;
-           var id=item.getAttribute('data-translator_id')||
-             item.getAttribute('data-translator-id')||
-             group.getAttribute('data-translator_id')||
-             group.getAttribute('data-translator-id')||
-             item.getAttribute('data-id')||group.getAttribute('data-id')||'';
-           var name=norm(item.getAttribute('title')||group.getAttribute('title')||
-             item.textContent||group.textContent);
-           return {id:id,name:name.slice(0,75)};
-         }).filter(function(item){return /^\d{1,12}$/.test(item.id)&&item.name;})
-           .filter(function(item,index,array){
-              return array.findIndex(function(other){return other.id===item.id;})===index;
-           }).slice(0,45);
+         var voices=kinoDiscoverVoices().voices;
          if(voices.length===0) {
            var scripts=Array.from(document.scripts).map(function(s){return s.textContent||'';}).join('\n');
            var init=scripts.match(/initCDN(?:Series|Movies)Events\s*\(\s*['"]?\d+['"]?\s*,\s*['"]?(\d{1,12})/i);

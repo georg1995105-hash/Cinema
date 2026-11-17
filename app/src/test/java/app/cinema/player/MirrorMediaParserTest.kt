@@ -4,6 +4,31 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MirrorMediaParserTest {
+    @Test fun extractsRealPostIdFromConventionalFilmUrls() {
+        assertEquals("123456", MirrorPostId.fromUrl(
+            "https://example.org/films/action/123456-film-title.html"))
+        assertNull(MirrorPostId.fromUrl("https://example.org/films/action/random.html"))
+        assertNull(MirrorPostId.fromUrl("http://example.org/films/123456-x.html"))
+    }
+
+    @Test fun loadsPageWithoutInlinePostIdWhenUrlContainsRealId() {
+        val raw = org.json.JSONObject.quote(
+            """{"id":"","series":false,"voices":[{"id":"12","name":"Дубляж"}]}"""
+        )
+        val page = MirrorMediaParser.pageFromWebView(
+            raw,"https://example.org/films/action/123456-film-title.html"
+        )
+        assertEquals("123456",page?.id)
+        assertEquals("12",page?.voices?.single()?.id)
+    }
+
+    @Test fun sharedVoiceDiscoveryReadsExplicitSourceNodesOnly() {
+        val js = MirrorVoiceDiscovery.javascript
+        assertTrue(js.contains("select[name*="))
+        assertTrue(js.contains("data-translator_id"))
+        assertTrue(js.contains("return {voices:found"))
+    }
+
     @Test fun retryablePageWithoutPostIdHasClearReason() {
         val raw = org.json.JSONObject.quote("""{"id":"","pageState":"missing-metadata"}""")
         assertNull(MirrorMediaParser.pageFromWebView(raw))

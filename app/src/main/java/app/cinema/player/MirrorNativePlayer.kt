@@ -66,6 +66,7 @@ import kotlin.coroutines.resume
 private val playerMetaJs = """
 (function(){
     function clean(s){return(s||'').replace(/\s+/g,' ').trim();}
+    ${MirrorVoiceDiscovery.javascript}
     var js=Array.from(document.scripts).map(function(x){return x.textContent||'';}).join('\n');
     var init=js.match(/initCDN(Series|Movies)Events\s*\(\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?(\d{1,12})/i);
     var scriptId=(js.match(/(?:post_id|news_id|postId)\s*[:=]\s*['"]?(\d{1,12})/i)||[])[1]||'';
@@ -83,26 +84,9 @@ private val playerMetaJs = """
        window.post_id,window.postId
     ];
     var id=idCandidates.map(numeric).find(Boolean)||'';
-    var voices=Array.from(document.querySelectorAll(
-      '#translators-list [data-translator_id], #translators-list [data-translator-id], '+
-      '.b-translator__item, [data-translator_id], [data-translator-id]'
-    )).map(function(node){
-      var x=node.closest('li, .b-translator__item')||node;
-      var id=numeric(node.getAttribute('data-translator_id')||
-        node.getAttribute('data-translator-id')||
-        x.getAttribute('data-translator_id')||
-        x.getAttribute('data-translator-id')||
-        node.getAttribute('data-id')||
-        x.getAttribute('data-id'));
-      var name=clean(node.getAttribute('title')||x.getAttribute('title')||
-        node.textContent||x.textContent);
-      return {id:id,name:name.slice(0,75)};
-    }).filter(function(item){return item.id&&item.name;})
-      .filter(function(item,index,array){return array.findIndex(function(v){return v.id===item.id})===index;});
-    var activeVoice=Array.from(document.querySelectorAll(
-      '[data-translator_id].active, [data-translator-id].active, .b-translator__item.active'
-    )).map(function(x){return numeric(x.getAttribute('data-translator_id')||
-        x.getAttribute('data-translator-id')||x.getAttribute('data-id'));}).find(Boolean)||'';
+    var discovered=kinoDiscoverVoices();
+    var voices=discovered.voices;
+    var activeVoice=discovered.selected;
     var initVoice=numeric(init?init[3]:'');
     var defaultVoice=activeVoice||initVoice||(voices.length===1?voices[0].id:'');
     if(voices.length===0 && defaultVoice){
@@ -279,7 +263,7 @@ internal fun MirrorNativePlayer(
                             if (view.url!=url || movie!=null) return@postDelayed
                             view.evaluateJavascript(playerMetaJs){ raw ->
                                 if (view.url!=url || movie!=null) return@evaluateJavascript
-                                val parsed=MirrorMediaParser.pageFromWebView(raw)
+                                val parsed=MirrorMediaParser.pageFromWebView(raw, url)
                                 if (parsed!=null && MirrorMediaParser.hasRealVoiceMetadata(raw)) {
                                     movie=parsed
                                     message=""

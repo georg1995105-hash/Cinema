@@ -56,9 +56,11 @@ internal object MirrorMediaParser {
             (json.optBoolean("voiceFromScript") || fallback != "0")
     }
 
-    fun pageFromWebView(raw: String): MirrorMoviePage? {
+    fun pageFromWebView(raw: String, pageUrl: String? = null): MirrorMoviePage? {
         val json = objectFromWebView(raw) ?: return null
-        val id = json.optString("id").trim()
+        val id = json.optString("id").trim().ifBlank {
+            pageUrl?.let(MirrorPostId::fromUrl).orEmpty()
+        }
         if (!id.matches(Regex("[0-9]{1,12}"))) return null
         val voices = parseVoices(json.optJSONArray("voices"), json.optString("voice"))
         return MirrorMoviePage(
