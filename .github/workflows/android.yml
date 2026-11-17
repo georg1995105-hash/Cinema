@@ -1,4 +1,4 @@
-name: Android debug APK
+name: Android checks and signed APK
 
 on:
   push:
@@ -28,11 +28,43 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Run unit tests and assemble APK
+      - name: Run unit tests and compile
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Prepare permanent APK signing key
+        id: signing
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          SIGNING_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$SIGNING_B64" ]; then
+            echo "::warning::Permanent signing secret missing. No installable release will be published."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s' "$SIGNING_B64" | base64 --decode > "$RUNNER_TEMP/kino-release.p12"
+          chmod 600 "$RUNNER_TEMP/kino-release.p12"
+          echo "available=true" >> "$GITHUB_OUTPUT"
+      - name: Assemble with persistent signature
+        if: steps.signing.outputs.available == 'true'
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/kino-release.p12
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: gradle --no-daemon :app:assembleRelease
+      - name: Verify APK signature
+        if: steps.signing.outputs.available == 'true'
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          sha256sum "$APK"
       - uses: actions/upload-artifact@v4
-        if: success()
+        if: steps.signing.outputs.available == 'true'
         with:
-          name: cinema-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: kino-persistent-signed-apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
