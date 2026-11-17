@@ -78,7 +78,14 @@ internal object FilmPageParser {
          document.querySelectorAll('.b-post__people_item, .b-post__actors_item, .b-post__person_item, .persons-list-holder .person-name-item').forEach(function(e){
            var img=e.querySelector('img');
            var n=norm(e.querySelector('a')?.textContent || img?.getAttribute('alt') || e.textContent);
-           var photo=img ? absolute(img.getAttribute('data-src') || img.getAttribute('src')) : '';
+           var photo=img ? absolute(img.getAttribute('data-src') || img.getAttribute('data-original') ||
+                                   img.getAttribute('data-lazy-src') || img.getAttribute('src')) : '';
+           if(!photo) {
+             var visual=e.querySelector('[style*="background-image"]');
+             var css=visual?.getAttribute('style') || '';
+             var found=css.match(/url\((['"]?)(.*?)\1\)/);
+             if(found) photo=absolute(found[2]);
+           }
            if(n && n.length<95) people.push({name:n,photo:photo});
          });
          var similar=[];
@@ -307,8 +314,14 @@ internal fun FilmDetails(
                         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                             Text(label, color = appMuted, modifier = Modifier.width(115.dp),
                                 style = MaterialTheme.typography.bodyMedium)
-                            Text(value, style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f))
+                            var expanded by remember(label, value) { mutableStateOf(false) }
+                            Text(
+                                value,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f).clickable { expanded = !expanded },
+                                maxLines = if (expanded) Int.MAX_VALUE else 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }
