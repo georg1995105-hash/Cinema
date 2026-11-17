@@ -43,7 +43,8 @@ internal data class FilmInfo(
     val rating: String,
     val cast: List<FilmPerson>,
     val related: List<CatalogMovie>,
-    val franchise: List<CatalogMovie> = emptyList()
+    val franchise: List<CatalogMovie> = emptyList(),
+    val franchiseResolved: Boolean = false
 )
 
 internal object FilmInfoMemory {
@@ -107,36 +108,7 @@ internal object FilmPageParser {
            var photo=img?absolute(img.getAttribute('data-src') || img.getAttribute('src')):'';
            similar.push({title:name,url:absolute(a.getAttribute('href')),poster:photo,details:''});
          });
-         var franchise=[];
-         var headings=Array.from(document.querySelectorAll(
-            'h2,h3,h4,.b-post__block_title,.b-post__section_title,.b-post__title'
-         )).filter(function(h){
-            return /все\s+части|части\s+франшизы|франшиз|все\s+фильмы\s+серии/i.test(norm(h.textContent));
-         });
-         headings.slice(0,2).forEach(function(h){
-            var root=h.closest('.b-post__partlist,.b-post__franchise,.b-post__parts,section')
-                 ||h.nextElementSibling||h.parentElement;
-            if(!root)return;
-            var links=Array.from(root.querySelectorAll('a[href]'));
-            if(!links.length||links.length>35){
-              root=h.parentElement?.nextElementSibling;
-              links=root?Array.from(root.querySelectorAll('a[href]')):[];
-            }
-            if(links.length>35)return;
-            links.slice(0,30).forEach(function(a){
-              var u;
-              try{u=new URL(a.getAttribute('href'),document.baseURI);}catch(e){return;}
-              if(u.origin!==location.origin||u.pathname===location.pathname)return;
-              if(!/(?:films|series|cartoons|animation)\//.test(u.pathname))return;
-              var row=a.closest('li,.b-content__inline_item,.b-post__part_item,.b-post__franchise_item')||a.parentElement;
-              var title=norm(a.getAttribute('title')||a.textContent||row?.textContent);
-              if(title.length<3||title.length>130||franchise.some(function(i){return i.url===u.href;}))return;
-              var img=row?.querySelector('img');
-              var poster=img?absolute(img.getAttribute('data-src')||img.getAttribute('data-original')||img.getAttribute('src')):'';
-              var year=norm(row?.textContent).match(/\b(?:19|20)\d{2}\b/);
-              franchise.push({url:u.href,title:title,poster:poster,details:year?year[0]:''});
-            });
-         });
+         var franchise=window.__kinoFranchiseParts || [];
          return JSON.stringify({
            originalTitle:txt('.b-post__origtitle, .b-post__subtitle, .b-post__title_original'),
            description:description.substring(0,1800),
@@ -144,8 +116,83 @@ internal object FilmPageParser {
            facts:facts.slice(0,18),
            people:people.slice(0,18),
            related:similar.slice(0,15),
-           franchise:franchise.slice(0,25)
+           franchise:franchise.slice(0,50),
+           franchiseDone:window.__kinoFranchiseDone === true
          });
+       })();
+    """.trimIndent()
+
+    /**
+     * Franchises are NOT identified by heading text. HDRezka uses a separate franchise
+     * link and .b-post__partcontent_item rows (number, title, year, rating).
+     * Fetch at most one same-origin HTML page using the current WebView session.
+     */
+    val franchiseJavascript = """
+       (function() {
+         if (window.__kinoFranchiseStarted) return 'already-started';
+         window.__kinoFranchiseStarted = true;
+         window.__kinoFranchiseParts = [];
+         window.__kinoFranchiseDone = false;
+         function text(node) { return (node?.textContent || '').replace(/\s+/g, ' ').trim(); }
+         function read(doc, base) {
+           var values = [];
+           doc.querySelectorAll('.b-post__partcontent_item').forEach(function(row) {
+             var a=row.querySelector('.title > a[href], .title a[href]');
+             var title=text(a || row.querySelector('.title'));
+             if (!title || title.length>140) return;
+             var href=a?.getAttribute('href') ||
+                (row.classList.contains('current') ? location.href : '');
+             if (!href) return;
+             var u;
+             try { u=new URL(href, base); } catch(e) { return; }
+             if (u.protocol!=='https:' || u.origin!==location.origin) return;
+             var position=parseInt(text(row.querySelector('.num')),10);
+             var year=text(row.querySelector('.year')).match(/\b(?:19|20)\d{2}\b/);
+             var rating=text(row.querySelector('.rating')).replace(',','.');
+             var posterNode=row.querySelector('img');
+             var img=posterNode?.getAttribute('data-src') || posterNode?.getAttribute('src') || '';
+             var poster='';
+             if(img) { try {var p=new URL(img,base); if(p.protocol==='https:')poster=p.href;}catch(e){} }
+             values.push({
+               url:u.href,title:title,poster:poster,
+               year:year?year[0]:'',rating:rating,number:Number.isFinite(position)?position:0
+             });
+           });
+           return values;
+         }
+         window.__kinoFranchiseParts = read(document,location.href);
+         var link = document.querySelector(
+           'a.b-post__franchise_link_title[href],.b-post__franchise_link_title[href]'
+         );
+         if (window.__kinoFranchiseParts.length>0 || !link) {
+           window.__kinoFranchiseDone=true;
+           return 'inline-or-none';
+         }
+         var endpoint;
+         try {endpoint = new URL(link.getAttribute('href'),document.baseURI);}catch(e) {
+           window.__kinoFranchiseDone=true;return 'invalid-url';
+         }
+         if(endpoint.protocol!=='https:' || endpoint.origin!==location.origin) {
+           window.__kinoFranchiseDone=true;return 'foreign-url';
+         }
+         var controller=new AbortController();
+         var abort=setTimeout(function(){controller.abort()},5700);
+         fetch(endpoint.href,{credentials:'same-origin',signal:controller.signal,
+           headers:{Accept:'text/html'}})
+           .then(function(response){
+             if(!response.ok || new URL(response.url).origin!==location.origin) return null;
+             return response.text();
+           })
+           .then(function(html){
+             if(!html || html.length>1700000)return;
+             var doc = new DOMParser().parseFromString(html,'text/html');
+             var found = read(doc,endpoint.href);
+             if(found.length>0)window.__kinoFranchiseParts=found.slice(0,50);
+           }).catch(function(){}).finally(function(){
+             clearTimeout(abort);
+             window.__kinoFranchiseDone=true;
+           });
+         return 'loading';
        })();
     """.trimIndent()
 
@@ -292,20 +339,20 @@ internal object FilmPageParser {
             }
         }.distinctBy { it.url }
         val partArray=data.optJSONArray("franchise")
-        val parts=buildList {
-            if (partArray != null) for (i in 0 until minOf(25,partArray.length())) {
-                val item=partArray.optJSONObject(i) ?: continue
-                val url=item.optString("url")
-                if (!SourceRules.isValidHttpsUrl(url)) continue
-                val host=URI(url).host?.lowercase() ?: continue
-                if (host != originalHost && !host.endsWith(".$originalHost")) continue
-                val title=item.optString("title").trim().take(130)
-                if (title.length<3) continue
-                val image=item.optString("poster").takeIf(SourceRules::isValidHttpsUrl).orEmpty()
-                val year=item.optString("details").take(5)
-                add(CatalogMovie(url,title,image,year))
+        val items=buildList {
+            if(partArray!=null)for(i in 0 until minOf(50,partArray.length())){
+                val part=partArray.optJSONObject(i) ?: continue
+                add(FranchisePartInput(
+                    url=part.optString("url"),
+                    title=part.optString("title"),
+                    poster=part.optString("poster"),
+                    year=part.optString("year").ifBlank { part.optString("details") },
+                    rating=part.optString("rating"),
+                    number=part.optInt("number",0)
+                ))
             }
-        }.distinctBy { it.url }
+        }
+        val parts=FranchiseParts.validate(items,source)
         FilmInfo(
             originalTitle = data.optString("originalTitle").trim().take(130),
             description = data.optString("description").trim().take(1800),
@@ -313,7 +360,8 @@ internal object FilmPageParser {
             rating = data.optString("rating").replace(Regex("\\s+"), " ").trim().take(130),
             cast = people,
             related = related,
-            franchise = parts
+            franchise = parts,
+            franchiseResolved = data.optBoolean("franchiseDone",false)
         )
     }.getOrNull()
 }
@@ -331,7 +379,7 @@ internal fun FilmDetails(
 ) {
     val context = LocalContext.current
     var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
-    var loadDone by remember(movie.url) { mutableStateOf(info != null) }
+    var loadDone by remember(movie.url) { mutableStateOf(info?.franchiseResolved == true) }
     val webView = if (!loadDone) remember(context, movie.url) {
         val handler = Handler(Looper.getMainLooper())
         WebView(context).apply {
@@ -351,6 +399,7 @@ internal fun FilmDetails(
                 }
                 override fun onPageFinished(view: WebView, url: String) {
                     // Keep this same-origin session alive briefly to resolve real actor profile portraits.
+                    view.evaluateJavascript(FilmPageParser.franchiseJavascript) {}
                     view.evaluateJavascript(FilmPageParser.actorProfilePhotosJavascript) {}
                     val delays = listOf(550L, 1700L, 3400L, 6200L, 8500L)
                     delays.forEachIndexed { index, delay ->
@@ -362,14 +411,19 @@ internal fun FilmDetails(
                                 if (parsed != null &&
                                     (parsed.description.isNotBlank() || parsed.facts.isNotEmpty() ||
                                         parsed.cast.isNotEmpty())) {
+                                    val merged = if(parsed.franchise.isEmpty() &&
+                                        info?.franchise?.isNotEmpty() == true)
+                                        parsed.copy(franchise=info!!.franchise) else parsed
                                     if (info == null ||
-                                        parsed.cast.count { it.photo.isNotBlank() } >=
-                                        (info?.cast?.count { it.photo.isNotBlank() } ?: 0)) {
-                                        info = parsed
-                                        FilmInfoMemory.put(movie.url, parsed)
+                                        merged.franchise.size > (info?.franchise?.size ?: 0) ||
+                                        merged.cast.count { it.photo.isNotBlank() } >=
+                                            (info?.cast?.count { it.photo.isNotBlank() } ?: 0)) {
+                                        info = merged
+                                        FilmInfoMemory.put(movie.url, merged)
                                     }
                                 }
-                                if (index == delays.lastIndex || (parsed?.cast?.isNotEmpty() == true &&
+                                if (index == delays.lastIndex || (parsed?.franchiseResolved == true &&
+                                    parsed.cast.isNotEmpty() &&
                                     parsed.cast.all { it.photo.isNotBlank() || it.url.isBlank() }))
                                     loadDone = true
                             }
