@@ -37,6 +37,7 @@ import coil.request.ImageRequest
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.net.URI
+import java.net.URLEncoder
 
 internal data class CatalogMovie(
     val url: String,
@@ -87,6 +88,12 @@ internal object MirrorCatalog {
         val target = URI(base).resolve(sections[kind].orEmpty()).toString()
         val filter = sorts[section] ?: return target
         return target + (if (target.contains("?")) "&" else "?") + "filter=" + filter
+    }
+
+    fun searchUrl(source: String, query: String): String {
+        val url = URI(source.trimEnd('/') + "/").resolve("search/").toString()
+        val text = URLEncoder.encode(query.trim().take(120), "UTF-8")
+        return url + "?do=search&subaction=search&q=" + text
     }
 
     fun parse(result: String, source: String): List<CatalogMovie> = runCatching {
@@ -142,7 +149,9 @@ internal fun CatalogGrid(
     onOpen: (CatalogMovie) -> Unit,
     onBrowse: (String) -> Unit,
     onAddSource: () -> Unit,
-    loadContent: Boolean = true
+    loadContent: Boolean = true,
+    requestOverride: String? = null,
+    movieFilter: (CatalogMovie) -> Boolean = { true }
 ) {
     if (source == null || !SourceRules.isValidHttpsUrl(source)) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -162,9 +171,9 @@ internal fun CatalogGrid(
     val context = LocalContext.current
     val isTablet = LocalConfiguration.current.screenWidthDp >= 600
     val columns = if (isTablet) cardsPerRow.coerceIn(2,8) else cardsPerRow.coerceIn(2,3)
-    var attempt by remember(source, section, kind) { mutableIntStateOf(0) }
-    val requestUrl = remember(source, section, kind) {
-        MirrorCatalog.requestUrl(source, section, kind)
+    var attempt by remember(source, section, kind, requestOverride) { mutableIntStateOf(0) }
+    val requestUrl = remember(source, section, kind, requestOverride) {
+        requestOverride ?: MirrorCatalog.requestUrl(source, section, kind)
     }
     val cacheKey = requestUrl
     var movies by remember(requestUrl, attempt) {
@@ -232,13 +241,14 @@ internal fun CatalogGrid(
             browser?.destroy()
         }
     }
+    val visibleMovies = movies.filter(movieFilter)
     Box(Modifier.fillMaxSize()) {
         // The hidden view reads the ordinary page over the user's current network and VPN.
         if (browser != null) AndroidView(factory = { browser }, modifier = Modifier.size(2.dp).alpha(0.01f))
         when {
             movies.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(movies.size.toString() + " карточек", color = appMuted,
+                    Text(visibleMovies.size.toString() + " результатов", color = appMuted,
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                     TextButton(onClick = { CatalogMemory.invalidate(cacheKey); attempt++ }) {
                         Icon(Icons.Outlined.Refresh, contentDescription = null,
@@ -254,7 +264,7 @@ internal fun CatalogGrid(
                     horizontalArrangement = Arrangement.spacedBy(11.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp)
                 ) {
-                    items(movies, key = { it.url }) { movie ->
+                    items(visibleMovies, key = { it.url }) { movie ->
                         FilmPoster(movie, source) { onOpen(movie) }
                     }
                 }
