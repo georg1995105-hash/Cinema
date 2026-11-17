@@ -19,4 +19,7 @@ internal object EpisodeNavigator {
         val position = all.indexOfFirst { it.season == currentSeason && it.id == currentEpisode }
         return if (position <= 0) null else all.getOrNull(position - 1)
     }
+    fun canResumeDisposedStream(attachedKey: String, currentKey: String): Boolean =
+        attachedKey == currentKey
+
 }

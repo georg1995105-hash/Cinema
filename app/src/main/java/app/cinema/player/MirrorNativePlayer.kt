@@ -372,7 +372,8 @@ internal fun MirrorNativePlayer(
             if (player != null) {
                 val ms=player.currentPosition.coerceAtLeast(0)
                 // Do not overwrite the next episode's position with the previous episode's end.
-                if (ms > 0 && attachedEpisode == season + "/" + episode + "/" + voice) {
+                if (ms > 0 && EpisodeNavigator.canResumeDisposedStream(
+                    attachedEpisode, season + "/" + episode + "/" + voice)) {
                     resumeMs = ms
                     onSave(ms)
                     onSaveSelection(PlaybackSelection(season, episode, voice, quality, ms))

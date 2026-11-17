@@ -33,4 +33,10 @@ class EpisodeNavigatorTest {
     @Test fun canMoveBackToPreviousSeason() {
         assertEquals("10", EpisodeNavigator.previous(episodes, "2", "1")?.id)
     }
+    @Test fun nextEpisodeNeverInheritsOldPlayerDisposePosition() {
+        assertFalse(EpisodeNavigator.canResumeDisposedStream("1/1/56", "1/2/56"))
+        assertFalse(EpisodeNavigator.canResumeDisposedStream("1/10/56", "2/1/56"))
+        assertTrue(EpisodeNavigator.canResumeDisposedStream("1/1/56", "1/1/56"))
+    }
+
 }
