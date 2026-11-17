@@ -132,11 +132,11 @@ jobs:
             --output "$RUNNER_TEMP/Kino-0.4.17.apk"
           adb uninstall app.cinema.player
           adb install "$RUNNER_TEMP/Kino-0.4.17.apk"
-          adb shell am start -W -n app.cinema.player/.MainActivity
+          adb shell am start -W -n app.cinema.player/.MainActivity | grep -F "Status: ok"
           ORIGINAL_INSTALL="$(adb shell dumpsys package app.cinema.player | awk -F= '/firstInstallTime=/{print $2; exit}')"
           test -n "$ORIGINAL_INSTALL"
           adb install -r "$APK"
-          adb shell am start -W -n app.cinema.player/.MainActivity
+          adb shell am start -W -n app.cinema.player/.MainActivity | grep -F "Status: ok"
           UPDATED_INSTALL="$(adb shell dumpsys package app.cinema.player | awk -F= '/firstInstallTime=/{print $2; exit}')"
           test "$ORIGINAL_INSTALL" = "$UPDATED_INSTALL"
           EXPECTED_CODE="$(awk '/versionCode =/{print $3; exit}' app/build.gradle.kts)"

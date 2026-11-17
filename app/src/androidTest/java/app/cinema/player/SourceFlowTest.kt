@@ -1,23 +1,28 @@
 package app.cinema.player
 
 import android.annotation.SuppressLint
-import android.net.Uri
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.ByteArrayInputStream
-import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.tls.HandshakeCertificates
+import okhttp3.tls.HeldCertificate
+import okio.Buffer
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -221,43 +226,71 @@ class SourceFlowTest {
         assertEquals("Заполнить", LocalStore(context).pictureMode())
     }
 
-    @Test fun media3DecodesAnAuthorizedTestClipAndAdvancesPlayback() {
+    @Test fun media3PlaysTheParsedHttpsStreamWithoutForwardingSessionToCdn() {
         val context = instrumentation.targetContext
-        val clip = File(context.cacheDir, "kino-test-video.mp4")
-        instrumentation.context.assets.open("kino-test-video.mp4").use { input ->
-            clip.outputStream().use { output -> input.copyTo(output) }
-        }
-        val playing = CountDownLatch(1)
-        val frame = CountDownLatch(1)
-        val texture = android.graphics.SurfaceTexture(false)
-        val surface = android.view.Surface(texture)
-        var player: ExoPlayer? = null
-        try {
-            instrumentation.runOnMainSync {
-                player = ExoPlayer.Builder(context).build().apply {
-                    setVideoSurface(surface)
-                    addListener(object : Player.Listener {
-                        override fun onIsPlayingChanged(isPlaying: Boolean) {
-                            if (isPlaying) playing.countDown()
-                        }
-                        override fun onRenderedFirstFrame() { frame.countDown() }
-                    })
-                    setMediaItem(MediaItem.fromUri(Uri.fromFile(clip)))
-                    prepare()
-                    play()
+        val clip = instrumentation.context.assets.open("kino-test-video.mp4").use { it.readBytes() }
+        val certificate = HeldCertificate.Builder()
+            .commonName("localhost").addSubjectAlternativeName("localhost").build()
+        val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()
+        val fixtureTrust = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
+        MockWebServer().use { mirror ->
+            MockWebServer().use { cdn ->
+                listOf(mirror, cdn).forEach {
+                    it.useHttps(serverTls.sslSocketFactory(), false)
+                    it.start()
+                }
+                fun localUrl(server: MockWebServer, path: String) =
+                    server.url(path).newBuilder().host("localhost").build()
+                val filmPage = localUrl(mirror, "/films/drama/12-brigada.html").toString()
+                val cookies = android.webkit.CookieManager.getInstance()
+                cookies.setCookie(filmPage, "cinema_fixture=active; Path=/; Secure; Max-Age=120")
+                mirror.enqueue(MockResponse().setResponseCode(302).addHeader("Location", localUrl(cdn, "/clip.mp4").toString()))
+                cdn.enqueue(MockResponse().addHeader("Content-Type", "video/mp4").setBody(Buffer().write(clip)))
+                val stream = MirrorMediaParser.parseQualityList("[720p]" + localUrl(mirror, "/stream.mp4")).single()
+                val client = MirrorHttp.client.newBuilder()
+                    .sslSocketFactory(fixtureTrust.sslSocketFactory(), fixtureTrust.trustManager).build()
+                val data = OkHttpDataSource.Factory(client)
+                    .setDefaultRequestProperties(mapOf("Referer" to filmPage))
+                val playing = CountDownLatch(1)
+                val frame = CountDownLatch(1)
+                val texture = android.graphics.SurfaceTexture(false)
+                val surface = android.view.Surface(texture)
+                var player: ExoPlayer? = null
+                try {
+                    instrumentation.runOnMainSync {
+                        player = ExoPlayer.Builder(context)
+                            .setMediaSourceFactory(DefaultMediaSourceFactory(data))
+                            .build().apply {
+                                setVideoSurface(surface)
+                                addListener(object : Player.Listener {
+                                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                                        if (isPlaying) playing.countDown()
+                                    }
+                                    override fun onRenderedFirstFrame() { frame.countDown() }
+                                })
+                                setMediaItem(MediaItem.fromUri(stream.url))
+                                prepare()
+                                play()
+                            }
+                    }
+                    assertTrue("Media3 entered playing state", playing.await(20, TimeUnit.SECONDS))
+                    assertTrue("Media3 rendered a video frame", frame.await(15, TimeUnit.SECONDS))
+                    Thread.sleep(700)
+                    var position = 0L
+                    instrumentation.runOnMainSync { position = requireNotNull(player).currentPosition }
+                    assertTrue("Playback advanced", position > 200)
+                    val originRequest = requireNotNull(mirror.takeRequest(5, TimeUnit.SECONDS))
+                    assertEquals(filmPage, originRequest.getHeader("Referer"))
+                    assertTrue(originRequest.getHeader("Cookie").orEmpty().contains("cinema_fixture=active"))
+                    val redirected = requireNotNull(cdn.takeRequest(5, TimeUnit.SECONDS))
+                    assertNull(redirected.getHeader("Cookie"))
+                } finally {
+                    instrumentation.runOnMainSync { player?.release() }
+                    surface.release()
+                    texture.release()
+                    cookies.setCookie(filmPage, "cinema_fixture=; Path=/; Secure; Max-Age=0")
                 }
             }
-            assertTrue("Media3 entered playing state", playing.await(15, TimeUnit.SECONDS))
-            assertTrue("Media3 rendered a video frame", frame.await(15, TimeUnit.SECONDS))
-            Thread.sleep(700)
-            var position = 0L
-            instrumentation.runOnMainSync { position = requireNotNull(player).currentPosition }
-            assertTrue("Playback advanced", position > 200)
-        } finally {
-            instrumentation.runOnMainSync { player?.release() }
-            surface.release()
-            texture.release()
-            clip.delete()
         }
     }
 }
