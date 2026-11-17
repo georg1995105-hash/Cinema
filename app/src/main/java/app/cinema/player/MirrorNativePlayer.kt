@@ -2,6 +2,7 @@ package app.cinema.player
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.net.Uri
 import android.content.Context
 
 import android.content.ContextWrapper
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
@@ -163,6 +165,8 @@ internal fun MirrorNativePlayer(
     var season by remember(filmUrl){mutableStateOf("")}
     var episode by remember(filmUrl){mutableStateOf("")}
     var options by remember(filmUrl){mutableStateOf<List<MirrorQuality>>(emptyList())}
+    var subtitleOptions by remember(filmUrl){mutableStateOf<List<MirrorSubtitle>>(emptyList())}
+    var subtitleIndex by remember(filmUrl){mutableIntStateOf(-1)}
     var quality by remember(filmUrl){mutableStateOf("")}
     var resumeMs by remember(filmUrl){mutableLongStateOf(startPositionMs)}
     var endedCounter by remember(filmUrl) { mutableIntStateOf(0) }
@@ -276,7 +280,11 @@ internal fun MirrorNativePlayer(
         val result=mirrorAjax(web,request)
         if(result==null){message="";error="Источник не ответил"}
         else{
-            val (available,reason)=MirrorMediaParser.parseStreamResponse(result)
+            val streams=MirrorMediaParser.parseStreamInfo(result)
+            val available=streams.qualities
+            val reason=streams.error
+            subtitleOptions=streams.subtitles
+            subtitleIndex=-1
             options=available
             quality=available.firstOrNull { it.label == desiredQuality }?.label
                 ?: available.firstOrNull()?.label.orEmpty()
@@ -297,7 +305,7 @@ internal fun MirrorNativePlayer(
     var paused by remember(selected?.url){mutableStateOf(false)}
     var controls by remember {mutableStateOf(true)}
     var accelerated by remember {mutableStateOf(false)}
-    val player=remember(currentUrl){
+    val player=remember(currentUrl, subtitleOptions){
         currentUrl?.let {streamUrl ->
             val http=DefaultHttpDataSource.Factory()
                 .setUserAgent(WebSettings.getDefaultUserAgent(context))
@@ -339,7 +347,18 @@ internal fun MirrorNativePlayer(
                         }
                         override fun onIsPlayingChanged(isPlaying:Boolean){paused=!isPlaying}
                     })
-                    setMediaItem(MediaItem.fromUri(streamUrl))
+                    val externalSubtitles = subtitleOptions.map { sub ->
+                        val mime=if(sub.url.substringBefore('?').endsWith(".srt",true))
+                            MimeTypes.APPLICATION_SUBRIP else MimeTypes.TEXT_VTT
+                        MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
+                            .setMimeType(mime).setLanguage(sub.language).setLabel(sub.title)
+                            .build()
+                    }
+                    setMediaItem(MediaItem.Builder().setUri(streamUrl)
+                        .setSubtitleConfigurations(externalSubtitles)
+                        .apply {
+                            if(streamUrl.contains(".m3u8",true)) setMimeType(MimeTypes.APPLICATION_M3U8)
+                        }.build())
                     prepare()
                     if(resumeMs>0)seekTo(resumeMs)
                     playWhenReady=true
@@ -419,14 +438,18 @@ internal fun MirrorNativePlayer(
     val speeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
     val pictureModes = listOf("По размеру", "Заполнить", "Растянуть")
     var pictureMode by remember { mutableStateOf("По размеру") }
-    var subtitlesEnabled by remember { mutableStateOf(false) }
-    val hasSubtitles = player?.currentTracks?.groups?.any { group ->
-        group.type == C.TRACK_TYPE_TEXT && (0 until group.length).any { group.isTrackSupported(it) }
-    } == true
-    LaunchedEffect(player, subtitlesEnabled) {
+    val hasSubtitles = subtitleOptions.isNotEmpty() ||
+        (player?.currentTracks?.groups?.any { group ->
+            group.type == C.TRACK_TYPE_TEXT &&
+                (0 until group.length).any { group.isTrackSupported(it) }
+        } == true)
+    LaunchedEffect(player, subtitleIndex, subtitleOptions) {
         player?.let { target ->
+            val preferred=subtitleOptions.getOrNull(subtitleIndex)?.language
+                ?.takeIf { it != "und" }
             target.trackSelectionParameters = target.trackSelectionParameters.buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !subtitlesEnabled).build()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subtitleIndex < 0)
+                .setPreferredTextLanguage(preferred).build()
         }
     }
     LaunchedEffect(player, speed) { player?.setPlaybackSpeed(speed) }
@@ -729,7 +752,8 @@ internal fun MirrorNativePlayer(
                         "Изображение" to pictureMode,
                         "Озвучка" to audio
                     ) + (if (hasSubtitles) listOf(
-                        "Субтитры" to (if (subtitlesEnabled) "Включены" else "Выключены")
+                        "Субтитры" to (subtitleOptions.getOrNull(subtitleIndex)?.title
+                            ?: if (subtitleIndex >= 0) "Включены" else "Выключены")
                     ) else emptyList()) + if (movie?.isSeries == true) listOf(
                         "Сезон" to season.ifBlank { "—" },
                         "Серия" to (episodes.firstOrNull { it.id == episode && it.season == season }
@@ -760,7 +784,9 @@ internal fun MirrorNativePlayer(
                         "Качество" -> options.map { it.label }
                         "Скорость" -> speeds.map { it.toString() + "×" }
                         "Изображение" -> pictureModes
-                        "Субтитры" -> listOf("Включены", "Выключены")
+                        "Субтитры" -> listOf("Выключены") +
+                            (if (subtitleOptions.isNotEmpty()) subtitleOptions.map { it.title }
+                             else listOf("Включены"))
                         "Озвучка" -> movie?.voices?.map { it.name }.orEmpty()
                         "Сезон" -> episodes.map { it.season }.distinct().map { "Сезон " + it }
                         "Серия" -> episodes.filter { it.season == season }.map { it.label }
@@ -771,7 +797,7 @@ internal fun MirrorNativePlayer(
                         "Качество" -> options.indexOfFirst { it.label == quality }
                         "Скорость" -> speeds.indexOf(speed)
                         "Изображение" -> pictureModes.indexOf(pictureMode)
-                        "Субтитры" -> if (subtitlesEnabled) 0 else 1
+                        "Субтитры" -> subtitleIndex + 1
                         "Озвучка" -> movie?.voices?.indexOfFirst { it.id == voice } ?: -1
                         "Сезон" -> episodes.map { it.season }.distinct().indexOf(season)
                         "Серия" -> episodes.filter { it.season == season }.indexOfFirst { it.id == episode }
@@ -797,7 +823,7 @@ internal fun MirrorNativePlayer(
                                         playbackPreferences.saveAutoNextEpisode(autoNextEpisode)
                                     }
                                     "Изображение" -> pictureMode = pictureModes[index]
-                                    "Субтитры" -> subtitlesEnabled = index == 0
+                                    "Субтитры" -> subtitleIndex = index - 1
                                     "Озвучка" -> {
                                         val newVoice = movie?.voices?.getOrNull(index)
                                         if (newVoice != null && voice != newVoice.id) {
