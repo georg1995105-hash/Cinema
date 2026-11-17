@@ -412,7 +412,7 @@ internal fun MirrorNativePlayer(
     val speeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
     val pictureModes = listOf("По размеру", "Заполнить", "Растянуть")
     var pictureMode by remember { mutableStateOf("По размеру") }
-    var subtitlesEnabled by remember { mutableStateOf(true) }
+    var subtitlesEnabled by remember { mutableStateOf(false) }
     val hasSubtitles = player?.currentTracks?.groups?.any { group ->
         group.type == C.TRACK_TYPE_TEXT && (0 until group.length).any { group.isTrackSupported(it) }
     } == true
@@ -582,16 +582,14 @@ internal fun MirrorNativePlayer(
                     Icon(Icons.Outlined.Replay10, contentDescription = "Назад на " + seekSeconds + " секунд",
                         tint = Color.White, modifier = Modifier.size(34.dp))
                 }
-                FilledIconButton(
+                IconButton(
                     onClick = { if (player.isPlaying) player.pause() else player.play() },
-                    modifier = Modifier.size(64.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = appBlue, contentColor = Color.Black
-                    )
+                    modifier = Modifier.size(58.dp)
+                        .background(Color.Black.copy(alpha = .58f), RoundedCornerShape(50))
                 ) {
                     Icon(if (paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
                         contentDescription = if (paused) "Воспроизвести" else "Пауза",
-                        modifier = Modifier.size(34.dp))
+                        tint = Color.White, modifier = Modifier.size(32.dp))
                 }
                 IconButton(
                     onClick = {
@@ -608,23 +606,22 @@ internal fun MirrorNativePlayer(
         }
         if (player != null && playerIssue.isNotBlank()) {
             Surface(
-                modifier = Modifier.align(Alignment.Center).padding(20.dp),
-                color = Color.Black.copy(alpha = .92f),
-                shape = RoundedCornerShape(16.dp)
+                modifier = Modifier.align(Alignment.Center).padding(18.dp).widthIn(max = 490.dp),
+                color = Color.Black.copy(alpha = .88f),
+                shape = RoundedCornerShape(15.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(Icons.Outlined.ReportProblem, contentDescription = null, tint = appBlue)
-                    Spacer(Modifier.height(10.dp))
-                    Text(playerIssue, color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(12.dp))
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 15.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Видео сейчас недоступно", color = Color.White,
+                        style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(playerIssue, color = Color.LightGray,
+                        style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(9.dp))
                     TextButton(onClick = {
                         settingsSection = "Настройки"
                         showSettings = true
-                    }) { Text("Выбрать другой вариант") }
+                    }) { Text("Другой доступный вариант") }
                 }
             }
         }
