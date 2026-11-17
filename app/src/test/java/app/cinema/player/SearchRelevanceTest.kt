@@ -37,7 +37,10 @@ class SearchRelevanceTest {
     @Test fun quickSearchUsesOnlySameMirrorEndpointAndEscapesQuery() {
         val js=MirrorQuickSearch.javascript("фильм');alert(1);//")
         assertTrue(js.contains("encodeURIComponent(q)"))
-        assertTrue(js.contains("new URL(resp.url).origin!==location.origin"))
+        assertTrue(js.contains("function sameOrigin(raw)"))
+        assertTrue(js.contains("new URL(raw).origin===location.origin"))
+        assertTrue(js.contains("!sameOrigin(resp.url)"))
+        assertTrue(js.contains("!sameOrigin(response.url)"))
         assertTrue(js.contains("fetch('/engine/ajax/search.php?q='"))
         assertFalse(js.contains("fetch('https://"))
     }
