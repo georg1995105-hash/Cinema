@@ -3,6 +3,8 @@ package app.cinema.player
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.media.AudioManager
+import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.view.View
@@ -19,6 +21,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -327,6 +330,37 @@ internal fun MirrorNativePlayer(
     var settingsSection by remember { mutableStateOf("Настройки") }
     var speed by remember { mutableFloatStateOf(1f) }
     val speeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
+    val audioManager = remember(context) {
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+    val originalWindowBrightness = remember(context) {
+        findHostingActivity(context)?.window?.attributes?.screenBrightness ?: -1f
+    }
+    var brightness by remember(context) {
+        mutableFloatStateOf(originalWindowBrightness.takeIf { it >= 0f } ?: 0.5f)
+    }
+    var mediaVolume by remember(context) {
+        mutableIntStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC))
+    }
+    val maxVolume = remember(audioManager) {
+        audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+    }
+    var gestureHint by remember { mutableStateOf("") }
+    LaunchedEffect(gestureHint) {
+        if (gestureHint.isNotEmpty()) {
+            delay(1100)
+            gestureHint = ""
+        }
+    }
+    DisposableEffect(context) {
+        onDispose {
+            findHostingActivity(context)?.window?.let { window ->
+                val attributes = window.attributes
+                attributes.screenBrightness = originalWindowBrightness
+                window.attributes = attributes
+            }
+        }
+    }
     val pictureModes = listOf("По размеру", "Заполнить", "Растянуть")
     var pictureMode by remember { mutableStateOf("По размеру") }
     var subtitlesEnabled by remember { mutableStateOf(true) }
@@ -376,7 +410,45 @@ internal fun MirrorNativePlayer(
                 }
             )
             Box(
-                Modifier.fillMaxSize().pointerInput(player, seekSeconds, holdSpeed) {
+                Modifier.fillMaxSize()
+                    .pointerInput(player, audioManager, maxVolume) {
+                        var left = false
+                        var delta = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { start ->
+                                left = start.x < size.width * 0.5f
+                                delta = 0f
+                            },
+                            onVerticalDrag = { change, amount ->
+                                change.consume()
+                                if (left) {
+                                    brightness = (brightness - amount / size.height.coerceAtLeast(1) * 1.7f)
+                                        .coerceIn(0.05f, 1f)
+                                    findHostingActivity(context)?.window?.let { window ->
+                                        val attrs = window.attributes
+                                        attrs.screenBrightness = brightness
+                                        window.attributes = attrs
+                                    }
+                                    gestureHint = "Яркость " + (brightness * 100).toInt() + "%"
+                                } else {
+                                    delta -= amount
+                                    val step = (size.height / (maxVolume.toFloat() * 1.6f)).coerceAtLeast(4f)
+                                    val offset = (delta / step).toInt()
+                                    if (offset != 0) {
+                                        delta -= offset * step
+                                        mediaVolume = (mediaVolume + offset).coerceIn(0, maxVolume)
+                                        runCatching {
+                                            audioManager.setStreamVolume(
+                                                AudioManager.STREAM_MUSIC, mediaVolume, 0
+                                            )
+                                        }
+                                    }
+                                    gestureHint = "Громкость " + (100 * mediaVolume / maxVolume) + "%"
+                                }
+                            }
+                        )
+                    }
+                    .pointerInput(player, seekSeconds, holdSpeed) {
                     detectTapGestures(
                         onTap = { controls = !controls },
                         onDoubleTap = { tap ->
@@ -430,6 +502,16 @@ internal fun MirrorNativePlayer(
             CircularProgressIndicator(
                 color = appBlue, modifier = Modifier.align(Alignment.Center).size(30.dp)
             )
+        }
+        if (gestureHint.isNotBlank()) {
+            Surface(
+                color = Color.Black.copy(alpha = .75f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.align(Alignment.Center).padding(12.dp)
+            ) {
+                Text(gestureHint, color = Color.White,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+            }
         }
         if (accelerated) {
             Surface(
