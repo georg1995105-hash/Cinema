@@ -42,7 +42,8 @@ internal data class FilmInfo(
     val facts: List<Pair<String,String>>,
     val rating: String,
     val cast: List<FilmPerson>,
-    val related: List<CatalogMovie>
+    val related: List<CatalogMovie>,
+    val franchise: List<CatalogMovie> = emptyList()
 )
 
 internal object FilmInfoMemory {
@@ -106,13 +107,44 @@ internal object FilmPageParser {
            var photo=img?absolute(img.getAttribute('data-src') || img.getAttribute('src')):'';
            similar.push({title:name,url:absolute(a.getAttribute('href')),poster:photo,details:''});
          });
+         var franchise=[];
+         var headings=Array.from(document.querySelectorAll(
+            'h2,h3,h4,.b-post__block_title,.b-post__section_title,.b-post__title'
+         )).filter(function(h){
+            return /все\s+части|части\s+франшизы|франшиз|все\s+фильмы\s+серии/i.test(norm(h.textContent));
+         });
+         headings.slice(0,2).forEach(function(h){
+            var root=h.closest('.b-post__partlist,.b-post__franchise,.b-post__parts,section')
+                 ||h.nextElementSibling||h.parentElement;
+            if(!root)return;
+            var links=Array.from(root.querySelectorAll('a[href]'));
+            if(!links.length||links.length>35){
+              root=h.parentElement?.nextElementSibling;
+              links=root?Array.from(root.querySelectorAll('a[href]')):[];
+            }
+            if(links.length>35)return;
+            links.slice(0,30).forEach(function(a){
+              var u;
+              try{u=new URL(a.getAttribute('href'),document.baseURI);}catch(e){return;}
+              if(u.origin!==location.origin||u.pathname===location.pathname)return;
+              if(!/(?:films|series|cartoons|animation)\//.test(u.pathname))return;
+              var row=a.closest('li,.b-content__inline_item,.b-post__part_item,.b-post__franchise_item')||a.parentElement;
+              var title=norm(a.getAttribute('title')||a.textContent||row?.textContent);
+              if(title.length<3||title.length>130||franchise.some(function(i){return i.url===u.href;}))return;
+              var img=row?.querySelector('img');
+              var poster=img?absolute(img.getAttribute('data-src')||img.getAttribute('data-original')||img.getAttribute('src')):'';
+              var year=norm(row?.textContent).match(/\b(?:19|20)\d{2}\b/);
+              franchise.push({url:u.href,title:title,poster:poster,details:year?year[0]:''});
+            });
+         });
          return JSON.stringify({
            originalTitle:txt('.b-post__origtitle, .b-post__subtitle, .b-post__title_original'),
            description:description.substring(0,1800),
            rating:txt('.b-post__rating, .b-post__rating_tables, .b-post__ratings'),
            facts:facts.slice(0,18),
            people:people.slice(0,18),
-           related:similar.slice(0,15)
+           related:similar.slice(0,15),
+           franchise:franchise.slice(0,25)
          });
        })();
     """.trimIndent()
@@ -259,13 +291,29 @@ internal object FilmPageParser {
                 add(CatalogMovie(url, title.take(130), poster, ""))
             }
         }.distinctBy { it.url }
+        val partArray=data.optJSONArray("franchise")
+        val parts=buildList {
+            if (partArray != null) for (i in 0 until minOf(25,partArray.length())) {
+                val item=partArray.optJSONObject(i) ?: continue
+                val url=item.optString("url")
+                if (!SourceRules.isValidHttpsUrl(url)) continue
+                val host=URI(url).host?.lowercase() ?: continue
+                if (host != originalHost && !host.endsWith(".$originalHost")) continue
+                val title=item.optString("title").trim().take(130)
+                if (title.length<3) continue
+                val image=item.optString("poster").takeIf(SourceRules::isValidHttpsUrl).orEmpty()
+                val year=item.optString("details").take(5)
+                add(CatalogMovie(url,title,image,year))
+            }
+        }.distinctBy { it.url }
         FilmInfo(
             originalTitle = data.optString("originalTitle").trim().take(130),
             description = data.optString("description").trim().take(1800),
             facts = facts,
             rating = data.optString("rating").replace(Regex("\\s+"), " ").trim().take(130),
             cast = people,
-            related = related
+            related = related,
+            franchise = parts
         )
     }.getOrNull()
 }
@@ -473,6 +521,35 @@ internal fun FilmDetails(
                                     color = appBlue,
                                     style = MaterialTheme.typography.bodySmall,
                                     overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            }
+            if (info?.franchise?.isNotEmpty() == true) {
+                item {
+                    Text("Все части франшизы", style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    info!!.franchise.forEach { part ->
+                        Surface(
+                            onClick = { onRelated(part) },
+                            color = appPanel,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 7.dp)
+                        ) {
+                            Row(Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.Movie, contentDescription = null,
+                                    tint = appBlue, modifier = Modifier.size(22.dp))
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(part.title, maxLines = 2)
+                                    if (part.details.isNotBlank()) Text(part.details,
+                                        color = appMuted, style = MaterialTheme.typography.bodySmall)
+                                }
+                                Icon(Icons.Outlined.ChevronRight, contentDescription = null,
+                                    tint = appMuted)
                             }
                         }
                     }
