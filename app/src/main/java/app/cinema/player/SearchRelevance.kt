@@ -25,6 +25,12 @@ internal object SearchRelevance {
                 words.size > 1 && words.all { word ->
                     title.split(' ').any { it == word || it.startsWith(word) }
                 } -> 4
+                // The speech recognizer can return an inflected Russian title:
+                // "найди Бригаду" vs the catalogue's "Бригада".
+                words.size == 1 && words[0].length >= 5 &&
+                    title.split(' ').firstOrNull()?.let { first ->
+                        first.length == q.length && first.dropLast(1) == q.dropLast(1)
+                    } == true -> 5
                 else -> return@mapNotNull null
             }
             score to movie

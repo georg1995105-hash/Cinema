@@ -21,6 +21,12 @@ class SearchRelevanceTest {
         assertEquals(3,results.size)
     }
 
+    @Test fun permitsRussianAccusativeSpeechEndingForARealTitle() {
+        assertEquals("Бригада 2002",
+            SearchRelevance.find(listOf(movie("Бригада 2002")), "бригаду").single().title)
+        assertTrue(SearchRelevance.find(listOf(movie("Титаник")), "бригада").isEmpty())
+    }
+
     @Test fun matchesPunctuationAndYo() {
         assertEquals(1,SearchRelevance.find(listOf(movie("Миссия: невыполнима")),
             "миссия невыполнима").size)

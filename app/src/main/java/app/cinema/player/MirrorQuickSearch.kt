@@ -27,8 +27,8 @@ internal object MirrorQuickSearch {
                 a.getAttribute('title') || a.textContent || '';
               var img=li.querySelector('img');
               var url=new URL(a.getAttribute('href'),location.origin).href;
-              var poster=img?new URL(img.getAttribute('data-src') ||
-                img.getAttribute('src')||'',location.origin).href:'';
+              var src=img&&(img.getAttribute('data-src')||img.getAttribute('src'));
+              var poster=src?new URL(src,location.origin).href:'';
               return {url:url,title:name.trim(),poster:poster,details:''};
             }).filter(function(x){return x && x.title && x.url});
             window.__kinoQuickSearchResult=JSON.stringify({cards:cards});
