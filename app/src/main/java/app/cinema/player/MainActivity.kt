@@ -38,7 +38,7 @@ internal val appBlue = Color(0xFF80C5E7)
 internal val appMuted = Color(0xFFADB8C0)
 private val appWhite = Color(0xFFF4F7F8)
 
-internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE }
+internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE, MOVIE }
 private data class Destination(val page: Page, val label: String, val icon: ImageVector)
 private val destinations = listOf(
     Destination(Page.HOME, "Главная", Icons.Outlined.Home),
@@ -74,6 +74,8 @@ private fun CinemaApp() {
     var page by remember { mutableStateOf(Page.HOME) }
     var playing by remember { mutableStateOf<String?>(null) }
     var browsingSource by remember { mutableStateOf<String?>(null) }
+    var selectedFilm by remember { mutableStateOf<CatalogMovie?>(null) }
+    var browseReturn by remember { mutableStateOf(Page.HOME) }
     val tablet = LocalConfiguration.current.screenWidthDp >= 600
 
     fun saveProgress(url: String, position: Long) {
@@ -95,7 +97,8 @@ private fun CinemaApp() {
         }
     }
     fun back() {
-        if (page == Page.SITE) { page = Page.HOME; return }
+        if (page == Page.SITE) { page = browseReturn; return }
+        if (page == Page.MOVIE) { page = Page.HOME; return }
         page = if (page in listOf(Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST, Page.UPDATES))
             Page.SETTINGS else Page.HOME
     }
@@ -116,7 +119,7 @@ private fun CinemaApp() {
     Scaffold(
         containerColor = appBackground,
         bottomBar = {
-            if (page != Page.SITE) BoxWithConstraints(
+            if (page != Page.SITE && page != Page.MOVIE) BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -159,7 +162,9 @@ private fun CinemaApp() {
             when (page) {
                 Page.HOME -> HomeScreen(
                     activeSource = activeSource,
-                    onBrowse = { browsingSource = it; page = Page.SITE },
+                    cardsPerRow = local.cardsPerRow(),
+                    onOpenFilm = { selectedFilm = it; page = Page.MOVIE },
+                    onBrowse = { browsingSource = it; browseReturn = Page.HOME; page = Page.SITE },
                     onAddSource = { page = Page.SOURCES }
                 )
                 Page.SEARCH -> SearchScreen(history, favourites) { playing = it }
@@ -171,11 +176,20 @@ private fun CinemaApp() {
                 Page.SETTINGS -> SettingsScreen { page = it }
                 Page.SOURCES -> SourcesScreen(sources, activeSource, ::saveSources,
                     { selected -> activeSource = selected; local.saveActiveSource(selected) }, ::back,
-                    onBrowse = { browsingSource = it; page = Page.SITE })
+                    onBrowse = { browsingSource = it; browseReturn = Page.SOURCES; page = Page.SITE })
                 Page.PLAYER -> PlayerSettingsScreen(local, ::back) { page = Page.TEST }
                 Page.APPEARANCE -> AppearanceScreen(local, ::back)
                 Page.UPDATES -> UpdatesScreen()
-                Page.SITE -> BrowserScreen(browsingSource ?: activeSource.orEmpty(), onBack = { page = Page.HOME })
+                Page.SITE -> BrowserScreen(browsingSource ?: activeSource.orEmpty(),
+                    onBack = { page = browseReturn })
+                Page.MOVIE -> selectedFilm?.let { movie ->
+                    FilmDetails(movie, activeSource.orEmpty(), onBack = { page = Page.HOME },
+                        onWatch = { url ->
+                            browsingSource = url
+                            browseReturn = Page.MOVIE
+                            page = Page.SITE
+                        })
+                }
                 Page.ABOUT -> AboutScreen(::back)
                 Page.TEST -> VideoTestScreen(::back) { playing = it }
             }
@@ -234,7 +248,13 @@ internal fun SimpleTabs(items: List<String>, selected: String, onSelected: (Stri
 }
 
 @Composable
-private fun HomeScreen(activeSource: String?, onBrowse: (String) -> Unit, onAddSource: () -> Unit) {
+private fun HomeScreen(
+    activeSource: String?,
+    cardsPerRow: Int,
+    onOpenFilm: (CatalogMovie) -> Unit,
+    onBrowse: (String) -> Unit,
+    onAddSource: () -> Unit
+) {
     var kind by rememberSaveable { mutableStateOf(contentKinds.first()) }
     var options by remember { mutableStateOf(false) }
     val pager = rememberPagerState(initialPage = 0, pageCount = { feeds.size })
@@ -351,44 +371,15 @@ private fun HomeScreen(activeSource: String?, onBrowse: (String) -> Unit, onAddS
             modifier = Modifier.fillMaxWidth().weight(1f),
             key = { index -> feeds[index] }
         ) { index ->
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(22.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.Movie, contentDescription = null,
-                        tint = appMuted.copy(alpha = .5f),
-                        modifier = Modifier.size(43.dp)
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "Каталог пока пуст",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = appWhite,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "Фильмы появятся после подключения источника.",
-                        color = appMuted,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Spacer(Modifier.height(18.dp))
-                    if (activeSource != null) {
-                        Button(onClick = { onBrowse(activeSource) }) {
-                            Icon(Icons.Outlined.OpenInNew, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Открыть выбранное зеркало")
-                        }
-                    } else {
-                        Button(onClick = onAddSource) { Text("Добавить зеркало") }
-                    }
-                }
-            }
+            CatalogGrid(
+                source = activeSource,
+                section = feeds[index],
+                kind = kind,
+                cardsPerRow = cardsPerRow,
+                onOpen = onOpenFilm,
+                onBrowse = onBrowse,
+                onAddSource = onAddSource
+            )
         }
     }
 }
