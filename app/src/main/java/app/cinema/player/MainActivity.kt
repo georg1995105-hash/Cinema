@@ -8,6 +8,9 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -169,22 +172,41 @@ private fun CinemaApp() {
                 Page.HOME -> HomeScreen(
                     activeSource = activeSource,
                     cardsPerRow = local.cardsPerRow(),
-                    onOpenFilm = { selectedFilm = it; movieBack = Page.HOME; page = Page.MOVIE },
+                    onOpenFilm = { local.rememberMovie(it); selectedFilm = it; movieBack = Page.HOME; page = Page.MOVIE },
                     onBrowse = { browsingSource = it; browseReturn = Page.HOME; page = Page.SITE },
                     onAddSource = { page = Page.SOURCES }
                 )
                 Page.SEARCH -> SearchScreen(
                     source = activeSource,
                     cardsPerRow = local.cardsPerRow(),
-                    onOpen = { selectedFilm = it; movieBack = Page.SEARCH; page = Page.MOVIE },
+                    onOpen = { local.rememberMovie(it); selectedFilm = it; movieBack = Page.SEARCH; page = Page.MOVIE },
                     onAddSource = { page = Page.SOURCES },
                     onBrowse = { browsingSource = it; browseReturn = Page.SEARCH; page = Page.SITE }
                 )
-                Page.LIBRARY -> LibraryScreen(history, favourites, { playing = it },
-                    ::toggleFavourite, { url ->
+                Page.LIBRARY -> LibraryScreen(
+                    local = local,
+                    history = history,
+                    favourites = favourites,
+                    cardsPerRow = local.cardsPerRow(),
+                    onOpen = { film ->
+                        local.rememberMovie(film)
+                        selectedFilm = film
+                        movieBack = Page.LIBRARY
+                        page = Page.MOVIE
+                    },
+                    onResume = { film ->
+                        local.rememberMovie(film)
+                        selectedFilm = film
+                        browsingSource = film.url
+                        movieBack = Page.LIBRARY
+                        page = Page.FILM_PLAYER
+                    },
+                    toggle = ::toggleFavourite,
+                    remove = { url ->
                         history.removeAll { it.url == url }
                         local.saveHistory(history.toList())
-                    })
+                    }
+                )
                 Page.SETTINGS -> SettingsScreen(
                     open = { page = it },
                     onAccount = { page = Page.ACCOUNT }
@@ -255,7 +277,7 @@ private fun CinemaApp() {
                             browsingSource = url
                             page = Page.FILM_PLAYER
                         },
-                        onRelated = { next -> selectedFilm = next },
+                        onRelated = { next -> local.rememberMovie(next); selectedFilm = next },
                         onPerson = { person ->
                             selectedPerson = person
                             previousFilm = selectedFilm
@@ -270,6 +292,7 @@ private fun CinemaApp() {
                         cardsPerRow = local.cardsPerRow(),
                         onBack = { selectedFilm = previousFilm; page = Page.MOVIE },
                         onOpen = { film ->
+                            local.rememberMovie(film)
                             selectedFilm = film
                             movieBack = Page.PERSON
                             page = Page.MOVIE
@@ -491,66 +514,98 @@ internal fun EmptyPanel(title: String, explanation: String, icon: ImageVector) {
 }
 
 
-private fun displayName(url: String): String =
-    runCatching { "Видео · " + (URI(url).host ?: "сохранённое") }.getOrDefault("Видео")
-
-@Composable
-private fun VideoRow(
-    url: String, position: Long?, play: (String) -> Unit,
-    fav: Boolean = false, toggle: (() -> Unit)? = null, remove: (() -> Unit)? = null
-) {
-    Surface(color = appCard, shape = RoundedCornerShape(15.dp)) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(50.dp).clip(RoundedCornerShape(12.dp))
-                .background(appPanel), contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.Movie, contentDescription = null, tint = appBlue)
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(displayName(url), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(if (position != null) "Продолжить с " + (position / 60000) + " мин"
-                    else "Сохранённое видео",
-                    color = appMuted, style = MaterialTheme.typography.bodySmall)
-            }
-            if (toggle != null) IconButton(onClick = toggle) {
-                Icon(if (fav) Icons.Outlined.Star else Icons.Outlined.StarBorder,
-                    contentDescription = if (fav) "Убрать из избранного" else "В избранное",
-                    tint = if (fav) appBlue else appMuted)
-            }
-            if (remove != null) IconButton(onClick = remove) {
-                Icon(Icons.Outlined.Delete, contentDescription = "Удалить", tint = appMuted)
-            }
-            FilledIconButton(onClick = { play(url) },
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = appBlue)) {
-                Icon(Icons.Outlined.PlayArrow, contentDescription = "Смотреть", tint = appBackground)
-            }
-        }
-    }
-}
 
 @Composable
 private fun LibraryScreen(
-    history: List<WatchedVideo>, favourites: List<String>, play: (String) -> Unit,
-    toggle: (String) -> Unit, remove: (String) -> Unit
+    local: LocalStore,
+    history: List<WatchedVideo>,
+    favourites: List<String>,
+    cardsPerRow: Int,
+    onOpen: (CatalogMovie) -> Unit,
+    onResume: (CatalogMovie) -> Unit,
+    toggle: (String) -> Unit,
+    remove: (String) -> Unit
 ) {
     var selected by remember { mutableStateOf("История") }
-    Column {
-        ScreenHeading("Моё", "История и избранное хранятся только на устройстве")
-        Spacer(Modifier.height(20.dp))
+    var sort by remember { mutableStateOf("По дате") }
+    val isTablet = LocalConfiguration.current.screenWidthDp >= 600
+    val columns = if (isTablet) cardsPerRow.coerceIn(3,8)
+        else cardsPerRow.coerceIn(2,3)
+    val list = if (selected == "История") history.map { it.url } else favourites
+    val visible = if (sort == "По названию")
+        list.sortedBy { local.savedMovie(it)?.title?.lowercase() ?: it } else list
+
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeading("Моё")
+        Spacer(Modifier.height(14.dp))
         SimpleTabs(listOf("История", "Избранное"), selected) { selected = it }
-        Spacer(Modifier.height(16.dp))
-        val visible = if (selected == "История") history.map { it.url } else favourites
+        Spacer(Modifier.height(8.dp))
+        SimpleTabs(listOf("По дате", "По названию"), sort) { sort = it }
+        Spacer(Modifier.height(12.dp))
         if (visible.isEmpty()) {
-            EmptyPanel(if (selected == "История") "Просмотров пока нет" else "Избранное пока пусто",
-                if (selected == "История") "Здесь появятся просмотренные видео и место остановки."
-                else "Видео можно сохранить в избранное из истории.",
-                if (selected == "История") Icons.Outlined.History else Icons.Outlined.Bookmarks)
+            EmptyPanel(
+                if (selected == "История") "Просмотров пока нет" else "Избранное пока пусто",
+                if (selected == "История") "Продолжение просмотра появится здесь."
+                else "Добавьте фильм в избранное из его карточки.",
+                if (selected == "История") Icons.Outlined.History else Icons.Outlined.Bookmarks
+            )
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(visible, key = { it }) { url ->
-                    VideoRow(url, history.firstOrNull { it.url == url }?.positionMs, play,
-                        fav = url in favourites, toggle = { toggle(url) },
-                        remove = if (selected == "История") ({ remove(url) }) else null)
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(columns),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                contentPadding = PaddingValues(bottom = 28.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                gridItems(visible, key = { it }) { url ->
+                    val film = local.savedMovie(url) ?: CatalogMovie(
+                        url, "Сохранённый фильм", "", "")
+                    val position = history.firstOrNull { it.url == url }?.positionMs
+                    val origin = runCatching {
+                        val uri = URI(url)
+                        uri.scheme + "://" + uri.authority
+                    }.getOrDefault(url)
+                    Column(Modifier.fillMaxWidth()) {
+                        FilmPoster(film, origin) { onOpen(film) }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            if (selected == "История") {
+                                val seconds = (position ?: 0L) / 1000L
+                                Text(
+                                    if (seconds > 0) {
+                                        val minute = seconds / 60
+                                        val second = (seconds % 60).toString().padStart(2,'0')
+                                        "$minute:$second"
+                                    } else "Начало",
+                                    color = appMuted,
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { onResume(film) },
+                                        modifier = Modifier.size(33.dp)) {
+                                        Icon(Icons.Outlined.PlayArrow,
+                                            contentDescription = "Продолжить", tint = appBlue)
+                                    }
+                                    IconButton(onClick = { remove(url) },
+                                        modifier = Modifier.size(33.dp)) {
+                                        Icon(Icons.Outlined.Close,
+                                            contentDescription = "Удалить из истории", tint = appMuted)
+                                    }
+                                }
+                            } else {
+                                Text("Избранное", color = appMuted,
+                                    style = MaterialTheme.typography.labelSmall)
+                                IconButton(onClick = { toggle(url) },
+                                    modifier = Modifier.size(33.dp)) {
+                                    Icon(Icons.Outlined.BookmarkRemove,
+                                        contentDescription = "Убрать из избранного", tint = appBlue)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
