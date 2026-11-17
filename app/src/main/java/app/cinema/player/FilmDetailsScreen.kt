@@ -45,6 +45,15 @@ internal data class FilmInfo(
     val related: List<CatalogMovie>
 )
 
+internal object FilmInfoMemory {
+    private val values = object : LinkedHashMap<String, FilmInfo>(20, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, FilmInfo>?): Boolean =
+            size > 20
+    }
+    @Synchronized fun get(url: String): FilmInfo? = values[url]
+    @Synchronized fun put(url: String, info: FilmInfo) { values[url] = info }
+}
+
 internal object FilmPageParser {
     val javascript = """
        (function() {
@@ -66,7 +75,7 @@ internal object FilmPageParser {
            if(meta) description=norm(meta.getAttribute('content'));
          }
          var people=[];
-         document.querySelectorAll('.b-post__people_item, .b-post__actors_item, .b-post__person_item').forEach(function(e){
+         document.querySelectorAll('.b-post__people_item, .b-post__actors_item, .b-post__person_item, .persons-list-holder .person-name-item').forEach(function(e){
            var img=e.querySelector('img');
            var n=norm(e.querySelector('a')?.textContent || img?.getAttribute('alt') || e.textContent);
            var photo=img ? absolute(img.getAttribute('data-src') || img.getAttribute('src')) : '';
@@ -151,9 +160,9 @@ internal fun FilmDetails(
     onRelated: (CatalogMovie) -> Unit
 ) {
     val context = LocalContext.current
-    var info by remember(movie.url) { mutableStateOf<FilmInfo?>(null) }
-    var loadDone by remember(movie.url) { mutableStateOf(false) }
-    val webView = remember(context, movie.url) {
+    var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
+    var loadDone by remember(movie.url) { mutableStateOf(info != null) }
+    val webView = if (info == null && !loadDone) remember(context, movie.url) {
         val handler = Handler(Looper.getMainLooper())
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
@@ -171,17 +180,20 @@ internal fun FilmDetails(
                         !(host.equals(home, true) || host.endsWith(".$home", true))
                 }
                 override fun onPageFinished(view: WebView, url: String) {
-                    listOf(400L, 1400L, 3000L).forEach { delay ->
+                    listOf(400L, 1400L, 3000L).forEachIndexed { index, delay ->
                         handler.postDelayed({
-                            if (view.url != url) return@postDelayed
+                            if (view.url != url || loadDone) return@postDelayed
                             view.evaluateJavascript(FilmPageParser.javascript) { raw ->
                                 val parsed = FilmPageParser.parse(raw, source)
                                 if (parsed != null &&
                                     (parsed.description.isNotBlank() || parsed.facts.isNotEmpty() ||
                                         parsed.cast.isNotEmpty())) {
                                     info = parsed
+                                    FilmInfoMemory.put(movie.url, parsed)
+                                    loadDone = true
+                                } else if (index == 2) {
+                                    loadDone = true
                                 }
-                                loadDone = true
                             }
                         }, delay)
                     }
@@ -193,18 +205,18 @@ internal fun FilmDetails(
             setTag(handler)
             loadUrl(movie.url)
         }
-    }
+    } else null
     DisposableEffect(webView) {
         onDispose {
-            (webView.tag as? Handler)?.removeCallbacksAndMessages(null)
-            webView.stopLoading()
-            webView.destroy()
+            (webView?.tag as? Handler)?.removeCallbacksAndMessages(null)
+            webView?.stopLoading()
+            webView?.destroy()
         }
     }
 
     val primary = MaterialTheme.colorScheme.onSurface
     Box(Modifier.fillMaxSize()) {
-        AndroidView(factory = { webView }, modifier = Modifier.size(2.dp).alpha(.01f))
+        if (webView != null) AndroidView(factory = { webView }, modifier = Modifier.size(2.dp).alpha(.01f))
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 28.dp),
