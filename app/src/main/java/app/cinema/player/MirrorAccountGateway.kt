@@ -9,13 +9,21 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
 
-internal data class MirrorLoginResult(val success: Boolean, val message: String)
+internal data class MirrorLoginResult(
+    val success: Boolean,
+    val message: String,
+    val retryInBrowser: Boolean = false
+)
 
 internal object MirrorLoginProtocol {
     fun decode(status: Int, body: String): MirrorLoginResult {
         if (status != 200) return MirrorLoginResult(false,
-            if (status in 300..399) "Сайт перенаправил запрос. Проверьте зеркало."
-            else "Сервер ответил с ошибкой $status.")
+            if (status in 300..399) "Зеркало перенаправило запрос."
+            else if (status == 403 || status == 429 || status == 503)
+                "Прямой запрос ограничен сайтом ($status)."
+            else "Сервер ответил с ошибкой $status.",
+            retryInBrowser = status in 300..399 || status == 403 ||
+                status == 429 || status == 503)
         return runCatching {
             val json = JSONObject(body)
             val ok = json.optBoolean("success", false) || json.optInt("success", 0) == 1
@@ -85,8 +93,8 @@ internal class MirrorAccountGateway(private val context: Context) {
                             if(size>0) String(buffer,0,size) else ""
                         }
                     else ""
-                    val outcome = MirrorLoginProtocol.decode(status, body)
-                    if (!outcome.success) return@withContext outcome
+                    // Session cookies can arrive on a 302/303 response as well as 200.
+                    // Never replay the credential-bearing POST to a redirect destination.
                     connection.headerFields.orEmpty().forEach { (key, values) ->
                         if (key?.equals("Set-Cookie", ignoreCase = true) == true) {
                             values.forEach { raw ->
@@ -95,13 +103,25 @@ internal class MirrorAccountGateway(private val context: Context) {
                         }
                     }
                     cookieManager.flush()
+                    if (status in 300..399) {
+                        val location = connection.getHeaderField("Location")
+                        if (!isSafeRedirect(origin, location)) {
+                            return@withContext MirrorLoginResult(false,
+                                "Сайт переадресует на другой домен. Выберите его отдельным зеркалом — пароль туда не отправлялся.")
+                        }
+                        if (hasSession(origin))
+                            return@withContext MirrorLoginResult(true, "Сеанс сохранён")
+                    }
+                    val outcome = MirrorLoginProtocol.decode(status, body)
+                    if (!outcome.success) return@withContext outcome
                     if (hasSession(origin)) outcome else MirrorLoginResult(false,
-                        "Сайт подтвердил вход, но не предоставил сохраняемый сеанс.")
+                        "Сайт принял запрос, но не предоставил сессионные cookie.",
+                        retryInBrowser = true)
                 } finally {
                     connection.disconnect()
                 }
             } catch (_: Exception) {
-                MirrorLoginResult(false, "Не удалось подключиться к зеркалу. Проверьте адрес и доступ.")
+                MirrorLoginResult(false, "Прямое подключение недоступно.", retryInBrowser = true)
             }
         }
 
@@ -114,6 +134,14 @@ internal class MirrorAccountGateway(private val context: Context) {
     }
 
     companion object {
+        internal fun isSafeRedirect(sourceOrigin: String, location: String?): Boolean {
+            if (location.isNullOrBlank()) return false
+            return runCatching {
+                val destination = URI(sourceOrigin).resolve(location)
+                origin(destination.toString()) == sourceOrigin
+            }.getOrDefault(false)
+        }
+
         internal fun origin(address: String): String? {
             if (!SourceRules.isValidHttpsUrl(address)) return null
             return try {

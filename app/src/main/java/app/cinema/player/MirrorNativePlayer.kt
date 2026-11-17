@@ -615,7 +615,7 @@ internal fun MirrorNativePlayer(
                     settingsSection = "Настройки"
                     showSettings = true
                 }) {
-                    Icon(Icons.Outlined.Settings, contentDescription = "Настройки плеера",
+                    Icon(Icons.Outlined.MoreVert, contentDescription = "Меню плеера",
                         tint = Color.White)
                 }
             }
@@ -688,7 +688,8 @@ internal fun MirrorNativePlayer(
                     Slider(
                         value = if (total > 0L) (position.toFloat() / total).coerceIn(0f, 1f) else 0f,
                         onValueChange = { if (total > 0L) player.seekTo((it * total).toLong()) },
-                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
+                        modifier = Modifier.weight(1f).height(28.dp)
+                            .padding(horizontal = 10.dp)
                     )
                     Text(if (total > 0L) formatVideoTime(total) else "—:—",
                         color = Color.White, style = MaterialTheme.typography.labelMedium)
@@ -699,29 +700,8 @@ internal fun MirrorNativePlayer(
                         }
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = {
-                        settingsSection = "Качество"
-                        showSettings = true
-                    }) {
-                        Text(quality.ifBlank { "Авто" }, color = Color.White)
-                    }
-                    TextButton(onClick = {
-                        settingsSection = "Скорость"
-                        showSettings = true
-                    }) {
-                        Text(speed.toString() + "×", color = Color.White)
-                    }
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = {
-                        settingsSection = "Настройки"
-                        showSettings = true
-                    }) {
-                        Icon(Icons.Outlined.Tune, contentDescription = "Озвучка, серии и качество",
-                            tint = Color.White)
-                    }
-
-                }
+                // Quality, voice, speed and episodes are all in the single player menu.
+                // No duplicated rows of oversized player controls below the seekbar.
             }
         }
         // Player settings are part of the same immersive screen, not a separate modal window.

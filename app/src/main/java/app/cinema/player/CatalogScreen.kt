@@ -129,9 +129,12 @@ internal object MirrorCatalog {
 
     val javascript = """
         (function() {
-          var nodes = Array.from(document.querySelectorAll('.b-content__inline_item')).slice(0,96);
+          var nodes = Array.from(document.querySelectorAll(
+            '.b-content__inline_item, .b-content__list_item, .b-content__item'
+          )).slice(0,96);
           var cards = nodes.map(function(item) {
-            var a = item.querySelector('.b-content__inline_item-link a[href]');
+            var a = item.querySelector('.b-content__inline_item-link a[href]') ||
+                    item.querySelector('a[href*="/films/"], a[href*="/series/"], a[href*="/cartoons/"], a[href*="/animation/"]');
             if (!a) return null;
             var link = item.querySelector('.b-content__inline_item-link');
             var img = item.querySelector('.b-content__inline_item-cover img') || item.querySelector('img');
@@ -166,6 +169,8 @@ internal object MirrorCatalog {
               });
             }
             if(cover) {
+              ['data-src','data-original','data-image','data-bg','data-background','data-cover']
+                .forEach(function(key){ add(cover.getAttribute(key)); });
               var css=cover.style.backgroundImage || getComputedStyle(cover).backgroundImage || '';
               var found=css.match(/url\(['"]?(.*?)['"]?\)/i);
               if(found)add(found[1]);
@@ -346,11 +351,20 @@ internal fun FilmPoster(movie: CatalogMovie, source: String, onClick: () -> Unit
     var imageIndex by remember(movie.url, candidates) { mutableIntStateOf(0) }
     val url = candidates.getOrNull(imageIndex)
     val image = remember(url, source) {
-        ImageRequest.Builder(context)
+        val builder = ImageRequest.Builder(context)
             .data(url)
             .addHeader("Referer", source.trimEnd('/') + "/")
             .addHeader("User-Agent", WebSettings.getDefaultUserAgent(context))
-            .crossfade(true).build()
+        // Coil does not share WebView's authenticated cookie jar automatically.
+        // Never attach account cookies to third-party image/CDN hosts.
+        if (url != null && runCatching {
+                URI(url).host.equals(URI(source).host, ignoreCase = true)
+            }.getOrDefault(false)) {
+            CookieManager.getInstance().getCookie(source)?.let { cookie ->
+                if (cookie.isNotBlank()) builder.addHeader("Cookie", cookie)
+            }
+        }
+        builder.crossfade(true).build()
     }
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Box(Modifier.fillMaxWidth().aspectRatio(.70f).clip(RoundedCornerShape(14.dp))

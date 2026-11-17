@@ -44,6 +44,7 @@ internal fun MirrorAccountScreen(
     var password by remember(selected) { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var browserLogin by remember(selected) { mutableStateOf(false) }
     var message by remember(selected) { mutableStateOf("") }
     var signedIn by remember(selected) { mutableStateOf(selected?.let(gateway::hasSession) ?: false) }
     var sourceMenu by remember { mutableStateOf(false) }
@@ -169,10 +170,15 @@ internal fun MirrorAccountScreen(
                                 busy = true
                                 scope.launch {
                                     val result = gateway.signIn(selected, login, password, userAgent)
-                                    busy = false
-                                    signedIn = result.success
-                                    message = result.message
-                                    password = ""
+                                    if (result.retryInBrowser) {
+                                        message = "Проверяем вход через сеанс зеркала…"
+                                        browserLogin = true
+                                    } else {
+                                        busy = false
+                                        signedIn = result.success
+                                        message = result.message
+                                        password = ""
+                                    }
                                 }
                             },
                             modifier = Modifier.weight(1f),
@@ -187,6 +193,20 @@ internal fun MirrorAccountScreen(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         ) { Text("Регистрация") }
+                    }
+                    if (browserLogin) {
+                        MirrorBrowserSignIn(
+                            source = selected,
+                            login = login,
+                            password = password,
+                            onComplete = { result ->
+                                browserLogin = false
+                                busy = false
+                                signedIn = result.success
+                                message = result.message
+                                password = ""
+                            }
+                        )
                     }
                     Text(
                         "Пароль отправляется только выбранному сайту по HTTPS. " +
