@@ -68,7 +68,8 @@ internal fun SourcesScreen(
     selected: String?,
     change: (List<String>) -> Unit,
     select: (String?) -> Unit,
-    back: () -> Unit
+    back: () -> Unit,
+    onBrowse: (String) -> Unit
 ) {
     var input by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
@@ -133,7 +134,9 @@ internal fun SourcesScreen(
                                 }
                                 else Text("Основное", color = appBlue,
                                     style = MaterialTheme.typography.labelMedium)
-                                Spacer(Modifier.width(10.dp))
+                                Spacer(Modifier.width(8.dp))
+                                TextButton(onClick = { onBrowse(address) }) { Text("Открыть") }
+                                Spacer(Modifier.width(6.dp))
                                 TextButton(enabled = testing != address, onClick = {
                                     testing = address
                                     scope.launch {
