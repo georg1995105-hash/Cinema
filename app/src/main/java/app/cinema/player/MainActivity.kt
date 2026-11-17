@@ -183,14 +183,19 @@ private fun CinemaApp() {
                 Page.UPDATES -> UpdatesScreen()
                 Page.SITE -> BrowserScreen(browsingSource ?: activeSource.orEmpty(),
                     onBack = { page = browseReturn })
-                Page.FILM_PLAYER -> MirrorFilmPlayer(
+                Page.FILM_PLAYER -> MirrorNativePlayer(
                     filmUrl = browsingSource ?: selectedFilm?.url.orEmpty(),
-                    title = selectedFilm?.title.orEmpty(),
-                    onBack = { page = Page.MOVIE },
-                    onOpenSite = {
-                        browseReturn = Page.FILM_PLAYER
-                        page = Page.SITE
-                    }
+                    filmTitle = selectedFilm?.title.orEmpty(),
+                    startPositionMs = history.firstOrNull {
+                        it.url == (browsingSource ?: selectedFilm?.url)
+                    }?.positionMs ?: 0L,
+                    seekSeconds = local.seekSeconds(),
+                    holdSpeed = local.holdSpeed(),
+                    onSave = { ms ->
+                        val address = browsingSource ?: selectedFilm?.url
+                        if (address != null) saveProgress(address, ms)
+                    },
+                    onClose = { page = Page.MOVIE }
                 )
                 Page.MOVIE -> selectedFilm?.let { movie ->
                     FilmDetails(
