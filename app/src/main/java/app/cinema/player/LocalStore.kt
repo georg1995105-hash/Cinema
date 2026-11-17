@@ -33,6 +33,11 @@ class LocalStore(context: Context) {
         prefs.edit().putString("active_source", value).apply()
     }
 
+    fun cardsPerRow(): Int = prefs.getInt("cards_per_row", 5).coerceIn(2, 8)
+    fun saveCardsPerRow(value: Int) { prefs.edit().putInt("cards_per_row", value.coerceIn(2, 8)).apply() }
+    fun holdSpeed(): Int = prefs.getInt("hold_speed", 2).takeIf { it in 2..4 } ?: 2
+    fun saveHoldSpeed(value: Int) { if (value in 2..4) prefs.edit().putInt("hold_speed", value).apply() }
+
     fun seekSeconds(): Int = prefs.getInt("seek_seconds", 10).takeIf { it in listOf(10, 15, 30) } ?: 10
     fun saveSeekSeconds(value: Int) {
         if (value in listOf(10, 15, 30)) prefs.edit().putInt("seek_seconds", value).apply()

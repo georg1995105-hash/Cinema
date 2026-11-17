@@ -34,12 +34,11 @@ internal val appBlue = Color(0xFF80C5E7)
 internal val appMuted = Color(0xFFADB8C0)
 private val appWhite = Color(0xFFF4F7F8)
 
-internal enum class Page { HOME, SEARCH, SECTIONS, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST }
+internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES }
 private data class Destination(val page: Page, val label: String, val icon: ImageVector)
 private val destinations = listOf(
     Destination(Page.HOME, "Главная", Icons.Outlined.Home),
     Destination(Page.SEARCH, "Поиск", Icons.Outlined.Search),
-    Destination(Page.SECTIONS, "Разделы", Icons.Outlined.GridView),
     Destination(Page.LIBRARY, "Моё", Icons.Outlined.Bookmarks),
     Destination(Page.SETTINGS, "Настройки", Icons.Outlined.Settings)
 )
@@ -91,7 +90,7 @@ private fun CinemaApp() {
         }
     }
     fun back() {
-        page = if (page in listOf(Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST))
+        page = if (page in listOf(Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST, Page.UPDATES))
             Page.SETTINGS else Page.HOME
     }
     playing?.let { url ->
@@ -100,6 +99,7 @@ private fun CinemaApp() {
             startPositionMs = history.firstOrNull { it.url == url }?.positionMs ?: 0,
             seekSeconds = local.seekSeconds(),
             onClose = { playing = null },
+            holdSpeed = local.holdSpeed(),
             onSave = { saveProgress(url, it) }
         )
         return
@@ -122,7 +122,7 @@ private fun CinemaApp() {
                     destinations.forEach { destination ->
                         val selected = page == destination.page ||
                             (destination.page == Page.SETTINGS && page in listOf(
-                                Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST
+                                Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST, Page.UPDATES
                             ))
                         NavigationBarItem(
                             selected = selected,
@@ -152,7 +152,6 @@ private fun CinemaApp() {
             when (page) {
                 Page.HOME -> HomeScreen()
                 Page.SEARCH -> SearchScreen(history, favourites) { playing = it }
-                Page.SECTIONS -> SectionsScreen()
                 Page.LIBRARY -> LibraryScreen(history, favourites, { playing = it },
                     ::toggleFavourite, { url ->
                         history.removeAll { it.url == url }
@@ -162,7 +161,8 @@ private fun CinemaApp() {
                 Page.SOURCES -> SourcesScreen(sources, activeSource, ::saveSources,
                     { selected -> activeSource = selected; local.saveActiveSource(selected) }, ::back)
                 Page.PLAYER -> PlayerSettingsScreen(local, ::back) { page = Page.TEST }
-                Page.APPEARANCE -> AppearanceScreen(::back)
+                Page.APPEARANCE -> AppearanceScreen(local, ::back)
+                Page.UPDATES -> UpdatesScreen()
                 Page.ABOUT -> AboutScreen(::back)
                 Page.TEST -> VideoTestScreen(::back) { playing = it }
             }
@@ -191,9 +191,10 @@ internal fun ScreenHeading(title: String, subtitle: String? = null, back: (() ->
 }
 
 private val feeds = listOf(
-    "Горячие", "Смотрят сейчас", "Новинки", "Последние поступления", "Популярное", "В ожидании"
+    "Смотрят сейчас", "Горячие", "Новинки", "Последние поступления",
+    "Популярное", "В ожидании"
 )
-private val genres = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы", "Аниме")
+private val contentKinds = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы", "Аниме")
 
 @Composable
 internal fun SimpleTabs(items: List<String>, selected: String, onSelected: (String) -> Unit) {
@@ -221,70 +222,72 @@ internal fun SimpleTabs(items: List<String>, selected: String, onSelected: (Stri
 @Composable
 private fun HomeScreen() {
     var feed by rememberSaveable { mutableStateOf(feeds.first()) }
+    var kind by rememberSaveable { mutableStateOf(contentKinds.first()) }
+    var options by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(26.dp),
-            contentPadding = PaddingValues(start = 2.dp, end = 20.dp)
-        ) {
-            items(feeds) { section ->
-                val active = feed == section
-                Column(
-                    Modifier.width(IntrinsicSize.Max)
-                        .clickable { feed = section }
-                        .padding(top = 15.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        section,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (active) appWhite else appMuted,
-                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                        maxLines = 1
-                    )
-                    Spacer(Modifier.height(13.dp))
-                    Box(
-                        Modifier.fillMaxWidth().height(3.dp)
-                            .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
-                            .background(if (active) appBlue else Color.Transparent)
-                    )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LazyRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                contentPadding = PaddingValues(start = 2.dp, end = 12.dp)
+            ) {
+                items(feeds) { section ->
+                    val active = feed == section
+                    Column(
+                        Modifier.width(IntrinsicSize.Max)
+                            .clickable { feed = section }
+                            .padding(top = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            section, color = if (active) appWhite else appMuted,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Box(
+                            Modifier.fillMaxWidth().height(3.dp)
+                                .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                                .background(if (active) appBlue else Color.Transparent)
+                        )
+                    }
+                }
+            }
+            Box {
+                TextButton(onClick = { options = true }) {
+                    Text(kind, maxLines = 1, color = appBlue)
+                    Icon(Icons.Outlined.ArrowDropDown, contentDescription = "Тип контента", tint = appBlue)
+                }
+                DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
+                    contentKinds.forEach { item ->
+                        DropdownMenuItem(
+                            text = { Text(item) },
+                            onClick = { kind = item; options = false },
+                            leadingIcon = {
+                                if (item == kind) Icon(Icons.Outlined.Check, contentDescription = null)
+                            }
+                        )
+                    }
                 }
             }
         }
         HorizontalDivider(color = appMuted.copy(alpha = .13f))
-        // Content will be populated by a catalogue provider. Do not show fake posters.
-        Box(
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(24.dp)
-            ) {
-                Icon(
-                    Icons.Outlined.Movie,
-                    contentDescription = null,
-                    tint = appMuted.copy(alpha = .55f),
-                    modifier = Modifier.size(44.dp)
-                )
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    "Каталог пока пуст",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = appWhite,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(Modifier.height(7.dp))
-                Text(
-                    "Фильмы появятся после подключения источника.",
-                    color = appMuted,
-                    style = MaterialTheme.typography.bodyMedium
-                )
+        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(22.dp)) {
+                Icon(Icons.Outlined.Movie, contentDescription = null,
+                    tint = appMuted.copy(alpha = .5f), modifier = Modifier.size(43.dp))
+                Spacer(Modifier.height(12.dp))
+                Text("Каталог пока пуст", style = MaterialTheme.typography.titleMedium,
+                    color = appWhite, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(6.dp))
+                Text("Фильмы появятся после подключения источника.",
+                    color = appMuted, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
 }
-
 @Composable
 internal fun EmptyPanel(title: String, explanation: String, icon: ImageVector) {
     Surface(color = appPanel, shape = RoundedCornerShape(22.dp),
@@ -302,46 +305,6 @@ internal fun EmptyPanel(title: String, explanation: String, icon: ImageVector) {
     }
 }
 
-@Composable
-private fun SearchScreen(history: List<WatchedVideo>, favourites: List<String>, play: (String) -> Unit) {
-    var query by remember { mutableStateOf("") }
-    val matched = (history.map { it.url } + favourites).distinct()
-        .filter { query.isNotBlank() && it.contains(query.trim(), ignoreCase = true) }
-    Column {
-        ScreenHeading("Поиск", "Поиск в каталоге появится после подключения источника")
-        Spacer(Modifier.height(20.dp))
-        OutlinedTextField(query, { query = it }, label = { Text("Название фильма или сериала") },
-            singleLine = true, modifier = Modifier.fillMaxWidth(),
-            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-            shape = RoundedCornerShape(14.dp))
-        Spacer(Modifier.height(18.dp))
-        if (matched.isEmpty()) {
-            EmptyPanel(if (query.isBlank()) "Что будем смотреть?" else "Ничего не найдено",
-                "Сейчас доступен поиск только по сохранённым видеоссылкам.",
-                Icons.Outlined.Search)
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(matched) { url ->
-                    VideoRow(url, history.firstOrNull { it.url == url }?.positionMs, play)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SectionsScreen() {
-    var category by remember { mutableStateOf(genres.first()) }
-    Column {
-        ScreenHeading("Разделы", "Категории фильмов и сериалов")
-        Spacer(Modifier.height(22.dp))
-        SimpleTabs(genres, category) { category = it }
-        Spacer(Modifier.height(18.dp))
-        EmptyPanel("Раздел «" + category + "» пуст",
-            "Фильмы появятся после подключения каталога.",
-            Icons.Outlined.GridView)
-    }
-}
 
 private fun displayName(url: String): String =
     runCatching { "Видео · " + (URI(url).host ?: "сохранённое") }.getOrDefault("Видео")

@@ -28,7 +28,10 @@ internal fun SettingsScreen(open: (Page) -> Unit) {
         MenuItem("Плеер", "Перемотка и проверка воспроизведения", Icons.Outlined.PlayArrow) {
             open(Page.PLAYER)
         }
-        MenuItem("Внешний вид", "Тёмная тема", Icons.Outlined.Palette) {
+        MenuItem("Обновления", "Новая версия и ход загрузки", Icons.Outlined.SystemUpdate) {
+            open(Page.UPDATES)
+        }
+        MenuItem("Внешний вид", "Оформление и число карточек", Icons.Outlined.Palette) {
             open(Page.APPEARANCE)
         }
         MenuItem("О приложении", "Версия и сведения", Icons.Outlined.Info) {
@@ -153,6 +156,7 @@ internal fun SourcesScreen(
 @Composable
 internal fun PlayerSettingsScreen(local: LocalStore, back: () -> Unit, openTest: () -> Unit) {
     var seconds by remember { mutableIntStateOf(local.seekSeconds()) }
+    var speed by remember { mutableIntStateOf(local.holdSpeed()) }
     Column {
         ScreenHeading("Плеер", "Настройки воспроизведения", back)
         Spacer(Modifier.height(25.dp))
@@ -163,6 +167,16 @@ internal fun PlayerSettingsScreen(local: LocalStore, back: () -> Unit, openTest:
             local.saveSeekSeconds(seconds)
         }
         Spacer(Modifier.height(18.dp))
+        Text("Ускорение при удержании", fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(10.dp))
+        SimpleTabs(listOf("2×", "3×", "4×"), "$speed×") {
+            speed = it.substringBefore('×').toInt()
+            local.saveHoldSpeed(speed)
+        }
+        Spacer(Modifier.height(14.dp))
+        Text("Двойное нажатие перематывает. Удержание временно ускоряет видео.",
+            color = appMuted)
+        Spacer(Modifier.height(18.dp))
         Text("Плеер сохраняет место остановки и воспроизводит доступные видеоссылки.",
             color = appMuted)
         Spacer(Modifier.height(22.dp))
@@ -172,10 +186,23 @@ internal fun PlayerSettingsScreen(local: LocalStore, back: () -> Unit, openTest:
 }
 
 @Composable
-internal fun AppearanceScreen(back: () -> Unit) {
+internal fun AppearanceScreen(local: LocalStore, back: () -> Unit) {
+    var count by remember { mutableIntStateOf(local.cardsPerRow()) }
     Column {
         ScreenHeading("Внешний вид", "Оформление", back)
         Spacer(Modifier.height(24.dp))
+        Text("Карточек в ряду: $count", fontWeight = FontWeight.SemiBold)
+        Slider(
+            value = count.toFloat(), onValueChange = {
+                count = it.toInt().coerceIn(2, 8)
+                local.saveCardsPerRow(count)
+            },
+            valueRange = 2f..8f, steps = 5,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text("Настройка будет применяться к сетке после подключения каталога.",
+            color = appMuted, style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(20.dp))
         Surface(color = appPanel, shape = RoundedCornerShape(15.dp)) {
             Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Palette, contentDescription = null, tint = appBlue)
@@ -196,7 +223,7 @@ internal fun AboutScreen(back: () -> Unit) {
         Spacer(Modifier.height(24.dp))
         Text("Кино", style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold)
-        Text("Версия 0.2.1", color = appBlue)
+        Text("Версия 0.3.0", color = appBlue)
         Spacer(Modifier.height(18.dp))
         Text("Независимое приложение. Каталог и вход в сторонний сервис пока не подключены.",
             color = appMuted)
