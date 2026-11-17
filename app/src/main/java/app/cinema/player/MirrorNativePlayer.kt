@@ -331,6 +331,15 @@ internal fun MirrorNativePlayer(
             }
         }
     }
+    val playbackPreferences = remember(context) { LocalStore(context) }
+    var autoNextEpisode by remember { mutableStateOf(playbackPreferences.autoNextEpisode()) }
+    var episodeNotice by remember { mutableStateOf("") }
+    LaunchedEffect(episodeNotice) {
+        if (episodeNotice.isNotBlank()) {
+            delay(2300)
+            episodeNotice = ""
+        }
+    }
     LaunchedEffect(player, season, episode, voice, quality) {
         if (player != null) {
             var checkpoint = -1L
@@ -386,15 +395,6 @@ internal fun MirrorNativePlayer(
     // All playback controls are overlaid on the video, including quality, audio and speed.
     var speed by remember { mutableFloatStateOf(1f) }
     val speeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
-    val playbackPreferences = remember(context) { LocalStore(context) }
-    var autoNextEpisode by remember { mutableStateOf(playbackPreferences.autoNextEpisode()) }
-    var episodeNotice by remember { mutableStateOf("") }
-    LaunchedEffect(episodeNotice) {
-        if (episodeNotice.isNotBlank()) {
-            delay(2300)
-            episodeNotice = ""
-        }
-    }
     val pictureModes = listOf("По размеру", "Заполнить", "Растянуть")
     var pictureMode by remember { mutableStateOf("По размеру") }
     var subtitlesEnabled by remember { mutableStateOf(true) }
