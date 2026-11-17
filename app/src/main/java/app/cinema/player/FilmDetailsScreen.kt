@@ -449,11 +449,11 @@ internal fun FilmDetails(
     val primary = MaterialTheme.colorScheme.onSurface
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 730.dp
+        val tabletPosterWidth = (maxWidth * .35f).coerceIn(250.dp, 420.dp)
         if (webView != null) AndroidView(factory = { webView }, modifier = Modifier.size(2.dp).alpha(.01f))
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             if (wide) {
-                val posterWidth = (maxWidth * .35f).coerceIn(250.dp, 420.dp)
-                Box(Modifier.width(posterWidth).fillMaxHeight()
+                Box(Modifier.width(tabletPosterWidth).fillMaxHeight()
                     .clip(RoundedCornerShape(17.dp)).background(appCard),
                     contentAlignment = Alignment.TopCenter) {
                     if (movie.poster.isNotBlank()) {
