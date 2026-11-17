@@ -213,7 +213,7 @@ internal fun MirrorNativePlayer(
                                 ?: parsed.voices.first().id
                             episodes=parsed.episodes
                             val chosen=parsed.episodes.firstOrNull {
-                                it.season == savedSelection?.season && it.id == savedSelection.episode
+                                it.season == savedSelection?.season && it.id == savedSelection?.episode
                             } ?: parsed.episodes.firstOrNull()
                             season=chosen?.season.orEmpty()
                             episode=chosen?.id.orEmpty()
@@ -245,7 +245,7 @@ internal fun MirrorNativePlayer(
         val incoming=MirrorMediaParser.parseEpisodes(response?.optJSONArray("__kinoEpisodes"))
         if(incoming.isNotEmpty()){
             val chosen=incoming.firstOrNull { it.season == season && it.id == episode }
-                ?: incoming.firstOrNull { it.season == savedSelection?.season && it.id == savedSelection.episode }
+                ?: incoming.firstOrNull { it.season == savedSelection?.season && it.id == savedSelection?.episode }
                 ?: incoming.first()
             episodes=incoming
             season=chosen.season
