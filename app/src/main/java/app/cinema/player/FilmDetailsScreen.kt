@@ -524,19 +524,26 @@ internal fun FilmDetails(
                     view.evaluateJavascript(FilmPageParser.javascript) { raw ->
                         if (loadDone || view.url != pageUrl) return@evaluateJavascript
                         val parsed = FilmPageParser.parse(raw, source) ?: return@evaluateJavascript
-                        if (parsed.description.isNotBlank() || parsed.facts.isNotEmpty() ||
-                            parsed.cast.isNotEmpty() || parsed.voices.isNotEmpty() ||
-                            parsed.directors.isNotEmpty()) {
-                            val merged = if (parsed.franchise.isEmpty() &&
-                                info?.franchise?.isNotEmpty() == true)
-                                parsed.copy(franchise = info!!.franchise) else parsed
+                        if (FilmInfoReadiness.hasContent(parsed)) {
+                            val previous = info
+                            val merged = parsed.copy(
+                                description = parsed.description.ifBlank {
+                                    previous?.description.orEmpty()
+                                },
+                                facts = parsed.facts.ifEmpty { previous?.facts.orEmpty() },
+                                cast = parsed.cast.ifEmpty { previous?.cast.orEmpty() },
+                                directors = parsed.directors.ifEmpty {
+                                    previous?.directors.orEmpty()
+                                },
+                                voices = parsed.voices.ifEmpty { previous?.voices.orEmpty() },
+                                franchise = parsed.franchise.ifEmpty {
+                                    previous?.franchise.orEmpty()
+                                },
+                                related = parsed.related.ifEmpty { previous?.related.orEmpty() }
+                            )
                             info = merged
                             FilmInfoMemory.put(movie.url, merged)
-                        }
-                        if (parsed.franchiseResolved &&
-                            parsed.cast.all { it.photo.isNotBlank() || it.url.isBlank() } &&
-                            parsed.directors.all { it.photo.isNotBlank() || it.url.isBlank() }) {
-                            loadDone = true
+                            if (FilmInfoReadiness.canFinish(merged)) loadDone = true
                         }
                     }
                 }
