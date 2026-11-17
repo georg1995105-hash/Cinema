@@ -243,6 +243,9 @@ internal fun MirrorNativePlayer(
                 private var failed = false
 
                 private fun fail(reason: String) {
+                    // An already validated HTTP metadata result must not be discarded
+                    // because WebView's separate navigation failed.
+                    if (movie != null) return
                     failed = true
                     message = ""
                     error = reason
@@ -325,6 +328,29 @@ internal fun MirrorNativePlayer(
         }
     }
     LaunchedEffect(filmUrl) {
+        val fetched = MirrorNetworkSource.film(filmUrl,
+            WebSettings.getDefaultUserAgent(context))
+        val player = fetched.metadata?.player
+        if (movie == null && player != null) {
+            val chosen = MirrorVoiceSelection.choose(player, savedSelection?.voice)
+            if (chosen.isNotBlank()) {
+                pageUrl = fetched.finalUrl
+                movie = player
+                voice = chosen
+                episodes = player.episodes
+                val preferred = episodes.firstOrNull {
+                    it.season == savedSelection?.season && it.id == savedSelection.episode
+                } ?: episodes.firstOrNull()
+                season = preferred?.season.orEmpty()
+                episode = preferred?.id.orEmpty()
+                error = ""
+                message = "Получаем видеопоток"
+            }
+        } else if (movie == null && fetched.reason.isNotBlank() && error.isBlank()) {
+            rejectedNavigation = fetched.reason
+        }
+    }
+    LaunchedEffect(filmUrl) {
         delay(10000)
         if (movie == null && error.isBlank()) {
             message = ""
@@ -347,13 +373,27 @@ internal fun MirrorNativePlayer(
         options = emptyList()
         error = ""
         message = "Загружаем список серий"
-        val raw = mirrorAjax(web, pageUrl, mapOf(
-            "action" to "get_episodes", "id" to item.id, "translator_id" to voice
-        ))
-        val response = raw?.let(MirrorMediaParser::objectFromWebView)
-        val failure = response?.let(MirrorMediaParser::responseFailure)
+        val payload = mapOf("action" to "get_episodes", "id" to item.id,
+            "translator_id" to voice)
+        var raw: String? = MirrorNetworkSource.playback(pageUrl, payload,
+            WebSettings.getDefaultUserAgent(context))
+        var response = raw?.let(MirrorMediaParser::objectFromWebView)
+        var failure = response?.let(MirrorMediaParser::responseFailure)
+        var entries = MirrorMediaParser.parseEpisodes(response?.optJSONArray("__kinoEpisodes"))
+        if (entries.isEmpty() && failure !in setOf(
+                PlaybackFailure.PREMIUM, PlaybackFailure.AUTH_REQUIRED, PlaybackFailure.DRM)) {
+            val alternate = mirrorAjax(web, pageUrl, payload)
+            val decoded = alternate?.let(MirrorMediaParser::objectFromWebView)
+            val parsed = MirrorMediaParser.parseEpisodes(decoded?.optJSONArray("__kinoEpisodes"))
+            if (parsed.isNotEmpty()) {
+                raw = alternate
+                response = decoded
+                failure = decoded?.let(MirrorMediaParser::responseFailure)
+                entries = parsed
+            }
+        }
         failure?.voiceAvailability()?.let { voiceAvailability[voiceKey(voice)] = it }
-        val incoming = MirrorMediaParser.parseEpisodes(response?.optJSONArray("__kinoEpisodes"))
+        val incoming = entries
         val listed = when {
             failure != null -> emptyList()
             incoming.isNotEmpty() -> incoming
@@ -390,9 +430,21 @@ internal fun MirrorNativePlayer(
         error = ""
         message = "Получаем доступные видеопотоки"
         val request = MirrorPlaybackRequest.stream(item, voice, season, episode)
-        val result = mirrorAjax(web, pageUrl, request)
-        val streams = result?.let(MirrorMediaParser::parseStreamInfo)
-            ?: MirrorStreamInfo(emptyList(), failure = PlaybackFailure.TIMEOUT)
+        val direct = MirrorNetworkSource.playback(pageUrl, request,
+            WebSettings.getDefaultUserAgent(context))
+        var streams = MirrorMediaParser.parseStreamInfo(direct)
+        if (streams.qualities.isEmpty() && streams.failure !in setOf(
+                PlaybackFailure.PREMIUM, PlaybackFailure.AUTH_REQUIRED, PlaybackFailure.DRM,
+                PlaybackFailure.PREVIEW)) {
+            // Browser-session AJAX is a second path if direct HTTPS is blocked.
+            val viaBrowser = mirrorAjax(web, pageUrl, request)
+            val retry = viaBrowser?.let(MirrorMediaParser::parseStreamInfo)
+            if (retry != null && (retry.qualities.isNotEmpty() ||
+                    retry.failure in setOf(PlaybackFailure.PREMIUM,
+                        PlaybackFailure.AUTH_REQUIRED, PlaybackFailure.DRM))) {
+                streams = retry
+            }
+        }
         if (streams.qualities.isEmpty()) {
             streams.failure?.voiceAvailability()?.let { voiceAvailability[voiceKey(voice)] = it }
             message = ""

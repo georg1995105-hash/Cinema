@@ -401,6 +401,22 @@ internal fun FilmDetails(
         mutableStateOf(info?.let { FilmInfoReadiness.canFinish(it) && it.portraitsResolved } == true)
     }
     var loadError by remember(movie.url) { mutableStateOf("") }
+    // A real HTTP session can deliver metadata even when the hidden WebView stalls.
+    // It is independent of the WebView parser, but shares Android's mirror cookies.
+    LaunchedEffect(movie.url) {
+        val result = MirrorNetworkSource.film(
+            movie.url, WebSettings.getDefaultUserAgent(context))
+        val parsed = result.metadata?.info
+        if (parsed != null && FilmInfoReadiness.hasContent(parsed)) {
+            val merged = FilmInfoMerger.merge(info, parsed)
+            info = merged
+            FilmInfoMemory.put(movie.url, merged)
+            if (FilmInfoReadiness.canFinish(merged) && merged.portraitsResolved)
+                loadDone = true
+        } else if (loadDone && info == null && result.reason.isNotBlank()) {
+            loadError = result.reason
+        }
+    }
     LaunchedEffect(movie.url) {
         if (!loadDone) {
             delay(9500)
