@@ -36,6 +36,7 @@ import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import org.json.JSONObject
+import java.net.URI
 import java.net.URLEncoder
 import kotlinx.coroutines.delay
 

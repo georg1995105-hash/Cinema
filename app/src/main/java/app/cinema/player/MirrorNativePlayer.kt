@@ -63,7 +63,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import kotlin.coroutines.resume
 
-private val playerMetaJs = """
+internal val mirrorPlayerMetadataJavascript = """
 (function(){
     ${MirrorVoiceDiscovery.javascript}
     ${MirrorVoiceDiscovery.episodesJavascript}
@@ -81,7 +81,7 @@ private val playerMetaJs = """
 })()
 """.trimIndent()
 
-private suspend fun mirrorAjax(web: WebView, pageUrl: String, payload: Map<String, String>): String? =
+internal suspend fun mirrorAjax(web: WebView, pageUrl: String, payload: Map<String, String>): String? =
     withTimeoutOrNull(14500L) {
         suspendCancellableCoroutine { continuation ->
             val handler = Handler(Looper.getMainLooper())
@@ -262,7 +262,7 @@ internal fun MirrorNativePlayer(
                     timings.forEachIndexed { index, wait ->
                         metadataHandler.postDelayed({
                             if (failed || view.url != url || movie != null) return@postDelayed
-                            view.evaluateJavascript(playerMetaJs) { result ->
+                            view.evaluateJavascript(mirrorPlayerMetadataJavascript) { result ->
                                 if (failed || view.url != url || movie != null) return@evaluateJavascript
                                 val parsed = MirrorMediaParser.pageFromWebView(result, url)
                                 if (parsed != null && (parsed.voices.isNotEmpty() || index >= 2)) {
