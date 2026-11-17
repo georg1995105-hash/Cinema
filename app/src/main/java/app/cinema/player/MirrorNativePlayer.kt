@@ -24,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -281,6 +282,8 @@ internal fun MirrorNativePlayer(
     }
 
     Column(Modifier.fillMaxSize().background(appBackground)){
+        // WebView must be attached to an Android window to run the site's session JavaScript.
+        AndroidView(factory={web},modifier=Modifier.size(2.dp).alpha(0.01f))
         if(!expanded)Row(verticalAlignment=Alignment.CenterVertically){
             IconButton(onClick=onClose){Icon(Icons.Outlined.ArrowBack,contentDescription="Назад")}
             Column(Modifier.weight(1f)){
