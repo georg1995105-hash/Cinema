@@ -138,11 +138,22 @@ internal object FilmPageParser {
            }
          });
          var voices=Array.from(document.querySelectorAll(
-           '#translators-list li[data-translator_id],.b-translator__item[data-translator_id]'
+           '#translators-list [data-translator_id], #translators-list [data-translator-id], '+
+           '.b-translator__item, [data-translator_id], [data-translator-id]'
          )).map(function(item){
-           return {id:item.getAttribute('data-translator_id'),
-                   name:norm(item.getAttribute('title')||item.textContent)};
-         }).filter(function(item){return item.id&&item.name}).slice(0,45);
+           var group=item.closest('li, .b-translator__item')||item;
+           var id=item.getAttribute('data-translator_id')||
+             item.getAttribute('data-translator-id')||
+             group.getAttribute('data-translator_id')||
+             group.getAttribute('data-translator-id')||
+             item.getAttribute('data-id')||group.getAttribute('data-id')||'';
+           var name=norm(item.getAttribute('title')||group.getAttribute('title')||
+             item.textContent||group.textContent);
+           return {id:id,name:name.slice(0,75)};
+         }).filter(function(item){return /^\d{1,12}$/.test(item.id)&&item.name;})
+           .filter(function(item,index,array){
+              return array.findIndex(function(other){return other.id===item.id;})===index;
+           }).slice(0,45);
          return JSON.stringify({
            originalTitle:txt('.b-post__origtitle, .b-post__subtitle, .b-post__title_original'),
            description:description.substring(0,1800),
@@ -458,7 +469,7 @@ internal fun FilmDetails(
     var loadDone by remember(movie.url) { mutableStateOf(false) }
     // A silent network stall must not leave the film page spinning forever.
     LaunchedEffect(movie.url) {
-        delay(8500)
+        delay(9000)
         if (!loadDone) loadDone = true
     }
     var showWatchMenu by remember(movie.url) { mutableStateOf(false) }
@@ -493,7 +504,7 @@ internal fun FilmDetails(
                             view.evaluateJavascript(FilmPageParser.actorProfilePhotosJavascript) {}
                         }
                     }, 900L)
-                    val delays = listOf(220L, 1000L, 2300L, 4600L)
+                    val delays = listOf(220L, 1000L, 2300L, 4600L, 6900L)
                     delays.forEachIndexed { index, delay ->
                         handler.postDelayed({
                             if (view.url != url || loadDone) return@postDelayed
@@ -502,7 +513,7 @@ internal fun FilmDetails(
                                 val parsed = FilmPageParser.parse(raw, source)
                                 if (parsed != null &&
                                     (parsed.description.isNotBlank() || parsed.facts.isNotEmpty() ||
-                                        parsed.cast.isNotEmpty())) {
+                                        parsed.cast.isNotEmpty() || parsed.voices.isNotEmpty())) {
                                     val merged = if(parsed.franchise.isEmpty() &&
                                         info?.franchise?.isNotEmpty() == true)
                                         parsed.copy(franchise=info!!.franchise) else parsed
