@@ -4,8 +4,8 @@ package app.cinema.player
 internal object VoiceSearchQuery {
     fun clean(raw: String): String =
         raw.trim()
-            .replace(Regex("(?i)^(пожалуйста\\s+)?(найди|найдите|покажи|покажите|ищи|поиск)\\s+(мне\\s+)?"), "")
-            .replace(Regex("(?i)^(фильм|сериал|мультфильм|аниме)\\s+"), "")
+            .replace(Regex("(?iu)^(пожалуйста\\s+)?(найди|найдите|покажи|покажите|ищи|поиск)\\s+(мне\\s+)?"), "")
+            .replace(Regex("(?iu)^(фильм|сериал|мультфильм|аниме)\\s+"), "")
             .trim().trim('.', '!', '?', ',', ' ')
             .take(120)
 }
