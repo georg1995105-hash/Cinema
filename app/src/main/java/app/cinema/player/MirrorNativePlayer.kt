@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
@@ -47,6 +48,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -155,7 +157,7 @@ internal fun MirrorNativePlayer(
     var options by remember(filmUrl){mutableStateOf<List<MirrorQuality>>(emptyList())}
     var quality by remember(filmUrl){mutableStateOf("")}
     var resumeMs by remember(filmUrl){mutableLongStateOf(startPositionMs)}
-    var expanded by remember {mutableStateOf(false)}
+    var expanded by remember(filmUrl) { mutableStateOf(true) }
     BackHandler { if (expanded) expanded = false else onClose() }
     DisposableEffect(expanded) {
         val activity = findHostingActivity(context)
@@ -325,6 +327,18 @@ internal fun MirrorNativePlayer(
     var settingsSection by remember { mutableStateOf("Настройки") }
     var speed by remember { mutableFloatStateOf(1f) }
     val speeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f)
+    val pictureModes = listOf("По размеру", "Заполнить", "Растянуть")
+    var pictureMode by remember { mutableStateOf("По размеру") }
+    var subtitlesEnabled by remember { mutableStateOf(true) }
+    val hasSubtitles = player?.currentTracks?.groups?.any { group ->
+        group.type == C.TRACK_TYPE_TEXT && (0 until group.length).any { group.isTrackSupported(it) }
+    } == true
+    LaunchedEffect(player, subtitlesEnabled) {
+        player?.let { target ->
+            target.trackSelectionParameters = target.trackSelectionParameters.buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !subtitlesEnabled).build()
+        }
+    }
     LaunchedEffect(player, speed) { player?.setPlaybackSpeed(speed) }
     LaunchedEffect(player, controls, showSettings, paused, accelerated) {
         if (player != null && controls && !showSettings && !paused && !accelerated) {
@@ -344,10 +358,22 @@ internal fun MirrorNativePlayer(
                         this.player = player
                         useController = false
                         keepScreenOn = true
+                        resizeMode = when (pictureMode) {
+                            "Заполнить" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                            "Растянуть" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
-                update = { it.player = player }
+                update = {
+                    it.player = player
+                    it.resizeMode = when (pictureMode) {
+                        "Заполнить" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                        "Растянуть" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                        else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    }
+                }
             )
             Box(
                 Modifier.fillMaxSize().pointerInput(player, seekSeconds, holdSpeed) {
@@ -581,8 +607,11 @@ internal fun MirrorNativePlayer(
                     val menuRows = listOf(
                         "Качество" to quality.ifBlank { "Авто" },
                         "Скорость" to (speed.toString() + "×"),
+                        "Изображение" to pictureMode,
                         "Озвучка" to audio
-                    ) + if (movie?.isSeries == true) listOf(
+                    ) + (if (hasSubtitles) listOf(
+                        "Субтитры" to (if (subtitlesEnabled) "Включены" else "Выключены")
+                    ) else emptyList()) + if (movie?.isSeries == true) listOf(
                         "Сезон" to season.ifBlank { "—" },
                         "Серия" to (episodes.firstOrNull { it.id == episode && it.season == season }
                             ?.label ?: episode.ifBlank { "—" })
@@ -610,6 +639,8 @@ internal fun MirrorNativePlayer(
                     val choices = when (settingsSection) {
                         "Качество" -> options.map { it.label }
                         "Скорость" -> speeds.map { it.toString() + "×" }
+                        "Изображение" -> pictureModes
+                        "Субтитры" -> listOf("Включены", "Выключены")
                         "Озвучка" -> movie?.voices?.map { it.name }.orEmpty()
                         "Сезон" -> episodes.map { it.season }.distinct().map { "Сезон " + it }
                         "Серия" -> episodes.filter { it.season == season }.map { it.label }
@@ -618,6 +649,8 @@ internal fun MirrorNativePlayer(
                     val currentIndex = when (settingsSection) {
                         "Качество" -> options.indexOfFirst { it.label == quality }
                         "Скорость" -> speeds.indexOf(speed)
+                        "Изображение" -> pictureModes.indexOf(pictureMode)
+                        "Субтитры" -> if (subtitlesEnabled) 0 else 1
                         "Озвучка" -> movie?.voices?.indexOfFirst { it.id == voice } ?: -1
                         "Сезон" -> episodes.map { it.season }.distinct().indexOf(season)
                         "Серия" -> episodes.filter { it.season == season }.indexOfFirst { it.id == episode }
@@ -637,6 +670,8 @@ internal fun MirrorNativePlayer(
                                         quality = options[index].label
                                     }
                                     "Скорость" -> speed = speeds[index]
+                                    "Изображение" -> pictureMode = pictureModes[index]
+                                    "Субтитры" -> subtitlesEnabled = index == 0
                                     "Озвучка" -> {
                                         val newVoice = movie?.voices?.getOrNull(index)
                                         if (newVoice != null && voice != newVoice.id) {

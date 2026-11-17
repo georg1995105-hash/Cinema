@@ -161,7 +161,8 @@ private fun CinemaApp() {
         }
     ) { insets ->
         Box(
-            Modifier.fillMaxSize().padding(insets)
+            if (page == Page.FILM_PLAYER) Modifier.fillMaxSize()
+            else Modifier.fillMaxSize().padding(insets)
                 .padding(horizontal = if (tablet) 30.dp else 16.dp, vertical = 12.dp)
         ) {
             when (page) {
