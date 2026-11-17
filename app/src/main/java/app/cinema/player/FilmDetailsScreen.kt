@@ -241,17 +241,18 @@ internal object FilmPageParser {
         if (window.__kinoActorPhotosStarted) return 'existing';
         window.__kinoActorPhotosStarted = true;
         window.__kinoActorPhotos = window.__kinoActorPhotos || {};
-        var cards = Array.from(document.querySelectorAll(
+        var castCards = Array.from(document.querySelectorAll(
           '.b-post__people_item, .b-post__actors_item, .b-post__person_item, .persons-list-holder .person-name-item'
         )).slice(0, 16);
-        // Director portraits live on their own linked profile pages, not in the cast list.
+        // Resolve confirmed director profiles first, before optional actor profiles.
+        var directorCards=[];
         document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(row) {
           var td=row.querySelectorAll('td');
           if(td.length>=2 && /режисс/i.test((td[0].textContent||'').trim())) {
-            td[1].querySelectorAll('a[href]').forEach(function(anchor){cards.push(anchor);});
+            td[1].querySelectorAll('a[href]').forEach(function(anchor){directorCards.push(anchor);});
           }
         });
-        cards=cards.slice(0,24);
+        var cards=directorCards.concat(castCards).slice(0,20);
         var targets = cards.map(function(e) {
           var a = e.matches('a[href]') ? e : (e.querySelector('a[href]') || e.closest('a[href]'));
           var href = a?.getAttribute('href') || e.getAttribute('data-href') || e.getAttribute('data-url');
@@ -482,8 +483,12 @@ internal fun FilmDetails(
                 override fun onPageFinished(view: WebView, url: String) {
                     // Keep this same-origin session alive briefly to resolve real actor profile portraits.
                     view.evaluateJavascript(FilmPageParser.franchiseJavascript) {}
-                    view.evaluateJavascript(FilmPageParser.actorProfilePhotosJavascript) {}
-                    val delays = listOf(550L, 1700L, 3400L, 6200L, 8500L)
+                    handler.postDelayed({
+                        if (view.url == url) {
+                            view.evaluateJavascript(FilmPageParser.actorProfilePhotosJavascript) {}
+                        }
+                    }, 900L)
+                    val delays = listOf(550L, 1700L, 3400L, 6200L, 10000L)
                     delays.forEachIndexed { index, delay ->
                         handler.postDelayed({
                             if (view.url != url || loadDone) return@postDelayed
@@ -496,17 +501,15 @@ internal fun FilmDetails(
                                     val merged = if(parsed.franchise.isEmpty() &&
                                         info?.franchise?.isNotEmpty() == true)
                                         parsed.copy(franchise=info!!.franchise) else parsed
-                                    if (info == null ||
-                                        merged.franchise.size > (info?.franchise?.size ?: 0) ||
-                                        merged.cast.count { it.photo.isNotBlank() } >=
-                                            (info?.cast?.count { it.photo.isNotBlank() } ?: 0)) {
-                                        info = merged
-                                        FilmInfoMemory.put(movie.url, merged)
-                                    }
+                                    // Latest confirmed source metadata replaces older role assignments.
+                                // Otherwise stale cached actor cards could masquerade as directors.
+                                info = merged
+                                FilmInfoMemory.put(movie.url, merged)
                                 }
                                 if (index == delays.lastIndex || (parsed?.franchiseResolved == true &&
                                     parsed.cast.isNotEmpty() &&
-                                    parsed.cast.all { it.photo.isNotBlank() || it.url.isBlank() }))
+                                    parsed.cast.all { it.photo.isNotBlank() || it.url.isBlank() } &&
+                                    parsed.directors.all { it.photo.isNotBlank() || it.url.isBlank() }))
                                     loadDone = true
                             }
                         }, delay)
