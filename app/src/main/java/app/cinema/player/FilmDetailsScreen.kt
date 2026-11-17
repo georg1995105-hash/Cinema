@@ -35,7 +35,7 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import java.net.URI
 
-internal data class FilmPerson(val name: String, val photo: String)
+internal data class FilmPerson(val name: String, val photo: String, val url: String = "")
 internal data class FilmInfo(
     val originalTitle: String,
     val description: String,
@@ -86,7 +86,9 @@ internal object FilmPageParser {
              var found=css.match(/url\((['"]?)(.*?)\1\)/);
              if(found) photo=absolute(found[2]);
            }
-           if(n && n.length<95) people.push({name:n,photo:photo});
+           var anchor=e.matches('a[href]')?e:e.querySelector('a[href]');
+           var personUrl=anchor?absolute(anchor.getAttribute('href')):'';
+           if(n && n.length<95) people.push({name:n,photo:photo,url:personUrl});
          });
          var similar=[];
          document.querySelectorAll('.b-content__inline_item, .b-sidelist__item').forEach(function(item) {
@@ -118,7 +120,12 @@ internal object FilmPageParser {
                 val row = factsArray.optJSONArray(i) ?: continue
                 val key = row.optString(0).trim().take(45)
                 val value = row.optString(1).trim().take(220)
-                if (key.isNotBlank() && value.isNotBlank()) add(key to value)
+                val normalized = key.lowercase()
+                val interesting = listOf("дата выхода", "страна", "режисс", "жанр",
+                    "время", "возраст", "в качестве", "оригинальное")
+                if (interesting.any { normalized.contains(it) } &&
+                    key.isNotBlank() && value.isNotBlank() && value.length < 165)
+                    add(key to value)
             }
         }
         val peopleArray = data.optJSONArray("people")
@@ -127,7 +134,13 @@ internal object FilmPageParser {
                 val item = peopleArray.optJSONObject(i) ?: continue
                 val name = item.optString("name").trim()
                 val photo = item.optString("photo").takeIf(SourceRules::isValidHttpsUrl).orEmpty()
-                if (name.isNotBlank()) add(FilmPerson(name.take(85), photo))
+                val personUrl = item.optString("url").takeIf { url ->
+                    if (!SourceRules.isValidHttpsUrl(url)) return@takeIf false
+                    val host = URI(url).host?.lowercase() ?: return@takeIf false
+                    val origin = URI(source).host?.lowercase() ?: return@takeIf false
+                    host == origin || host.endsWith(".$origin")
+                }.orEmpty()
+                if (name.isNotBlank()) add(FilmPerson(name.take(85), photo, personUrl))
             }
         }.distinctBy { it.name }
         val relatedArray = data.optJSONArray("related")
@@ -164,7 +177,8 @@ internal fun FilmDetails(
     onToggleFavourite: () -> Unit,
     onBack: () -> Unit,
     onWatch: (String) -> Unit,
-    onRelated: (CatalogMovie) -> Unit
+    onRelated: (CatalogMovie) -> Unit,
+    onPerson: (FilmPerson) -> Unit
 ) {
     val context = LocalContext.current
     var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
@@ -333,7 +347,7 @@ internal fun FilmDetails(
                     Spacer(Modifier.height(9.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(info!!.cast, key = { it.name }) { person ->
-                            Column(Modifier.width(92.dp)) {
+                            Column(Modifier.width(92.dp).clickable { onPerson(person) }) {
                                 Box(
                                     Modifier.fillMaxWidth().aspectRatio(.80f)
                                         .clip(RoundedCornerShape(12.dp)).background(appCard),
@@ -347,6 +361,7 @@ internal fun FilmDetails(
                                 }
                                 Spacer(Modifier.height(5.dp))
                                 Text(person.name, maxLines = 2,
+                                    color = appBlue,
                                     style = MaterialTheme.typography.bodySmall,
                                     overflow = TextOverflow.Ellipsis)
                             }

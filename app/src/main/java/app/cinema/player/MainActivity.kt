@@ -38,7 +38,7 @@ internal val appBlue = Color(0xFF80C5E7)
 internal val appMuted = Color(0xFFADB8C0)
 private val appWhite = Color(0xFFF4F7F8)
 
-internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE, MOVIE, FILM_PLAYER }
+internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE, MOVIE, FILM_PLAYER, PERSON }
 private data class Destination(val page: Page, val label: String, val icon: ImageVector)
 private val destinations = listOf(
     Destination(Page.HOME, "Главная", Icons.Outlined.Home),
@@ -75,6 +75,9 @@ private fun CinemaApp() {
     var playing by remember { mutableStateOf<String?>(null) }
     var browsingSource by remember { mutableStateOf<String?>(null) }
     var selectedFilm by remember { mutableStateOf<CatalogMovie?>(null) }
+    var movieBack by remember { mutableStateOf(Page.HOME) }
+    var selectedPerson by remember { mutableStateOf<FilmPerson?>(null) }
+    var previousFilm by remember { mutableStateOf<CatalogMovie?>(null) }
     var browseReturn by remember { mutableStateOf(Page.HOME) }
     val tablet = LocalConfiguration.current.screenWidthDp >= 600
 
@@ -98,7 +101,8 @@ private fun CinemaApp() {
     }
     fun back() {
         if (page == Page.SITE) { page = browseReturn; return }
-        if (page == Page.MOVIE) { page = Page.HOME; return }
+        if (page == Page.MOVIE) { page = movieBack; return }
+        if (page == Page.PERSON) { selectedFilm = previousFilm; page = Page.MOVIE; return }
         if (page == Page.FILM_PLAYER) { page = Page.MOVIE; return }
         page = if (page in listOf(Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST, Page.UPDATES))
             Page.SETTINGS else Page.HOME
@@ -120,7 +124,7 @@ private fun CinemaApp() {
     Scaffold(
         containerColor = appBackground,
         bottomBar = {
-            if (page != Page.SITE && page != Page.MOVIE && page != Page.FILM_PLAYER) BoxWithConstraints(
+            if (page != Page.SITE && page != Page.MOVIE && page != Page.FILM_PLAYER && page != Page.PERSON) BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -164,11 +168,17 @@ private fun CinemaApp() {
                 Page.HOME -> HomeScreen(
                     activeSource = activeSource,
                     cardsPerRow = local.cardsPerRow(),
-                    onOpenFilm = { selectedFilm = it; page = Page.MOVIE },
+                    onOpenFilm = { selectedFilm = it; movieBack = Page.HOME; page = Page.MOVIE },
                     onBrowse = { browsingSource = it; browseReturn = Page.HOME; page = Page.SITE },
                     onAddSource = { page = Page.SOURCES }
                 )
-                Page.SEARCH -> SearchScreen(history, favourites) { playing = it }
+                Page.SEARCH -> SearchScreen(
+                    source = activeSource,
+                    cardsPerRow = local.cardsPerRow(),
+                    onOpen = { selectedFilm = it; movieBack = Page.SEARCH; page = Page.MOVIE },
+                    onAddSource = { page = Page.SOURCES },
+                    onBrowse = { browsingSource = it; browseReturn = Page.SEARCH; page = Page.SITE }
+                )
                 Page.LIBRARY -> LibraryScreen(history, favourites, { playing = it },
                     ::toggleFavourite, { url ->
                         history.removeAll { it.url == url }
@@ -203,12 +213,32 @@ private fun CinemaApp() {
                         source = activeSource.orEmpty(),
                         isFavourite = movie.url in favourites,
                         onToggleFavourite = { toggleFavourite(movie.url) },
-                        onBack = { page = Page.HOME },
+                        onBack = { page = movieBack },
                         onWatch = { url ->
                             browsingSource = url
                             page = Page.FILM_PLAYER
                         },
-                        onRelated = { next -> selectedFilm = next }
+                        onRelated = { next -> selectedFilm = next },
+                        onPerson = { person ->
+                            selectedPerson = person
+                            previousFilm = selectedFilm
+                            page = Page.PERSON
+                        }
+                    )
+                }
+                Page.PERSON -> selectedPerson?.let { person ->
+                    PersonScreen(
+                        person = person,
+                        source = activeSource,
+                        cardsPerRow = local.cardsPerRow(),
+                        onBack = { selectedFilm = previousFilm; page = Page.MOVIE },
+                        onOpen = { film ->
+                            selectedFilm = film
+                            movieBack = Page.PERSON
+                            page = Page.MOVIE
+                        },
+                        onBrowse = { browsingSource = it; browseReturn = Page.PERSON; page = Page.SITE },
+                        onAddSource = { page = Page.SOURCES }
                     )
                 }
                 Page.ABOUT -> AboutScreen(::back)

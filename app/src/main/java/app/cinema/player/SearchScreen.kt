@@ -47,7 +47,8 @@ internal fun SearchScreen(
     source: String?,
     cardsPerRow: Int,
     onOpen: (CatalogMovie) -> Unit,
-    onAddSource: () -> Unit
+    onAddSource: () -> Unit,
+    onBrowse: (String) -> Unit
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var submittedQuery by rememberSaveable { mutableStateOf("") }
@@ -239,7 +240,7 @@ internal fun SearchScreen(
                 kind = "Все",
                 cardsPerRow = cardsPerRow,
                 onOpen = onOpen,
-                onBrowse = {},
+                onBrowse = onBrowse,
                 onAddSource = onAddSource,
                 requestOverride = url,
                 movieFilter = resultFilter
