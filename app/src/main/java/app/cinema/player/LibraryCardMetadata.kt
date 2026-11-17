@@ -33,7 +33,7 @@ internal object LibraryCardMetadata {
           var og=document.querySelector('meta[property="og:title"]');
           var poster=document.querySelector('.b-post__poster img, .b-post__cover img, .b-post__mainitem img');
           var imageMeta=document.querySelector('meta[property="og:image"]');
-          var name=(heading?.textContent || og?.content || '').replace(/\\s+/g,' ').trim();
+          var name=(heading?.textContent || og?.content || '').replace(/\s+/g,' ').trim();
           var image=poster?.getAttribute('data-src') ||
               poster?.getAttribute('data-original') ||
               poster?.getAttribute('src') || imageMeta?.content || '';

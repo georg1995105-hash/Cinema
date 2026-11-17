@@ -18,15 +18,16 @@ object SourceProbe {
         var connection: HttpURLConnection? = null
         try {
             connection=(URL(url).openConnection() as HttpURLConnection).apply {
-                connectTimeout=6000;readTimeout=6000;requestMethod="HEAD"
+                connectTimeout=6000;readTimeout=6000;requestMethod="GET"
                 instanceFollowRedirects=false
+                setRequestProperty("Accept", "text/html")
             }
             val code=connection.responseCode
             val latency=((System.nanoTime()-start)/1_000_000L).coerceAtLeast(0L)
             when(code){
-                in 200..299 -> MirrorProbeResult(true,latency,"Сайт отвечает")
-                in 300..399 -> MirrorProbeResult(false,latency,"Сайт перенаправляет запрос")
-                405 -> MirrorProbeResult(false,latency,"Проверка не поддерживается")
+                in 200..299 -> MirrorProbeResult(true,latency,"Сайт отвечает (видео не проверено)")
+                in 300..399 -> MirrorProbeResult(false,latency,"Зеркало перенаправляет на другой адрес")
+                403, 429 -> MirrorProbeResult(false,latency,"Доступ ограничен зеркалом: " + code)
                 else -> MirrorProbeResult(false,latency,"Код ответа: "+code)
             }
         } catch (_: Exception) {

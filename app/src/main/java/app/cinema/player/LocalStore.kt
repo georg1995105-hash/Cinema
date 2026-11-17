@@ -42,6 +42,24 @@ class LocalStore(context: Context) {
         prefs.edit().putString("active_source", value).apply()
     }
 
+    /** Remember only the login name per chosen mirror, never a password. */
+    fun savedAccountName(source: String): String {
+        if (!SourceRules.isValidHttpsUrl(source)) return ""
+        return runCatching {
+            JSONObject(prefs.getString("account_names_v1", "{}") ?: "{}")
+                .optString(source).take(128)
+        }.getOrDefault("")
+    }
+
+    fun saveAccountName(source: String, name: String) {
+        if (!SourceRules.isValidHttpsUrl(source)) return
+        val entries = runCatching {
+            JSONObject(prefs.getString("account_names_v1", "{}") ?: "{}")
+        }.getOrDefault(JSONObject())
+        if (name.isBlank()) entries.remove(source) else entries.put(source, name.trim().take(128))
+        prefs.edit().putString("account_names_v1", entries.toString()).apply()
+    }
+
     fun cardsPerRow(): Int = prefs.getInt("cards_per_row", 5).coerceIn(2, 8)
     fun saveCardsPerRow(value: Int) { prefs.edit().putInt("cards_per_row", value.coerceIn(2, 8)).apply() }
     fun holdSpeed(): Int = prefs.getInt("hold_speed", 2).takeIf { it in 2..4 } ?: 2

@@ -36,11 +36,14 @@ internal fun MirrorAccountScreen(
 ) {
     val context = LocalContext.current
     val gateway = remember(context) { MirrorAccountGateway(context.applicationContext) }
+    val local = remember(context) { LocalStore(context.applicationContext) }
     val userAgent = remember(context) {
         android.webkit.WebSettings.getDefaultUserAgent(context)
     }
     val scope = rememberCoroutineScope()
-    var login by remember(selected) { mutableStateOf("") }
+    var login by remember(selected) {
+        mutableStateOf(selected?.let(local::savedAccountName).orEmpty())
+    }
     var password by remember(selected) { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -122,7 +125,7 @@ internal fun MirrorAccountScreen(
                     OutlinedButton(onClick = {
                         gateway.forgetLocalSession(selected)
                         signedIn = false
-                        login = ""
+                        login = local.savedAccountName(selected)
                         password = ""
                         message = "Сеанс удалён с устройства"
                     }) {
@@ -176,6 +179,7 @@ internal fun MirrorAccountScreen(
                                     } else {
                                         busy = false
                                         signedIn = result.success
+                                        if (result.success) local.saveAccountName(selected, login)
                                         message = result.message
                                         password = ""
                                     }
@@ -203,6 +207,7 @@ internal fun MirrorAccountScreen(
                                 browserLogin = false
                                 busy = false
                                 signedIn = result.success
+                                if (result.success) local.saveAccountName(selected, login)
                                 message = result.message
                                 password = ""
                             }
