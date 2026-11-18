@@ -244,6 +244,7 @@ internal fun MirrorNativePlayer(
             webViewClient = object : WebViewClient() {
                 private var scanningUrl: String? = null
                 private var failed = false
+                private var staleAnubisRetried = false
 
                 private fun fail(reason: String) {
                     // An already validated HTTP metadata result must not be discarded
@@ -382,6 +383,20 @@ internal fun MirrorNativePlayer(
                             rejectedNavigation = ""
                             error = ""
                             message = "Проверяем доступ к источнику"
+                            return
+                        }
+                        if (response.statusCode == 403 && !staleAnubisRetried &&
+                            MirrorHttp.clearStaleAnubisCookies(address)) {
+                            staleAnubisRetried = true
+                            browserChallengeActive = true
+                            rejectedNavigation = ""
+                            error = ""
+                            message = "Проверяем доступ к источнику"
+                            view.postDelayed({
+                                if (movie == null) view.loadUrl(
+                                    address, MirrorSitePolicy.webViewHeaders(address)
+                                )
+                            }, 120)
                             return
                         }
                         val failure = MirrorMediaParser.responseFailure(
