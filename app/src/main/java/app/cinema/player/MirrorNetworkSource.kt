@@ -67,30 +67,35 @@ internal object MirrorNetworkSource {
         return out.toString()
     }
 
-    private fun safeRedirect(from: String, destination: String?, original: String): String? {
-        if (destination.isNullOrBlank()) return null
-        return runCatching { URI(from).resolve(destination).toString() }
-            .getOrNull()?.takeIf {
-                SourceRules.sameOrigin(original,it) && MirrorPostId.isSameFilm(original,it)
-            }
-    }
-
-    suspend fun film(url: String, userAgent: String): FilmResult =
-        withContext(Dispatchers.IO) {
+    suspend fun film(
+        url: String,
+        userAgent: String,
+        mirrors: List<String> = emptyList()
+    ): FilmResult = withContext(Dispatchers.IO) {
             if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
                 return@withContext FilmResult(url,reason="Неверный адрес фильма.")
             var current=url
             try {
                 repeat(3) { attempt ->
                     val referer=MirrorAccountGateway.origin(current).orEmpty()+"/"
-                    val request=Request.Builder().url(current).get()
-                        .header("Referer",referer).header("User-Agent",userAgent)
-                        .header("Accept","text/html,application/xhtml+xml").build()
+                    val builder = Request.Builder().url(current).get()
+                        .header("Referer", referer)
+                        .header("Accept", "text/html,application/xhtml+xml")
+                    MirrorSitePolicy.requestHeaders(current, userAgent).forEach { (name, value) ->
+                        builder.header(name, value)
+                    }
+                    val request = builder.build()
                     execute(request).use { response ->
                         if (response.code in 300..399) {
-                            val next=safeRedirect(current,response.header("Location"),url)
-                                ?:return@withContext FilmResult(current,
-                                    reason="Зеркало перенаправляет на другую страницу. Выберите другое зеркало.")
+                            val next = MirrorRedirect.resolveFilmUrl(
+                                originalFilmUrl = url,
+                                fromUrl = current,
+                                location = response.header("Location"),
+                                savedMirrors = mirrors
+                            ) ?: return@withContext FilmResult(
+                                current,
+                                reason = "Редирект не ведёт на допустимое зеркало этого фильма."
+                            )
                             if (next==current || attempt==2)
                                 return@withContext FilmResult(current,
                                     reason="Зеркало не завершило перенаправление.")
@@ -138,16 +143,16 @@ internal object MirrorNetworkSource {
 
             val candidates = buildList {
                 add(url)
-                mirrors.asSequence()
+                (mirrors + MirrorSitePolicy.builtInOrigins).asSequence()
                     .filter(SourceRules::isValidHttpsUrl)
                     .mapNotNull { MirrorFilmUrl.changeOrigin(url, it) }
                     .forEach(::add)
-            }.distinct().take(8)
+            }.distinct().take(10)
 
             val completed = Channel<FilmResult>(Channel.UNLIMITED)
             val jobs = candidates.map { candidate ->
                 launch(Dispatchers.IO) {
-                    completed.send(film(candidate, userAgent))
+                    completed.send(film(candidate, userAgent, mirrors))
                 }
             }
             var bestInfo: FilmResult? = null
@@ -196,10 +201,15 @@ internal object MirrorNetworkSource {
             val form=FormBody.Builder().apply {
                 fields.forEach { (k,v) -> add(k,v) }
             }.build()
-            val request=Request.Builder().url(origin+"/ajax/get_cdn_series/").post(form)
-                .header("Referer",pageUrl).header("Origin",origin)
-                .header("User-Agent",userAgent).header("X-Requested-With","XMLHttpRequest")
-                .header("Accept","application/json, text/plain, */*").build()
+            val builder = Request.Builder().url(origin+"/ajax/get_cdn_series/").post(form)
+                .header("Referer", pageUrl)
+                .header("Origin", origin)
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Accept", "application/json, text/plain, */*")
+            MirrorSitePolicy.requestHeaders(pageUrl, userAgent).forEach { (name, value) ->
+                builder.header(name, value)
+            }
+            val request = builder.build()
             try {
                 execute(request).use { response ->
                     if (response.code in 300..399)
