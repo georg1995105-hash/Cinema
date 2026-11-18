@@ -261,18 +261,13 @@ private fun DetailsBody(
             }
             if (info.episodes.isNotEmpty()) {
                 Text("Сезоны и серии", style = MaterialTheme.typography.titleMedium)
+                Text("Сведения об эпизодах — не ссылки на просмотр",
+                    style = MaterialTheme.typography.bodySmall, color = appMuted)
                 val bySeason = info.episodes.groupBy { it.season }.toSortedMap()
                 bySeason.forEach { (season, episodes) ->
-                    Text("Сезон $season • ${episodes.size} серий", color = appBlue)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        episodes.sortedBy { it.episode }.forEach {
-                            Surface(shape = RoundedCornerShape(10.dp), color = appPanel) {
-                                Text(it.episode.toString(), modifier = Modifier.padding(
-                                    horizontal = 12.dp, vertical = 8.dp), color = appMuted)
-                            }
-                        }
-                    }
+                    val count = episodes.map { it.episode }.distinct().size
+                    Text("Сезон $season · $count серий", color = appBlue,
+                        style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
