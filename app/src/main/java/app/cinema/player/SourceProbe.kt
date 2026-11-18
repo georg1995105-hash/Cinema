@@ -22,7 +22,10 @@ object SourceProbe {
         .callTimeout(7, TimeUnit.SECONDS)
         .build()
 
-    internal suspend fun inspect(url: String, browserUserAgent: String? = null): MirrorProbeResult = withContext(Dispatchers.IO) {
+    internal suspend fun inspect(
+        url: String, browserUserAgent: String? = null,
+        transport: okhttp3.OkHttpClient = client
+    ): MirrorProbeResult = withContext(Dispatchers.IO) {
         if (!SourceRules.isValidHttpsUrl(url))
             return@withContext MirrorProbeResult(false, null, "Неправильный адрес")
         val origin = MirrorAccountGateway.origin(url)
@@ -49,7 +52,7 @@ object SourceProbe {
                         MirrorSitePolicy.requestHeaders(current, userAgent)
                             .forEach { (name, value) -> header(name, value) }
                     }.build()
-                val next = client.newCall(request).execute().use { response ->
+                val next = transport.newCall(request).execute().use { response ->
                     val latency = ((System.nanoTime() - started) / 1_000_000L)
                         .coerceAtLeast(0L)
                     if (response.code in 300..399) {
@@ -75,7 +78,7 @@ object SourceProbe {
                                     MirrorSitePolicy.requestHeaders(catalog, userAgent)
                                         .forEach { (name, value) -> header(name, value) }
                                 }.build()
-                            client.newCall(catalogRequest).execute().use { catalogResponse ->
+                            transport.newCall(catalogRequest).execute().use { catalogResponse ->
                                 val checkedMs = ((System.nanoTime() - started) / 1_000_000L)
                                     .coerceAtLeast(0L)
                                 when (catalogResponse.code) {
