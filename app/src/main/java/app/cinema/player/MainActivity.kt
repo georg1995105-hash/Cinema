@@ -251,7 +251,13 @@ private fun CinemaApp() {
                 Page.PLAYER -> PlayerSettingsScreen(local, ::back) { page = Page.TEST }
                 Page.APPEARANCE -> AppearanceScreen(local, ::back)
                 Page.UPDATES -> UpdatesScreen()
-                Page.LIFT -> LiftWebScreen(onClose = { page = liftReturn }, title = liftTitle)
+                Page.LIFT -> LiftWebScreen(
+                    onClose = { page = liftReturn },
+                    title = liftTitle,
+                    expectedYear = LiftMatchPolicy.yearFromDetails(
+                        selectedFilm?.details.orEmpty()
+                    )
+                )
                 Page.SITE -> BrowserScreen(
                     browsingSource ?: activeSource.orEmpty(),
                     onBack = { page = browseReturn },
