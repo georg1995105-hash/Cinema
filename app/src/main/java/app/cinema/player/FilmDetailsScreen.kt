@@ -413,7 +413,8 @@ internal fun FilmDetails(
             FilmInfoMemory.put(movie.url, merged)
             if (FilmInfoReadiness.canFinish(merged) && merged.portraitsResolved)
                 loadDone = true
-        } else if (loadDone && info == null && result.reason.isNotBlank()) {
+        } else if (info == null && result.reason.isNotBlank()) {
+            // Keep the actual HTTP failure, even while WebView retries in parallel.
             loadError = result.reason
         }
     }
@@ -445,7 +446,8 @@ internal fun FilmDetails(
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
                     val decision = FilmNavigationPolicy.decide(movie.url, request.url.toString())
-                    if (!decision.allow && info == null) loadError = decision.failureMessage
+                    if (!decision.allow && info == null && loadError.isBlank())
+                        loadError = decision.failureMessage
                     // Block unrelated navigation, but do NOT destroy the original film page.
                     return !decision.allow
                 }
