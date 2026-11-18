@@ -201,6 +201,18 @@ internal object MirrorNetworkSource {
         }
     }
 
+    internal fun candidateUrls(url: String, mirrors: List<String>): List<String> {
+        if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
+            return emptyList()
+        return buildList {
+            add(url)
+            (mirrors + MirrorSitePolicy.builtInOrigins).asSequence()
+                .filter(SourceRules::isValidHttpsUrl)
+                .mapNotNull { MirrorFilmUrl.changeOrigin(url, it) }
+                .forEach(::add)
+        }.distinct().take(30)
+    }
+
     /**
      * Resolve one logical Rezka film across the user's saved mirrors.
      * Mirrors are transport candidates, not separate playback sources in the UI.
@@ -225,23 +237,25 @@ internal object MirrorNetworkSource {
                     MirrorVoiceSelection.supports(preferredPlayer, requiredVoice))
             if (preferredCompatible) return@supervisorScope preferred
 
-            val candidates = (mirrors + MirrorSitePolicy.builtInOrigins).asSequence()
-                .filter(SourceRules::isValidHttpsUrl)
-                .mapNotNull { MirrorFilmUrl.changeOrigin(url, it) }
-                .filter { it != url }
-                .distinct()
-                .take(9)
-                .toList()
-
-            val completed = Channel<FilmResult>(Channel.UNLIMITED)
-            val jobs = candidates.map { candidate ->
-                launch(Dispatchers.IO) {
-                    completed.send(film(candidate, userAgent, mirrors, client))
-                }
-            }
+            val candidates = candidateUrls(url, mirrors).filter { it != url }
             var bestInfo: FilmResult? = preferred.takeIf { it.metadata?.info != null }
             var bestFailure: FilmResult? = preferred.takeIf { it.reason.isNotBlank() }
             var incompatiblePlayerSeen = preferredPlayer != null && !preferredCompatible
+
+            // Preserve PR #11 semantics: the selected mirror is fully tried first.
+            // Only then search the complete reference pool, with at most six active
+            // requests and no batch barrier between fast and slow candidates.
+            val queue = Channel<String>(Channel.UNLIMITED)
+            candidates.forEach { queue.trySend(it) }
+            queue.close()
+            val completed = Channel<FilmResult>(Channel.UNLIMITED)
+            val jobs = List(minOf(6, candidates.size)) {
+                launch(Dispatchers.IO) {
+                    for (candidate in queue) {
+                        completed.send(film(candidate, userAgent, mirrors, client))
+                    }
+                }
+            }
             try {
                 repeat(candidates.size) {
                     val result = completed.receive()
