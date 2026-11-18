@@ -42,6 +42,10 @@ import java.net.URI
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -117,6 +121,34 @@ internal object MirrorCatalog {
                     }
                 }
             }.getOrDefault(emptyList())
+        }
+
+    /**
+     * The reference client treats alternate hostnames as the same catalogue.
+     * Race only a small, known mirror set after a brief head start for the
+     * selected mirror. Return only genuinely parsed cards, not HTTP 200.
+     */
+    suspend fun readWithFallback(pageUrl: String, userAgent: String): List<CatalogMovie> =
+        supervisorScope {
+            val urls = MirrorCatalogMirrors.candidates(pageUrl)
+            if (urls.isEmpty()) return@supervisorScope emptyList()
+            val responses = Channel<List<CatalogMovie>>(Channel.UNLIMITED)
+            val workers = urls.mapIndexed { index, candidate ->
+                launch {
+                    if (index > 0) delay(index * 800L)
+                    responses.send(read(candidate, userAgent))
+                }
+            }
+            try {
+                repeat(urls.size) {
+                    val realCards = responses.receive()
+                    if (realCards.isNotEmpty()) return@supervisorScope realCards
+                }
+                emptyList()
+            } finally {
+                workers.forEach { it.cancel() }
+                responses.close()
+            }
         }
 
     internal fun parseHtml(html: String, pageUrl: String): List<CatalogMovie> {
@@ -310,24 +342,25 @@ internal fun CatalogGrid(
     var nativeSearchChecked by remember(requestUrl, attempt) {
         mutableStateOf(movies.isNotEmpty())
     }
+    var pending by remember(requestUrl, attempt) { mutableStateOf(movies.isEmpty()) }
     LaunchedEffect(requestUrl, attempt, loadContent) {
-        if (loadContent && !nativeSearchChecked) {
+        if (loadContent && !nativeSearchChecked && pending) {
             val agent = WebSettings.getDefaultUserAgent(context)
             val cards = if (searchText.isBlank()) {
-                MirrorCatalog.read(requestUrl, agent)
+                MirrorCatalog.readWithFallback(requestUrl, agent)
             } else {
-                PublicSearch.read(source, searchText, agent)
+                PublicSearch.readWithFallback(source, searchText, agent)
             }
             val verified = MirrorCatalog.filterRootFallback(
                 cards, kind, useRootFallback, searchText.isNotBlank())
             if (verified.isNotEmpty()) {
                 movies = verified
+                pending = false
                 CatalogMemory.put(cacheKey, verified)
             }
             nativeSearchChecked = true
         }
     }
-    var pending by remember(requestUrl, attempt, nativeSearchChecked) { mutableStateOf(movies.isEmpty()) }
     var problem by remember(requestUrl, attempt) { mutableStateOf("") }
     var challengeActive by remember(requestUrl, attempt) { mutableStateOf(false) }
     fun recoverEmptyCatalog(reason: String) {
@@ -344,16 +377,18 @@ internal fun CatalogGrid(
     }
     // Page callbacks are not guaranteed after a network stall or blocked navigation.
     // Bound each load, then try only the standard category once before showing an error.
-    LaunchedEffect(requestUrl, attempt, loadContent, nativeSearchChecked, challengeActive) {
-        if (loadContent && nativeSearchChecked && pending) {
-            delay(if (challengeActive) 28_000L else 12_500L)
+    LaunchedEffect(requestUrl, attempt, loadContent, challengeActive) {
+        if (loadContent && pending) {
+            delay(if (challengeActive) 28_000L else 18_000L)
             if (pending) recoverEmptyCatalog(
                 if (challengeActive) "Зеркало не завершило проверку браузера."
                 else "Источник не завершил загрузку каталога. Проверьте доступность зеркала."
             )
         }
     }
-    val browser = if (loadContent && nativeSearchChecked && pending && movies.isEmpty()) remember(context, requestUrl, attempt) {
+    // Start WebView immediately, concurrently with HTTP. Waiting for a native timeout
+    // before starting the browser prevented Anubis from completing in time.
+    val browser = if (loadContent && pending && movies.isEmpty()) remember(context, requestUrl, attempt) {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
             settings.javaScriptEnabled = true
