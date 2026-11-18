@@ -301,7 +301,15 @@ private fun CinemaApp() {
                     }
                 }
                 Page.MOVIE -> selectedFilm?.let { movie ->
-                    FilmDetails(
+                    if (CinemetaCatalog.isMovieUrl(movie.url)) {
+                        CinemetaFilmDetails(
+                            movie = movie,
+                            isFavourite = movie.url in favourites,
+                            onToggleFavourite = { toggleFavourite(movie.url) },
+                            onBack = { page = movieBack },
+                            onPlay = { verifiedStreamUrl -> playing = verifiedStreamUrl }
+                        )
+                    } else FilmDetails(
                         movie = movie,
                         source = activeSource ?: MirrorAccountGateway.origin(movie.url).orEmpty(),
                         sources = sources.toList(),
@@ -396,11 +404,12 @@ internal fun ScreenHeading(title: String, subtitle: String? = null, back: (() ->
     }
 }
 
-private val feeds = listOf(
+private val feeds = listOf("Популярное", "Новинки", "Высокий рейтинг")
+private val oldFeeds = listOf(
     "Смотрят сейчас", "Горячие", "Новинки", "Последние поступления",
     "Популярное", "В ожидании"
 )
-private val contentKinds = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы", "Аниме")
+private val contentKinds = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы")
 
 @Composable
 internal fun SimpleTabs(items: List<String>, selected: String, onSelected: (String) -> Unit) {
@@ -549,14 +558,11 @@ private fun HomeScreen(
             modifier = Modifier.fillMaxWidth().weight(1f),
             key = { index -> feeds[index] }
         ) { index ->
-            CatalogGrid(
-                source = activeSource,
-                section = feeds[index],
+            CinemetaGrid(
+                tab = feeds[index],
                 kind = kind,
                 cardsPerRow = cardsPerRow,
                 onOpen = onOpenFilm,
-                onBrowse = onBrowse,
-                onAddSource = onAddSource,
                 loadContent = pager.currentPage == index
             )
         }
