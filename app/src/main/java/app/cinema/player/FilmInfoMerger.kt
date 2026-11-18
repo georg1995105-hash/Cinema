@@ -31,6 +31,9 @@ internal object FilmInfoMerger {
             franchise = (latest.franchise + previous.franchise).distinctBy { it.url }.take(50),
             franchiseResolved = previous.franchiseResolved || latest.franchiseResolved,
             voices = (latest.voices + previous.voices).distinctBy { it.id }.take(45),
+            defaultVoice = latest.defaultVoice.ifBlank { previous.defaultVoice },
+            episodes = (latest.episodes + previous.episodes)
+                .distinctBy { it.season to it.id }.take(500),
             posters = (latest.posters + previous.posters).distinct().take(10)
         )
     }

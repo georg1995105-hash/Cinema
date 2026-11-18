@@ -1,0 +1,27 @@
+package app.cinema.player
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class MirrorFilmUrlTest {
+    @Test fun keepsRealFilmIdentityWhenSwitchingMirror() {
+        val expected="https://rezka-ua.pub/series/crime/123-brigada.html"
+        val actual=MirrorFilmUrl.changeOrigin(expected,"https://hdrezka.website/")
+        assertEquals("https://hdrezka.website/series/crime/123-brigada.html",actual)
+        assertEquals(MirrorPostId.fromUrl(expected),MirrorPostId.fromUrl(actual!!))
+    }
+
+    @Test fun neverRewritesArbitraryPagesOrCredentials() {
+        assertNull(MirrorFilmUrl.changeOrigin("https://rezka-ua.pub/login/","https://hdrezka.website"))
+        assertNull(MirrorFilmUrl.changeOrigin("https://rezka-ua.pub/series/123-film.html",
+            "http://unsafe.example"))
+        assertNull(MirrorFilmUrl.changeOrigin("https://rezka-ua.pub/series/123-film.html",
+            "https://user:pass@host.example/"))
+    }
+
+    @Test fun queryCanBePreservedWithoutUsingOldHost() {
+        val actual=MirrorFilmUrl.changeOrigin("https://rezka-ua.pub/films/22-film.html?lang=ru",
+            "https://hdrezka.club")
+        assertEquals("https://hdrezka.club/films/22-film.html?lang=ru",actual)
+    }
+}
