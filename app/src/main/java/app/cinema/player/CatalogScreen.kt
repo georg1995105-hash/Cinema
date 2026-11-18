@@ -569,9 +569,14 @@ internal fun CatalogGrid(
                     Icon(Icons.Outlined.CloudOff, contentDescription = null, tint = appMuted,
                         modifier = Modifier.size(39.dp))
                     Spacer(Modifier.height(14.dp))
-                    Text(if (searchText.isNotBlank()) "Совпадений не найдено"
-                        else "Не удалось получить карточки",
-                        style = MaterialTheme.typography.titleMedium)
+                    // A server denial is NOT an empty search result.
+                    Text(when {
+                        problem.isNotBlank() && searchText.isNotBlank() ->
+                            "Не удалось выполнить поиск"
+                        problem.isNotBlank() -> "Каталог недоступен"
+                        searchText.isNotBlank() -> "Совпадений не найдено"
+                        else -> "Не удалось получить карточки"
+                    }, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(7.dp))
                     Text(problem.ifBlank {
                         if (searchText.isNotBlank()) "Зеркало не нашло фильм с таким названием."
