@@ -203,7 +203,7 @@ class SourceFlowTest {
 
     @Test fun nativeRezkaRequestSolvesAnubisStoresCookieAndRetriesFilm() {
         val certificate = HeldCertificate.Builder()
-            .commonName("localhost").addSubjectAlternativeName("localhost").build()
+            .commonName("hdrezka.mn").addSubjectAlternativeName("hdrezka.mn").build()
         val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()
         val fixtureTrust = HandshakeCertificates.Builder()
             .addTrustedCertificate(certificate.certificate).build()
@@ -212,12 +212,13 @@ class SourceFlowTest {
             server.useHttps(serverTls.sslSocketFactory(), false)
             server.start()
             fun localUrl(path: String) =
-                server.url(path).newBuilder().host("localhost").build()
+                server.url(path).newBuilder().host("hdrezka.mn").build()
             val filmPage = localUrl(
                 "/films/fiction/30651-mstiteli-final-2019.html"
             ).toString()
             val challengeData = "fixture-seed"
             val passValid = java.util.concurrent.atomic.AtomicBoolean(false)
+            val sentReferenceCookie = java.util.concurrent.atomic.AtomicBoolean(false)
             val retriedWithCookie = java.util.concurrent.atomic.AtomicBoolean(false)
             val filmRequests = java.util.concurrent.atomic.AtomicInteger(0)
             val passRequests = java.util.concurrent.atomic.AtomicInteger(0)
@@ -257,8 +258,11 @@ class SourceFlowTest {
                     return when (address.encodedPath) {
                         "/films/fiction/30651-mstiteli-final-2019.html" -> {
                             filmRequests.incrementAndGet()
-                            if (request.getHeader("Cookie").orEmpty()
-                                    .contains("techaro.lol-anubis-auth=fixture")) {
+                            val cookie = request.getHeader("Cookie").orEmpty()
+                            if (cookie.contains("hdmbbs=1")) {
+                                sentReferenceCookie.set(true)
+                            }
+                            if (cookie.contains("techaro.lol-anubis-auth=fixture")) {
                                 retriedWithCookie.set(true)
                                 MockResponse().setResponseCode(200)
                                     .addHeader("Content-Type", "text/html; charset=UTF-8")
@@ -301,6 +305,9 @@ class SourceFlowTest {
                     fixtureTrust.sslSocketFactory(),
                     fixtureTrust.trustManager
                 )
+                .dns(okhttp3.Dns {
+                    listOf(java.net.InetAddress.getByName("127.0.0.1"))
+                })
                 .followRedirects(false)
                 .followSslRedirects(false)
                 .build()
@@ -319,6 +326,7 @@ class SourceFlowTest {
                 assertEquals(listOf("Дубляж", "Оригинал"), player.voices.map { it.name })
                 assertEquals(2, filmRequests.get())
                 assertEquals(1, passRequests.get())
+                assertTrue("reference hdmbbs cookie is sent", sentReferenceCookie.get())
                 assertTrue("PoW query is valid", passValid.get())
                 assertTrue("film is retried with Anubis cookie", retriedWithCookie.get())
                 assertTrue(MirrorHttp.hasAnubisCookie(filmPage))
