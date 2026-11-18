@@ -133,18 +133,18 @@ jobs:
           CERTIFICATE="$(awk -F': ' '/certificate SHA-256 digest: /{print $NF}' <<< "$SIGNER" | sort -u)"
           test "$CERTIFICATE" = '1db504f66fa39cf51feefab727f5b8b229baef08a5ae2de80da05191514f93cb'
           sha256sum "$APK"
-      - name: Verify signed Android update from 0.4.28
+      - name: Verify signed Android update from 0.4.29
         if: steps.signing.outputs.available == 'true'
         shell: bash
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           curl --fail --silent --show-error --location --retry 2 \
-            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.28/Cinema-0.4.28.apk" \
-            --output "$RUNNER_TEMP/Cinema-0.4.28.apk"
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.29/Cinema-0.4.29.apk" \
+            --output "$RUNNER_TEMP/Cinema-0.4.29.apk"
           if adb shell pm path app.cinema.player | grep -q "^package:"; then
             adb uninstall app.cinema.player
           fi
-          adb install "$RUNNER_TEMP/Cinema-0.4.28.apk"
+          adb install "$RUNNER_TEMP/Cinema-0.4.29.apk"
           adb shell am start -W -n app.cinema.player/.MainActivity | grep -F "Status: ok"
           ORIGINAL_INSTALL="$(adb shell dumpsys package app.cinema.player | awk -F= '/firstInstallTime=/{print $2; exit}')"
           test -n "$ORIGINAL_INSTALL"
@@ -184,4 +184,4 @@ jobs:
           gh release create "$TAG" "$RUNNER_TEMP/Cinema-$VERSION.apk" \
             --target "$GITHUB_SHA" \
             --title "Cinema $VERSION" \
-            --notes "Cinema 0.4.29: подключён независимый источник Collapse через Kinopoisk/IMDb ID (результаты с HLS/DASH), полноценный Media3-плеер с выбором существующих звуковых дорожек и серий, сохранение провайдера и позиции. В окне Смотреть источники Rezka и Collapse разделены и доступны только при реальных данных. В разделе Зеркала показан весь публичный пул из эталона, доступно измерение задержки HTTPS-запросов и выбор встроенного зеркала. Релизные тесты: unit, Android WebView/Media3, постоянный сертификат и установка поверх 0.4.28. Региональная доступность сторонних источников требует проверки на устройстве."
+            --notes "Cinema 0.4.30: исправлено отличие гостевой сессии Rezka между OkHttp и WebView: cookie hdmbbs=1 устанавливается перед загрузкой фильма в WebView, а запросы AJAX запускаются только после загрузки страницы того же фильма. Независимый повтор через WebView работает даже при HTTP-ошибке доступа из прямого сетевого клиента, без подмены подписки. Обновлён парсинг параметра favs и добавлены регрессионные unit-тесты. Сохранены интерфейс, мультиисточники и медиаплеер 0.4.29. CI подтверждает тесты, подпись и установку поверх 0.4.29. Реальные гостевые потоки проверяются на устройстве."
