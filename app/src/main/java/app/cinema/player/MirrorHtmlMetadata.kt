@@ -242,7 +242,7 @@ internal object MirrorHtmlMetadata {
         )
         // Preserve source-provided request state even when the native HTTP
         // metadata parser finishes before the WebView's page scripts execute.
-        val favs = document.selectFirst("#favs, input[name=favs]")?.attr("value").orEmpty()
+        val favs = document.selectFirst("#ctrl_favs, input[name=ctrl_favs], #favs, input[name=favs]")?.attr("value").orEmpty()
             .ifBlank { document.selectFirst("[data-favs]")?.attr("data-favs").orEmpty() }
             .takeIf { it.matches(Regex("[A-Za-z0-9_+=/-]{1,256}")) }.orEmpty()
         // Only trust source-provided player metadata matching the requested film.
