@@ -60,6 +60,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.media3:media3-exoplayer:1.8.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.8.1")
+    implementation("androidx.media3:media3-exoplayer-dash:1.8.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.8.1")
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
