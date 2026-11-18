@@ -34,7 +34,7 @@ internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium
         )
         Spacer(Modifier.height(16.dp))
-        MenuItem("Плеер", "Перемотка и проверка воспроизведения", Icons.Outlined.PlayArrow) {
+        MenuItem("Плеер", "Перемотка и скорость", Icons.Outlined.PlayArrow) {
             open(Page.PLAYER)
         }
         MenuItem("Обновления", "Новая версия и ход загрузки", Icons.Outlined.SystemUpdate) {
@@ -240,8 +240,8 @@ internal fun PlayerSettingsScreen(local: LocalStore, back: () -> Unit, openTest:
         Text("Плеер сохраняет место остановки и воспроизводит доступные видеоссылки.",
             color = appMuted)
         Spacer(Modifier.height(22.dp))
-        MenuItem("Проверка плеера", "Открыть видео по прямой ссылке",
-            Icons.Outlined.PlayArrow, openTest)
+        // Direct-link developer test is intentionally absent from the
+        // consumer UI. Real films launch from their own film cards.
     }
 }
 
