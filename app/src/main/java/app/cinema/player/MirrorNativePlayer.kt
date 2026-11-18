@@ -522,8 +522,7 @@ internal fun MirrorNativePlayer(
         options = emptyList()
         error = ""
         message = "Загружаем список серий"
-        val payload = mapOf("action" to "get_episodes", "id" to item.id,
-            "translator_id" to voice)
+        val payload = MirrorPlaybackRequest.episodes(item, voice)
         var raw: String? = MirrorNetworkSource.playback(pageUrl, payload,
             WebSettings.getDefaultUserAgent(context))
         var response = raw?.let(MirrorMediaParser::objectFromWebView)
