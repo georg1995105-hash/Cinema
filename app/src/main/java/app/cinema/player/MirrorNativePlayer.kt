@@ -333,14 +333,8 @@ internal fun MirrorNativePlayer(
         val fetched = MirrorNetworkSource.resolveFilm(
             filmUrl, mirrors, WebSettings.getDefaultUserAgent(context)
         )
-        val originalId = MirrorPostId.fromUrl(filmUrl)
-        val resolvedId = MirrorPostId.fromUrl(fetched.finalUrl)
-        val allowedMirror = (listOf(filmUrl) + mirrors).any {
-            SourceRules.sameOrigin(it, fetched.finalUrl)
-        }
         val acceptedUrl = fetched.finalUrl.takeIf {
-            originalId != null && originalId == resolvedId &&
-                allowedMirror && SourceRules.isValidHttpsUrl(it)
+            MirrorFilmUrl.isAllowedResolved(filmUrl, it, mirrors)
         } ?: filmUrl
         if (acceptedUrl != transportUrl) transportUrl = acceptedUrl
 
