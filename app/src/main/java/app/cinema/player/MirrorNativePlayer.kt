@@ -169,6 +169,7 @@ internal suspend fun mirrorAjax(web: WebView, pageUrl: String, payload: Map<Stri
 internal fun MirrorNativePlayer(
     filmUrl: String,
     filmTitle: String,
+    mirrors: List<String> = emptyList(),
     startPositionMs: Long,
     seekSeconds: Int,
     holdSpeed: Int,
@@ -183,6 +184,7 @@ internal fun MirrorNativePlayer(
         return
     }
     val context=LocalContext.current
+    var transportUrl by remember(filmUrl) { mutableStateOf(filmUrl) }
     var pageUrl by remember(filmUrl) { mutableStateOf(filmUrl) }
     var movie by remember(filmUrl){mutableStateOf<MirrorMoviePage?>(null)}
     var message by remember(filmUrl){mutableStateOf("Получаем данные фильма")}
@@ -225,8 +227,8 @@ internal fun MirrorNativePlayer(
         }
     }
 
-    val metadataHandler = remember(context,filmUrl) { Handler(Looper.getMainLooper()) }
-    val web=remember(context,filmUrl) {
+    val metadataHandler = remember(context,filmUrl,transportUrl) { Handler(Looper.getMainLooper()) }
+    val web=remember(context,filmUrl,transportUrl) {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
             settings.javaScriptEnabled=true
@@ -253,14 +255,14 @@ internal fun MirrorNativePlayer(
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
-                    val decision = FilmNavigationPolicy.decide(filmUrl, request.url.toString())
+                    val decision = FilmNavigationPolicy.decide(transportUrl, request.url.toString())
                     if (!decision.allow) rejectedNavigation = decision.failureMessage
                     // A blocked navigation attempt must not kill the already loaded film page.
                     return !decision.allow
                 }
 
                 private fun scan(view: WebView, url: String) {
-                    if (failed || scanningUrl == url || !MirrorPostId.canOpen(filmUrl, url)) return
+                    if (failed || scanningUrl == url || !MirrorPostId.canOpen(transportUrl, url)) return
                     scanningUrl = url
                     message = "Определяем доступный плеер"
                     val timings = listOf(150L, 500L, 1250L, 2400L, 4100L, 6500L)
@@ -317,7 +319,7 @@ internal fun MirrorNativePlayer(
                     if (request.isForMainFrame) fail("Не удалось открыть страницу фильма. Проверьте соединение.")
                 }
             }
-            loadUrl(filmUrl)
+            loadUrl(transportUrl)
         }
     }
     DisposableEffect(web){
@@ -327,14 +329,26 @@ internal fun MirrorNativePlayer(
             web.destroy()
         }
     }
-    LaunchedEffect(filmUrl) {
-        val fetched = MirrorNetworkSource.film(filmUrl,
-            WebSettings.getDefaultUserAgent(context))
+    LaunchedEffect(filmUrl, mirrors) {
+        val fetched = MirrorNetworkSource.resolveFilm(
+            filmUrl, mirrors, WebSettings.getDefaultUserAgent(context)
+        )
+        val originalId = MirrorPostId.fromUrl(filmUrl)
+        val resolvedId = MirrorPostId.fromUrl(fetched.finalUrl)
+        val allowedMirror = (listOf(filmUrl) + mirrors).any {
+            SourceRules.sameOrigin(it, fetched.finalUrl)
+        }
+        val acceptedUrl = fetched.finalUrl.takeIf {
+            originalId != null && originalId == resolvedId &&
+                allowedMirror && SourceRules.isValidHttpsUrl(it)
+        } ?: filmUrl
+        if (acceptedUrl != transportUrl) transportUrl = acceptedUrl
+
         val player = fetched.metadata?.player
         if (movie == null && player != null) {
             val chosen = MirrorVoiceSelection.choose(player, savedSelection?.voice)
             if (chosen.isNotBlank()) {
-                pageUrl = fetched.finalUrl
+                pageUrl = acceptedUrl
                 movie = player
                 voice = chosen
                 episodes = player.episodes
