@@ -2,6 +2,8 @@ package app.cinema.player
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -97,7 +99,20 @@ internal object TvMazeSeries {
             if (arr == null) emptyList() else (0 until minOf(16, arr.length()))
                 .map { arr.optString(it) }.filter(String::isNotBlank)
         }
-        val eps = JSONArray(get("/shows/$showId/episodes"))
+        // Episodes, cast and crew are independent resources. Requesting them
+        // sequentially previously tripled worst-case wait on poor networks.
+        val (eps, cast, crew) = coroutineScope {
+            val episodesJob = async(Dispatchers.IO) {
+                JSONArray(get("/shows/$showId/episodes"))
+            }
+            val castJob = async(Dispatchers.IO) {
+                runCatching { JSONArray(get("/shows/$showId/cast")) }.getOrElse { JSONArray() }
+            }
+            val crewJob = async(Dispatchers.IO) {
+                runCatching { JSONArray(get("/shows/$showId/crew")) }.getOrElse { JSONArray() }
+            }
+            Triple(episodesJob.await(), castJob.await(), crewJob.await())
+        }
         val episodes = buildList {
             for (i in 0 until minOf(1000, eps.length())) {
                 val ep = eps.optJSONObject(i) ?: continue
@@ -110,7 +125,6 @@ internal object TvMazeSeries {
             }
         }.distinctBy { it.season to it.episode }
 
-        val cast = JSONArray(get("/shows/$showId/cast"))
         val actors = buildList {
             for (i in 0 until minOf(24, cast.length())) {
                 val value = cast.optJSONObject(i)?.optJSONObject("person")
@@ -118,7 +132,6 @@ internal object TvMazeSeries {
                 if (value.isNotBlank() && value !in this) add(value)
             }
         }
-        val crew = JSONArray(get("/shows/$showId/crew"))
         val directors = buildList {
             for (i in 0 until minOf(48, crew.length())) {
                 val member = crew.optJSONObject(i) ?: continue
