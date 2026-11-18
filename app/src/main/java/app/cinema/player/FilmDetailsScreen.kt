@@ -987,11 +987,9 @@ internal fun FilmDetails(
                                 }
                             },
                             enabled = WatchChoicePolicy.validChoice(availableVoices, chosenVoice) &&
-                                voiceAvailability[chosenVoice] !in setOf(
-                                    VoiceAvailability.SUBSCRIPTION,
-                                    VoiceAvailability.PREVIEW,
-                                    VoiceAvailability.UNAVAILABLE
-                                ),
+                                voiceAvailability[chosenVoice].let { status ->
+                                    status == null || status == VoiceAvailability.AVAILABLE
+                                },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         ) {
