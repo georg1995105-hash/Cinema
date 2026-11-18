@@ -102,7 +102,10 @@ internal fun LiftWebScreen(
             settings.setSupportMultipleWindows(false)
             settings.javaScriptCanOpenWindowsAutomatically = false
             if (android.os.Build.VERSION.SDK_INT >= 26) settings.safeBrowsingEnabled = true
-            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+            // Lift's website may embed its own video host in another origin.
+            // Let the first-party player manage cookies inside this isolated
+            // WebView; never import Cinema's unrelated mirror credentials.
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             webChromeClient = object : WebChromeClient() {
                 override fun onShowCustomView(view: View, callback: CustomViewCallback) {
                     fullscreenCallback?.onCustomViewHidden()
