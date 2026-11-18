@@ -331,7 +331,10 @@ internal fun MirrorNativePlayer(
     }
     LaunchedEffect(filmUrl, mirrors) {
         val fetched = MirrorNetworkSource.resolveFilm(
-            filmUrl, mirrors, WebSettings.getDefaultUserAgent(context)
+            filmUrl,
+            mirrors,
+            WebSettings.getDefaultUserAgent(context),
+            requiredVoice = savedSelection?.voice.orEmpty()
         )
         val acceptedUrl = fetched.finalUrl.takeIf {
             MirrorFilmUrl.isAllowedResolved(filmUrl, it, mirrors)
