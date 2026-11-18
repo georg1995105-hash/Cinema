@@ -16,6 +16,10 @@ internal object MirrorGuestCookies {
      */
     fun isGuestFilmRequest(address: String, referer: String?): Boolean {
         if (referer == null || !SourceRules.sameOrigin(referer, address)) return false
+        // Login is not anonymous video playback: keep CSRF and site session
+        // cookies in the same-origin authentication request.
+        val path = runCatching { java.net.URI(address).path.orEmpty() }.getOrDefault("")
+        if (path.startsWith("/ajax/login/") || path.startsWith("/ajax/register/")) return false
         return MirrorSitePolicy.isRecognizedMirror(address) ||
             MirrorPostId.fromUrl(address) != null ||
             MirrorPostId.fromUrl(referer) != null
