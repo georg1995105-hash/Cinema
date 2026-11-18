@@ -29,7 +29,7 @@ internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
         // Legacy source data remains intact on disk for backward compatibility,
         // but it must not be presented as a requirement for watching content.
         Text(
-            "Каталог работает без зеркал и авторизации. Для просмотра показываются только подтверждённые видеоматериалы.",
+            "Каталог работает без зеркал и авторизации. Просмотр открывается в Lift; наличие карточки не гарантирует доступность видео в вашем регионе.",
             color = appMuted,
             style = MaterialTheme.typography.bodyMedium
         )
