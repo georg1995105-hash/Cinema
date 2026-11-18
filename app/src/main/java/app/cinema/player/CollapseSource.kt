@@ -123,10 +123,16 @@ internal object ExternalFilmIdResolver {
             if (!id.matches(Regex("tt[0-9]{5,12}", RegexOption.IGNORE_CASE))) continue
             val label = item.optString("l").trim().lowercase()
             val itemYear = item.optInt("y", 0).takeIf { it > 0 }?.toString().orEmpty()
-            var score = 0
-            if (label == target) score += 8
-            else if (label.contains(target) || target.contains(label)) score += 4
-            if (year.isNotBlank() && itemYear == year) score += 5
+            val titleScore = when {
+                label == target -> 8
+                label.length >= 4 && target.length >= 4 &&
+                    (label.contains(target) || target.contains(label)) -> 4
+                else -> 0
+            }
+            val yearMatches = year.isBlank() || (itemYear.isNotBlank() && itemYear == year)
+            if (titleScore == 0 || !yearMatches) continue
+            var score = titleScore
+            if (year.isNotBlank()) score += 5
             val type = item.optString("q").lowercase()
             if ("feature" in type || "movie" in type || "tv" in type) score += 1
             if (score > bestScore) {
@@ -134,7 +140,8 @@ internal object ExternalFilmIdResolver {
                 bestId = id
             }
         }
-        bestId
+        val threshold = if (year.isNotBlank()) 9 else 8
+        bestId.takeIf { bestScore >= threshold }.orEmpty()
     }.getOrDefault("")
 }
 
