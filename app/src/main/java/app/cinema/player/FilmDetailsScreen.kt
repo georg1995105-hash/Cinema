@@ -458,6 +458,7 @@ internal fun FilmDetails(
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
             webViewClient = object : WebViewClient() {
                 private var scanningUrl: String? = null
+                private var staleAnubisRetried = false
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
@@ -587,6 +588,18 @@ internal fun FilmDetails(
                         if (MirrorAnubis.isChallengeUrl(resolvedFilmUrl, address)) {
                             browserChallengeActive = true
                             loadError = ""
+                            return
+                        }
+                        if (response.statusCode == 403 && !staleAnubisRetried &&
+                            MirrorHttp.clearStaleAnubisCookies(address)) {
+                            staleAnubisRetried = true
+                            browserChallengeActive = true
+                            loadError = ""
+                            view.postDelayed({
+                                if (!loadDone) view.loadUrl(
+                                    address, MirrorSitePolicy.webViewHeaders(address)
+                                )
+                            }, 120)
                             return
                         }
                         if (info == null)
