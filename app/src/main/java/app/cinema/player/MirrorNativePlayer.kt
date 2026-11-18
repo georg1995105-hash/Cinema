@@ -79,7 +79,7 @@ internal val mirrorPlayerMetadataJavascript = """
         data.defaultVoice || data.voices.length ? 'ready' : root?.querySelector('.b-player__premium') ? 'premium' : 'missing-metadata';
     data.runtime = kinoFilmRuntime();
     data.episodes = kinoEpisodes(document);
-    data.favs = (document.querySelector('#favs, input[name="favs"]')?.value ||
+    data.favs = (document.querySelector('#ctrl_favs, input[name="ctrl_favs"], #favs, input[name="favs"]')?.value ||
         document.querySelector('[data-favs]')?.getAttribute('data-favs') || '').trim();
     return JSON.stringify(data);
 })()
