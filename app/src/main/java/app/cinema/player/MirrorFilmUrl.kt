@@ -11,10 +11,14 @@ internal object MirrorFilmUrl {
         return runCatching {
             val movie = URI(filmUrl)
             val target = URI(mirror)
-            val base = URI("https", null, target.host,
-                if (target.port == 443) -1 else target.port,
-                movie.rawPath, movie.rawQuery, null)
-            val output = base.toString()
+            val authority = target.rawAuthority ?: return@runCatching null
+            val suffix = buildString {
+                append(movie.rawPath)
+                movie.rawQuery?.let { append('?').append(it) }
+            }
+            // rawPath/rawQuery are already encoded. Rebuilding through URI's component
+            // constructor would encode '%' again (for example %20 -> %2520).
+            val output = "https://$authority$suffix"
             output.takeIf { SourceRules.isValidHttpsUrl(it) &&
                 MirrorPostId.fromUrl(it) == MirrorPostId.fromUrl(filmUrl) }
         }.getOrNull()
