@@ -219,6 +219,16 @@ private fun DetailsBody(
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(movie.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         if (movie.details.isNotBlank()) Text(movie.details, color = appMuted)
+        // Watch must be directly visible under the film title, not buried
+        // below synopsis, credits and a long list of metadata.
+        if (officialEmbed != null) {
+            Button(onClick = { onPlay(officialEmbed) },
+                modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Смотреть")
+            }
+        }
         if (loading && info == null) CircularProgressIndicator(Modifier.size(24.dp))
         if (error.isNotBlank()) {
             Text(error, color = MaterialTheme.colorScheme.error)
@@ -293,14 +303,6 @@ private fun DetailsBody(
         if (officialEmbed != null) {
             Text("Киноконцерн «Мосфильм» · официальный плеер RUTUBE",
                 color = appMuted, style = MaterialTheme.typography.bodyMedium)
-            Button(
-                onClick = { onPlay(officialEmbed) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Outlined.PlayArrow, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Смотреть")
-            }
             Text("Управление качеством и звуком — в плеере RUTUBE.",
                 color = appMuted, style = MaterialTheme.typography.bodySmall)
         }
