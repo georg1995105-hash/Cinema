@@ -233,37 +233,40 @@ internal object MirrorNetworkSource {
             var bestFailure: FilmResult? = null
             var incompatiblePlayerSeen = false
 
-            // The reference app has a much larger public mirror pool. Do not launch
-            // two dozen Anubis/HTML requests at once: try bounded waves and stop
-            // immediately when a mirror exposes a real player.
-            for (batch in candidates.chunked(6)) {
-                val completed = Channel<FilmResult>(Channel.UNLIMITED)
-                val jobs = batch.map { candidate ->
-                    launch(Dispatchers.IO) {
+            // The reference app has a much larger public mirror pool. Keep at most
+            // six active requests, but start the next candidate as soon as any
+            // request finishes instead of waiting for a whole slow batch.
+            val queue = Channel<String>(Channel.UNLIMITED)
+            candidates.forEach { queue.trySend(it) }
+            queue.close()
+            val completed = Channel<FilmResult>(Channel.UNLIMITED)
+            val jobs = List(minOf(6, candidates.size)) {
+                launch(Dispatchers.IO) {
+                    for (candidate in queue) {
                         completed.send(film(candidate, userAgent, mirrors))
                     }
                 }
-                try {
-                    repeat(batch.size) {
-                        val result = completed.receive()
-                        val player = result.metadata?.player
-                        if (player != null) {
-                            val compatible = requiredVoice.isBlank() ||
-                                MirrorVoiceSelection.supports(player, requiredVoice)
-                            if (compatible) {
-                                jobs.forEach { it.cancel() }
-                                return@supervisorScope result
-                            }
-                            incompatiblePlayerSeen = true
+            }
+            try {
+                repeat(candidates.size) {
+                    val result = completed.receive()
+                    val player = result.metadata?.player
+                    if (player != null) {
+                        val compatible = requiredVoice.isBlank() ||
+                            MirrorVoiceSelection.supports(player, requiredVoice)
+                        if (compatible) {
+                            jobs.forEach { it.cancel() }
+                            return@supervisorScope result
                         }
-                        if (bestInfo == null && result.metadata?.info != null) bestInfo = result
-                        if (bestFailure == null && result.reason.isNotBlank())
-                            bestFailure = result
+                        incompatiblePlayerSeen = true
                     }
-                } finally {
-                    jobs.forEach { it.cancel() }
-                    completed.close()
+                    if (bestInfo == null && result.metadata?.info != null) bestInfo = result
+                    if (bestFailure == null && result.reason.isNotBlank())
+                        bestFailure = result
                 }
+            } finally {
+                jobs.forEach { it.cancel() }
+                completed.close()
             }
 
             if (requiredVoice.isNotBlank() && incompatiblePlayerSeen) {
