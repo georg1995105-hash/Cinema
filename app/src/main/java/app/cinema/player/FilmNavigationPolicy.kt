@@ -9,6 +9,9 @@ internal object FilmNavigationPolicy {
         requestedUrl: String,
         mirrors: List<String> = emptyList()
     ): Decision {
+        // Anubis is the mirror's own browser verification flow. Blocking this
+        // same-origin service URL makes a healthy mirror look like a foreign redirect.
+        if (MirrorAnubis.isChallengeUrl(filmUrl, requestedUrl)) return Decision(true)
         if (MirrorPostId.canOpen(filmUrl, requestedUrl)) return Decision(true)
         val samePost = MirrorPostId.fromUrl(filmUrl) != null &&
             MirrorPostId.fromUrl(filmUrl) == MirrorPostId.fromUrl(requestedUrl)
