@@ -11,7 +11,7 @@ import java.net.URI
  * or authorization from one origin on another.
  */
 internal object MirrorCatalogMirrors {
-    private val provenCatalogueHosts = listOf(
+    val provenCatalogueHosts = listOf(
         "https://rezka-ua.pub/",
         "https://hdrezka.sh/"
     )
