@@ -165,6 +165,7 @@ internal fun CinemetaFilmDetails(
     var checkFailure by remember(movie.url) { mutableStateOf("") }
     var retry by remember(movie.url) { mutableIntStateOf(0) }
     val couldHaveArchive = InternetArchiveStreams.canCheck(movie.url)
+    val officialEmbed = MosfilmCatalog.embedUrl(movie.url)
     LaunchedEffect(movie.url, retry) {
         loading = true
         error = ""
@@ -204,14 +205,14 @@ internal fun CinemetaFilmDetails(
                 PublicMoviePoster(movie, Modifier.width(190.dp).aspectRatio(.70f)
                     .border(1.dp, appPanel, RoundedCornerShape(14.dp)))
                 DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
-                    couldHaveArchive, onPlay, { retry++ }, Modifier.weight(1f))
+                    couldHaveArchive, officialEmbed, onPlay, { retry++ }, Modifier.weight(1f))
             }
         } else {
             PublicMoviePoster(movie, Modifier.width(148.dp).aspectRatio(.70f)
                 .align(Alignment.CenterHorizontally))
             Spacer(Modifier.height(12.dp))
             DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
-                couldHaveArchive, onPlay, { retry++ }, Modifier.fillMaxWidth())
+                couldHaveArchive, officialEmbed, onPlay, { retry++ }, Modifier.fillMaxWidth())
         }
         Spacer(Modifier.height(28.dp))
     }
@@ -222,7 +223,8 @@ internal fun CinemetaFilmDetails(
 private fun DetailsBody(
     movie: CatalogMovie, info: CinemetaDetails?, loading: Boolean, error: String,
     streams: List<InternetArchiveStreams.Video>, checking: Boolean, checkFailure: String,
-    couldHaveArchive: Boolean, onPlay: (String) -> Unit, retry: () -> Unit,
+    couldHaveArchive: Boolean, officialEmbed: String?,
+    onPlay: (String) -> Unit, retry: () -> Unit,
     modifier: Modifier
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -299,7 +301,21 @@ private fun DetailsBody(
         }
         HorizontalDivider(color = appMuted.copy(alpha = .2f))
         Text("Просмотр", style = MaterialTheme.typography.titleMedium)
-        if (checking) Text("Проверяем реальный видеопоток…", color = appMuted)
+        if (officialEmbed != null) {
+            Text("Киноконцерн «Мосфильм» · официальный плеер RUTUBE",
+                color = appMuted, style = MaterialTheme.typography.bodyMedium)
+            Button(
+                onClick = { onPlay(officialEmbed) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Outlined.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Смотреть")
+            }
+            Text("Управление качеством и звуком — в плеере RUTUBE.",
+                color = appMuted, style = MaterialTheme.typography.bodySmall)
+        }
+        else if (checking) Text("Проверяем реальный видеопоток…", color = appMuted)
         else if (streams.isNotEmpty()) {
             var selecting by remember(movie.url) { mutableStateOf(false) }
             Text("Internet Archive • доступный архивный фильм", color = appMuted)
