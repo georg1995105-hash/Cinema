@@ -205,7 +205,7 @@ private fun CinemaApp() {
                         local.rememberMovie(film)
                         selectedFilm = film
                         movieBack = Page.LIBRARY
-                        if (CinemetaCatalog.isMovieUrl(film.url)) {
+                        if (CinemetaCatalog.isMovieUrl(film.url) || ArchivePublicCatalog.isArchiveUrl(film.url)) {
                             // An IMDb metadata URL is never a playable video URL.
                             // Recheck the legal source in the details screen before play.
                             page = Page.MOVIE
@@ -309,7 +309,7 @@ private fun CinemaApp() {
                     }
                 }
                 Page.MOVIE -> selectedFilm?.let { movie ->
-                    if (CinemetaCatalog.isMovieUrl(movie.url)) {
+                    if (CinemetaCatalog.isMovieUrl(movie.url) || ArchivePublicCatalog.isArchiveUrl(movie.url)) {
                         CinemetaFilmDetails(
                             movie = movie,
                             isFavourite = movie.url in favourites,
