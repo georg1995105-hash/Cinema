@@ -342,6 +342,11 @@ private fun CinemaApp() {
                             page = Page.SITE
                         },
                         savedSelection = local.playbackSelection(movie.url),
+                        onLift = {
+                            liftTitle = movie.title
+                            liftReturn = Page.MOVIE
+                            page = Page.LIFT
+                        },
                         onWatch = { request ->
                             if (request.voice.isNotBlank()) {
                                 val storageUrl = movie.url
