@@ -203,6 +203,7 @@ private fun CinemaApp() {
                     onResume = { film ->
                         local.rememberMovie(film)
                         selectedFilm = film
+                        playbackStorageUrl = film.url
                         browsingSource = film.url
                         movieBack = Page.LIBRARY
                         page = Page.FILM_PLAYER
@@ -250,6 +251,7 @@ private fun CinemaApp() {
                     MirrorNativePlayer(
                         filmUrl = playbackUrl,
                         filmTitle = selectedFilm?.title.orEmpty(),
+                        mirrors = sources.toList(),
                         startPositionMs = local.playbackSelection(storageUrl)?.positionMs
                             ?: history.firstOrNull { it.url == storageUrl }?.positionMs ?: 0L,
                         seekSeconds = local.seekSeconds(),
