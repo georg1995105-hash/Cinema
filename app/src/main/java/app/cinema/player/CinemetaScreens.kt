@@ -48,35 +48,22 @@ internal fun CinemetaGrid(
         loading = true
         error = ""
         try {
-            // Show the last real results before issuing potentially slow network
-            // calls; a cached catalogue is not presented as a live update.
+            val initial = SourceBackedCatalog.initial(tab, kind, searchText)
             val cached = CinemetaCatalog.cachedCards(context, tab, kind, searchText)
-            if (tab == "Смотреть" && searchText.isBlank()) {
-                // Always prepend studio films, even when last version cached
-                // ONLY the single archive test movie. This prevents the user
-                // from seeing the same one-film screen during network outages.
-                movies = (MosfilmCatalog.catalog(kind) + cached +
-                    ArchivePublicCatalog.featured()).distinctBy { it.url }
-                loading = false
-            } else if (cached.isNotEmpty()) {
-                movies = cached
-                loading = false
-            } else if (searchText.isNotBlank()) {
-                val direct = MosfilmCatalog.search(searchText, kind)
-                if (direct.isNotEmpty()) {
-                    movies = direct
-                    loading = false
-                }
-            }
+            // Show genuine source-backed cards immediately, even offline.
+            // A metadata refresh must never replace them with unwatcheable IMDb cards.
+            movies = SourceBackedCatalog.merge(initial, cached)
+            if (movies.isNotEmpty()) loading = false
             val items = if (searchText.isBlank())
                 CinemetaCatalog.home(context, tab, kind)
             else CinemetaCatalog.search(context, searchText, kind)
-            movies = items
+            val withSources = SourceBackedCatalog.merge(initial, items)
+            movies = withSources
             loading = false
-            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, items)
-            val localized = RussianMovieTitles.enrich(items)
-            movies = localized
-            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, localized)
+            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, withSources)
+            val localized = RussianMovieTitles.enrich(withSources)
+            movies = SourceBackedCatalog.merge(initial, localized)
+            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, movies)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
