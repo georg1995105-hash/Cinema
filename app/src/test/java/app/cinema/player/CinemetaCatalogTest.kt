@@ -21,6 +21,22 @@ class CinemetaCatalogTest {
         assertTrue(film.details.contains("2002"))
     }
 
+    @Test fun knownMismatchedBrigadaPosterIsRejectedByImdbIdentity() {
+        val item = JSONObject()
+            .put("id", "tt0337898")
+            .put("name", "Law of the Lawless")
+            .put("type", "series")
+            .put("poster", "https://images.example.org/posters/first-dates.jpg")
+        val result = CinemetaCatalog.parseMovie(item)!!
+        assertEquals("Бригада", result.title)
+        assertEquals("", result.poster)
+        assertEquals("", CinemetaCatalog.trustedPoster(result.url,
+            "https://images.example.org/posters/first-dates.jpg"))
+        val other = CinemetaCatalog.movieUrl("movie", "tt1234567")
+        assertEquals("https://images.example.org/posters/real.jpg",
+            CinemetaCatalog.trustedPoster(other, "https://images.example.org/posters/real.jpg"))
+    }
+
     @Test fun actualEpisodeStructureIsNotMisreadAsVideoStream() {
         val item = JSONObject().put("id", "tt1196946")
             .put("type", "series")
