@@ -222,19 +222,6 @@ internal object CinemetaCatalog {
     }
 
     suspend fun home(context: Context, tab: String, kind: String): List<CatalogMovie> = coroutineScope {
-        if (tab == "Мосфильм") return@coroutineScope MosfilmCatalog.catalog(kind)
-        if (tab == "Архив") return@coroutineScope ArchivePublicCatalog.home(kind)
-        if (tab == "Смотреть") {
-            val archive = try { ArchivePublicCatalog.home(kind) }
-                catch (e: CancellationException) { throw e }
-                catch (_: Exception) {
-                    if (kind == "Сериалы" || kind == "Мультфильмы") emptyList()
-                    else ArchivePublicCatalog.featured()
-                }
-            return@coroutineScope SourceBackedCatalog.merge(
-                MosfilmCatalog.catalog(kind), archive
-            )
-        }
         val types = if (kind == "Фильмы") listOf("movie")
                     else if (kind == "Сериалы") listOf("series")
                     else listOf("movie", "series")
@@ -271,24 +258,52 @@ internal object CinemetaCatalog {
      * metadata, not links to videos: returning them here previously produced
      * a large number of film pages without a Watch action.
      */
-    suspend fun search(context: Context, query: String, kind: String): List<CatalogMovie> =
-        withContext(Dispatchers.IO) {
-            val q = query.trim().take(110)
-            if (q.isBlank()) return@withContext emptyList()
-            val listed = SourceBackedCatalog.initial("Поиск", kind, q)
-            if (kind == "Сериалы" || kind == "Мультфильмы" || q.length < 2)
-                return@withContext listed
-
-            // The public Archive index contains candidates, not guaranteed
-            // streams. The film page checks the license AND actual MP4 bytes.
-            val archive = try {
-                ArchivePublicCatalog.home(kind).filter {
-                    it.title.contains(q, ignoreCase = true)
-                }
-            } catch (e: CancellationException) { throw e }
-              catch (_: Exception) { emptyList() }
-            SourceBackedCatalog.merge(listed, archive)
+    suspend fun search(context: Context, query: String, kind: String): List<CatalogMovie> = withContext(Dispatchers.IO) {
+        val q = query.trim().take(110)
+        if (q.isBlank()) return@withContext emptyList()
+        val encoded = URLEncoder.encode(q, "UTF-8").replace("+", "%20")
+        val types = when (kind) {
+            "Фильмы" -> listOf("movie")
+            "Сериалы" -> listOf("series")
+            else -> listOf("series", "movie")
         }
+        // Search film and series concurrently. Previously, the series request
+        // had to time out before films could even begin loading.
+        val responses = coroutineScope {
+            types.map { type ->
+                async(Dispatchers.IO) {
+                    try {
+                        Pair(parseList(read(context, "/catalog/$type/top/search=$encoded.json")), null as Exception?)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Pair(emptyList<CatalogMovie>(), e)
+                    }
+                }
+            }.awaitAll()
+        }
+        val items = responses.flatMap { it.first }
+            .distinctBy { it.url }.toMutableList()
+        val seriesFound = items.any { identity(it.url)?.first == "series" }
+        var successes = responses.count { it.second == null }
+        var failure = responses.firstNotNullOfOrNull { it.second }
+        if ("series" in types && !seriesFound) {
+            try {
+                items.addAll(TvMazeSeries.search(q))
+                successes++
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failure = e
+            }
+        }
+        if (successes == 0 && items.isEmpty()) throw IOException(failure?.message ?: "Поиск недоступен")
+        items.distinctBy { it.url }.let { found ->
+            if (kind == "Мультфильмы")
+                found.filter { it.details.contains("Мультфильм", ignoreCase = true) }
+            else found
+        }
+    }
 
     suspend fun metadata(context: Context, url: String): CinemetaDetails = withContext(Dispatchers.IO) {
         if (MosfilmCatalog.isVideoUrl(url))
