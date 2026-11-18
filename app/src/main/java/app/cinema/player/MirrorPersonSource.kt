@@ -45,12 +45,12 @@ internal object MirrorPersonSource {
         resolved.takeIf(MirrorPoster::isPhoto)
     }.getOrNull()
 
-    suspend fun portrait(filmUrl: String, person: FilmPerson): String? {
+    suspend fun portrait(filmUrl: String, person: FilmPerson, userAgent: String): String? {
         val filmId = MirrorPostId.fromUrl(filmUrl) ?: return null
         val personId = person.pid
         if (!personId.matches(idPattern) || person.name.isBlank()) return null
         val origin = MirrorAccountGateway.origin(filmUrl) ?: return null
-        val key = "$origin/$filmId/$personId"
+        val key = "$origin/$filmId/$personId/${person.name.lowercase()}"
         cache[key]?.let { return it }
         return semaphore.withPermit {
             cache[key]?.let { return@withPermit it }
@@ -64,7 +64,7 @@ internal object MirrorPersonSource {
                         .header("X-Requested-With", "XMLHttpRequest")
                         .header("Accept", "application/json, text/plain, */*")
                         .apply {
-                            MirrorSitePolicy.requestHeaders(filmUrl, "Cinema Android").forEach { (name, value) -> header(name, value) }
+                            MirrorSitePolicy.requestHeaders(filmUrl, userAgent).forEach { (name, value) -> header(name, value) }
                         }
                         .build()
                     client.newCall(request).execute().use { response ->
