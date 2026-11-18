@@ -25,4 +25,16 @@ class MirrorSitePolicyTest {
         assertEquals("hdrezka.me", standby["Host"])
         assertTrue(MirrorSitePolicy.cookieScopes("https://standby-rezka.tv/").contains("https://hdrezka.me/"))
     }
+
+    @Test fun sharedCookiesFillMissingAuthWithoutOverwritingLocalValues() {
+        val merged = MirrorSitePolicy.mergeCookieHeaders(listOf(
+            "theme=dark; guest=local",
+            "dle_user_id=42; dle_password=secret; guest=shared"
+        ))
+        assertTrue(merged.contains("theme=dark"))
+        assertTrue(merged.contains("dle_user_id=42"))
+        assertTrue(merged.contains("dle_password=secret"))
+        assertTrue(merged.contains("guest=local"))
+        assertFalse(merged.contains("guest=shared"))
+    }
 }
