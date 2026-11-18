@@ -17,10 +17,15 @@ class CinemetaLiveNetworkTest {
     @Test fun actualCyrillicSearchFindsBrigada() = runBlocking {
         withTimeout(40_000) {
             val movies = CinemetaCatalog.search(context, "Бригада", "Сериалы")
-            assertTrue("Real Russian query must return Brigada", movies.any {
-                CinemetaCatalog.identity(it.url) == ("series" to "tt0337898") &&
-                    it.title == "Бригада" && it.poster.startsWith("https://")
-            })
+            val ranked = SearchRelevance.find(movies, "Бригада")
+            assertTrue("Real Russian query must contain Brigada", ranked.isNotEmpty())
+            assertEquals("Бригада", ranked.first().title)
+            assertEquals("series" to "tt0337898",
+                CinemetaCatalog.identity(ranked.first().url))
+            assertEquals("Known incorrect Cinemeta cover must not be displayed",
+                "", ranked.first().poster)
+            assertTrue("Unrelated titles must be excluded",
+                ranked.none { it.title == "First Dates" || it.title == "Law & Order" })
         }
     }
 
