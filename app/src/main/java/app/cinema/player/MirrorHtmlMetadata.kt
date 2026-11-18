@@ -145,6 +145,20 @@ internal object MirrorHtmlMetadata {
                 else actors.putIfAbsent(name.lowercase(), value)
             }
         }
+        // A real mirror may provide complete credits in schema.org JSON-LD
+        // even when the visible cast table has not been rendered.
+        val structured = MirrorStructuredPeople.parse(document, filmUrl, title, expectedId)
+        fun mergePerson(dest: MutableMap<String, FilmPerson>, incoming: FilmPerson) {
+            val key = incoming.name.trim().lowercase().replace('ё', 'е')
+            val old = dest[key]
+            if (old == null) dest[key] = incoming
+            else dest[key] = old.copy(
+                photo = old.photo.ifBlank { incoming.photo },
+                url = old.url.ifBlank { incoming.url }
+            )
+        }
+        structured.actors.forEach { mergePerson(actors, it) }
+        structured.directors.forEach { mergePerson(directors, it) }
         val imdbId = document.selectFirst(
             "span.imdb a[href], .imdb a[href], a[href*=imdb.com/title/]"
         )?.let { Regex("""tt\d{5,12}""", RegexOption.IGNORE_CASE)
@@ -266,7 +280,12 @@ internal object MirrorHtmlMetadata {
             cast = actors.values.take(20),
             related = related,
             franchise = franchise,
-            franchiseResolved = franchise.isNotEmpty(),
+            // No franchise section is a resolved state, not an endless wait.
+            // A separate franchise URL still needs WebView to load its parts.
+            franchiseResolved = franchise.isNotEmpty() ||
+                document.selectFirst(
+                    "a.b-post__franchise_link_title[href], .b-post__franchise_link_title[href]"
+                ) == null,
             directors = directors.values.take(12),
             voices = voices.values.toList(),
             title = CatalogTitleCleaner.clean(title),
