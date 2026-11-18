@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.delay
 
 /**
  * The permitted official RUTUBE embed, not an HTML scraper or a request to
@@ -38,7 +39,17 @@ internal fun RutubeEmbeddedPlayer(embedUrl: String, onClose: () -> Unit) {
     var error by remember(embedUrl) { mutableStateOf("") }
     var loading by remember(embedUrl) { mutableStateOf(true) }
     var retry by remember(embedUrl) { mutableIntStateOf(0) }
+    var originalPage by remember(embedUrl) { mutableStateOf(false) }
+    val videoPage = "https://rutube.ru/video/${embedUrl.substringAfterLast('/')}/"
     var webView by remember(embedUrl) { mutableStateOf<WebView?>(null) }
+
+    LaunchedEffect(embedUrl, retry, originalPage) {
+        delay(20_000)
+        if (loading && error.isBlank()) {
+            loading = false
+            error = "RUTUBE не ответил. Можно повторить или открыть страницу фильма."
+        }
+    }
 
     DisposableEffect(webView) {
         // Capture the exact instance. Reading mutable state in onDispose
@@ -61,11 +72,17 @@ internal fun RutubeEmbeddedPlayer(embedUrl: String, onClose: () -> Unit) {
                 Text("Назад")
             }
             Spacer(Modifier.weight(1f))
-            Text("Мосфильм · RUTUBE", style = MaterialTheme.typography.bodySmall,
-                color = Color.LightGray)
+            TextButton(onClick = {
+                originalPage = !originalPage
+                retry++
+                error = ""
+                loading = true
+            }) {
+                Text(if (originalPage) "Видеоплеер" else "Страница RUTUBE")
+            }
         }
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-            key(embedUrl, retry) {
+            key(embedUrl, retry, originalPage) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
@@ -115,7 +132,7 @@ internal fun RutubeEmbeddedPlayer(embedUrl: String, onClose: () -> Unit) {
                                 }
                             }
                             webView = this
-                            loadUrl(embedUrl)
+                            loadUrl(if (originalPage) videoPage else embedUrl)
                         }
                     }
                 )
@@ -128,11 +145,19 @@ internal fun RutubeEmbeddedPlayer(embedUrl: String, onClose: () -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(error, color = Color.White)
                     Spacer(Modifier.height(9.dp))
-                    OutlinedButton(onClick = {
-                        error = ""
-                        loading = true
-                        retry++
-                    }) { Text("Повторить") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            error = ""
+                            loading = true
+                            retry++
+                        }) { Text("Повторить") }
+                        OutlinedButton(onClick = {
+                            originalPage = !originalPage
+                            error = ""
+                            loading = true
+                            retry++
+                        }) { Text(if (originalPage) "Видеоплеер" else "Страница RUTUBE") }
+                    }
                 }
             }
         }
