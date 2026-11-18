@@ -53,7 +53,7 @@ internal object CinemetaCatalog {
                     val item = data.optJSONObject(i) ?: continue
                     val url = item.optString("url")
                     val title = item.optString("title").trim().take(180)
-                    if (!isMovieUrl(url) || title.isBlank()) continue
+                    if ((!isMovieUrl(url) && !ArchivePublicCatalog.isArchiveUrl(url)) || title.isBlank()) continue
                     val poster = item.optString("poster").takeIf(MirrorPoster::isPhoto).orEmpty()
                     add(CatalogMovie(url, title, poster, item.optString("details").take(180)))
                 }
@@ -218,7 +218,7 @@ internal object CinemetaCatalog {
     }
 
     suspend fun home(context: Context, tab: String, kind: String): List<CatalogMovie> = coroutineScope {
-        if (tab == "Смотреть") return@coroutineScope InternetArchiveStreams.catalog(context, kind)
+        if (tab == "Смотреть") return@coroutineScope ArchivePublicCatalog.home(kind)
         val types = if (kind == "Фильмы") listOf("movie")
                     else if (kind == "Сериалы") listOf("series")
                     else listOf("movie", "series")
@@ -297,6 +297,8 @@ internal object CinemetaCatalog {
     }
 
     suspend fun metadata(context: Context, url: String): CinemetaDetails = withContext(Dispatchers.IO) {
+        if (ArchivePublicCatalog.isArchiveUrl(url))
+            return@withContext InternetArchiveStreams.details(context, url)
         val (type, id) = identity(url) ?: throw IOException("Неверный идентификатор фильма")
         if (type == "movie" && id == "tt0063350")
             return@withContext InternetArchiveStreams.details(context)
