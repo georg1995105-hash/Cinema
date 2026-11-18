@@ -244,7 +244,7 @@ private fun DetailsBody(
             )
             if (info.description.isNotBlank()) {
                 Text("Описание", style = MaterialTheme.typography.titleMedium)
-                Text(info.description)
+                CinemaSynopsis(info.description)
             }
             val facts = listOf(
                 "Оригинальное название" to info.originalTitle,
