@@ -8,7 +8,8 @@ import java.net.URI
 internal data class MirrorVoice(
     val id: String, val name: String,
     val isCamrip: Int = 0, val isAds: Int = 0, val isDirector: Int = 0,
-    val requiresSubscription: Boolean = false
+    val requiresSubscription: Boolean = false,
+    val favs: String = ""
 )
 internal data class MirrorEpisode(val season: String, val id: String, val label: String)
 internal data class MirrorQuality(val label: String, val url: String, val alternatives: List<String> = emptyList())
@@ -95,7 +96,7 @@ internal object MirrorMediaParser {
         return MirrorMoviePage(
             id, json.optBoolean("series"), voices,
             parseEpisodes(json.optJSONArray("episodes")),
-            json.optString("favs").takeIf { it.matches(Regex("[A-Za-z0-9_+=/-]{1,256}")) }.orEmpty(),
+            sanitizeFavs(json.optString("favs")),
             defaultVoice,
             flags?.let { voiceWithFlags(defaultVoice, "", it) },
             MirrorPreview.expectedDuration(json.optString("runtime"))
@@ -103,11 +104,14 @@ internal object MirrorMediaParser {
     }
 
     private val numericId = Regex("[0-9]{1,12}")
+    internal fun sanitizeFavs(value: String): String =
+        value.trim().takeIf { it.matches(Regex("[A-Za-z0-9_+=/-]{1,256}")) }.orEmpty()
 
     private fun voiceWithFlags(id: String, name: String, item: JSONObject): MirrorVoice =
         MirrorVoice(id, name, item.optInt("isCamrip").coerceIn(0, 1),
             item.optInt("isAds").coerceIn(0, 1), item.optInt("isDirector").coerceIn(0, 1),
-            item.optBoolean("requiresSubscription", false))
+            item.optBoolean("requiresSubscription", false),
+            sanitizeFavs(item.optString("favs")))
 
     fun parseVoices(input: JSONArray?): List<MirrorVoice> = buildList {
         if (input != null) for (index in 0 until minOf(input.length(), 80)) {

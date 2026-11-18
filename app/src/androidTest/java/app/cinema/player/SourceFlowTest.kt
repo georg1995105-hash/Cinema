@@ -150,22 +150,24 @@ class SourceFlowTest {
 
     @Test fun playerResolvesVoiceEpisodesAndAjaxResponsesFromWebView() = withPage(
         """
-        <script type="application/x-fixture">sof.tv.initCDNSeriesEvents(12, 7, 0, 1, 0);</script>
-        <ul id="translators-list"><li data-translator_id="7" class="active">Оригинал</li>
+        <script type="application/x-fixture">sof.tv.initCDNSeriesEvents(12, 7, 1, 2, 0, null, 1, 0);</script>
+        <ul id="translators-list"><li data-translator_id="7" data-ads="1" data-favs="voice-fixture-token" class="active">Оригинал</li>
         <li data-translator-id="8" data-ads="0" data-premium="1">Дубляж</li></ul>
         <table class="b-post__infotable"><tr><th>Время</th><td>43 мин.</td></tr></table>
-        <input id="favs" value="fixture-token">
+        <input id="ctrl_favs" value="fixture-token">
         <script>
         window.fetch = async function(url, request) {
           const body = new URLSearchParams(request.body);
           const correct = url.startsWith('/ajax/get_cdn_series/') && request.method === 'POST' &&
-            request.credentials === 'same-origin' && body.get('id') === '12' && body.get('translator_id') === '7';
+            request.credentials === 'same-origin' && body.get('id') === '12' && body.get('translator_id') === '7' &&
+            body.get('is_camrip') === '0' && body.get('is_ads') === '1' &&
+            body.get('is_director') === '0' && body.get('favs') === 'voice-fixture-token';
           if (correct && body.get('action') === 'get_episodes') {
             const episodes = '<ul id="simple-episodes-list-2"><li class="b-simple_episode__item" data-episode_id="3">Третья серия</li></ul>';
             return {ok:true, status:200, text:async()=>JSON.stringify({success:1,episodes:episodes})};
           }
           if (correct && body.get('action') === 'get_stream' && body.get('season') === '2' &&
-              body.get('episode') === '3' && body.get('favs') === 'fixture-token') {
+              body.get('episode') === '3' && body.get('favs') === 'voice-fixture-token') {
             return {ok:true, status:200, text:async()=>JSON.stringify({success:1,url:'[720p]https://media.example/film.m3u8'})};
           }
           return {ok:false, status:403, text:async()=>'Access denied'};
@@ -177,13 +179,15 @@ class SourceFlowTest {
         assertEquals("12", page.id)
         assertEquals(listOf("Оригинал", "Дубляж"), page.voices.map(MirrorVoice::name))
         assertEquals("7", page.defaultVoice)
+        assertEquals("fixture-token", page.favs)
+        assertEquals("voice-fixture-token", page.voices.first().favs)
         assertEquals(2_580_000L, page.expectedDurationMs)
         assertTrue(MirrorPreview.isPreview(60_000, page.expectedDurationMs))
         assertFalse(page.voices.first().requiresSubscription)
         assertTrue(page.voices.last().requiresSubscription)
         val episodes = runBlocking {
             withContext(Dispatchers.Main) {
-                mirrorAjax(web, film, mapOf("action" to "get_episodes", "id" to page.id, "translator_id" to page.defaultVoice))
+                mirrorAjax(web, film, MirrorPlaybackRequest.episodes(page, page.defaultVoice))
             }
         }
         val response = requireNotNull(episodes?.let(MirrorMediaParser::objectFromWebView))

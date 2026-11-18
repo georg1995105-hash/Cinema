@@ -6,10 +6,24 @@ internal object MirrorVoiceDiscovery {
       function clean(s) { return String(s || '').replace(/\s+/g,' ').trim(); }
       function id(v) { return /^\d{1,12}$/.test(String(v ?? '').trim()) ? String(v).trim() : ''; }
       var init = Array.from(document.scripts).map(function(script) {
-        return (script.textContent || '').match(
+        var source = script.textContent || '';
+        // The reference client has an eight-argument signature for series:
+        // id,translator,season,episode,camrip,other,ads,director.
+        // The older five-argument call must remain supported for old mirrors.
+        var extended = source.match(
+          /\binitCDNSeriesEvents\s*\(\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?\d+['"]?\s*,\s*['"]?\d+['"]?\s*,\s*['"]?(\w+)['"]?\s*,\s*[^,]+\s*,\s*['"]?(\w+)['"]?\s*,\s*['"]?(\w+)['"]?/i
+        );
+        if (extended) {
+          return [extended[0], 'Series', extended[1], extended[2],
+              extended[3], extended[4], extended[5]];
+        }
+        return source.match(
           /\binitCDN(Series|Movies)Events\s*\(\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?(\d{1,12})['"]?(?:\s*,\s*['"]?([01])['"]?\s*,\s*['"]?([01])['"]?(?:\s*,\s*['"]?([01])['"]?)?)?/i
         );
       }).find(Boolean);
+      function initFlag(index) {
+        return /^(?:1|true)$/i.test(String(init?.[index] || '')) ? 1 : 0;
+      }
       var selected = '', voices = [];
       var list = '#translators-list, .b-post__translators, .b-translator';
       var selectors = [
@@ -39,14 +53,15 @@ internal object MirrorVoiceDiscovery {
         function flag(names, index) {
           var explicit = attr(names);
           if (/^[01]$/.test(explicit)) return Number(explicit);
-          return init && init[3] === voiceId && init[index] ? Number(init[index]) : 0;
+          return init && init[3] === voiceId ? initFlag(index) : 0;
         }
         if (name && !voices.some(function(v){return v.id === voiceId})) {
           voices.push({id:voiceId, name:name,
             isCamrip:flag(['data-camrip','data-is-camrip','data-is_camrip'],4),
             isAds:flag(['data-ads','data-is-ads','data-is_ads'],5),
             isDirector:flag(['data-director','data-is-director','data-is_director'],6),
-            requiresSubscription:requiresSubscription});
+            requiresSubscription:requiresSubscription,
+            favs:attr(['data-favs', 'data-fav', 'data-favorites']).slice(0,256)});
         }
         if (attrs.some(function(e) {
           return e.matches('.active, .selected, :checked, [aria-selected="true"]');
@@ -61,7 +76,7 @@ internal object MirrorVoiceDiscovery {
                     document.querySelector('#simple-episodes-tabs, #simple-seasons-tabs, .b-simple_episode__item') ||
                     /^\/series\//i.test(location.pathname)),
         defaultVoice: defaultVoice,
-        flags: {isCamrip:Number(init?.[4] || 0), isAds:Number(init?.[5] || 0), isDirector:Number(init?.[6] || 0)},
+        flags: {isCamrip:initFlag(4), isAds:initFlag(5), isDirector:initFlag(6)},
         voices: voices.slice(0, 45)
       };
     }

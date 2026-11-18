@@ -79,7 +79,7 @@ internal val mirrorPlayerMetadataJavascript = """
         data.defaultVoice || data.voices.length ? 'ready' : root?.querySelector('.b-player__premium') ? 'premium' : 'missing-metadata';
     data.runtime = kinoFilmRuntime();
     data.episodes = kinoEpisodes(document);
-    data.favs = (document.querySelector('#favs, input[name="favs"]')?.value ||
+    data.favs = (document.querySelector('#ctrl_favs, input[name="ctrl_favs"], #favs, input[name="favs"]')?.value ||
         document.querySelector('[data-favs]')?.getAttribute('data-favs') || '').trim();
     return JSON.stringify(data);
 })()
@@ -272,8 +272,8 @@ internal fun MirrorNativePlayer(
         }
     }
 
-    val metadataHandler = remember(context,filmUrl,transportUrl) { Handler(Looper.getMainLooper()) }
-    val web=remember(context,filmUrl,transportUrl) {
+    val metadataHandler = remember(context,filmUrl) { Handler(Looper.getMainLooper()) }
+    val web=remember(context,filmUrl) {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
             settings.javaScriptEnabled=true
@@ -473,7 +473,14 @@ internal fun MirrorNativePlayer(
         val acceptedUrl = fetched.finalUrl.takeIf {
             MirrorFilmUrl.isAllowedResolved(filmUrl, it, mirrors)
         } ?: filmUrl
-        if (acceptedUrl != transportUrl) transportUrl = acceptedUrl
+        if (acceptedUrl != transportUrl) {
+            transportUrl = acceptedUrl
+            // Keep one session WebView alive through native-origin failover.
+            // A recreated WebView loses its pending challenge and AJAX state.
+            if (!SourceRules.sameOrigin(web.url ?: filmUrl, acceptedUrl)) {
+                MirrorGuestSession.loadFilm(web, acceptedUrl)
+            }
+        }
 
         val player = fetched.metadata?.player
         if (movie == null && player != null) {
@@ -522,8 +529,7 @@ internal fun MirrorNativePlayer(
         options = emptyList()
         error = ""
         message = "Загружаем список серий"
-        val payload = mapOf("action" to "get_episodes", "id" to item.id,
-            "translator_id" to voice)
+        val payload = MirrorPlaybackRequest.episodes(item, voice)
         var raw: String? = MirrorNetworkSource.playback(pageUrl, payload,
             WebSettings.getDefaultUserAgent(context))
         var response = raw?.let(MirrorMediaParser::objectFromWebView)

@@ -54,13 +54,12 @@ internal object MirrorHttp {
             if (referer != null && SourceRules.sameOrigin(referer, address)) {
                 val cookies = MirrorSitePolicy.cookieScopes(address)
                     .mapNotNull { manager.getCookie(it)?.takeIf(String::isNotBlank) }
-                    .toMutableList()
-                if (MirrorSitePolicy.isRecognizedMirror(address)) {
-                    // Reference CookieJar forces this app-profile cookie. Put it
-                    // first so a stale persisted hdmbbs=0 cannot override it.
-                    cookies.add(0, "hdmbbs=1")
-                }
-                MirrorSitePolicy.mergeCookieHeaders(cookies).takeIf(String::isNotBlank)
+                val header = if (MirrorSitePolicy.isRecognizedMirror(address)) {
+                    // Actual reference guest CookieJar: use the public app profile
+                    // and Anubis, not the user's unrelated account credentials.
+                    MirrorGuestCookies.fromStoredCookies(cookies)
+                } else MirrorSitePolicy.mergeCookieHeaders(cookies)
+                header.takeIf(String::isNotBlank)
                     ?.let { scoped.header("Cookie", it) }
             }
             val response = chain.proceed(scoped.build())

@@ -109,7 +109,7 @@ class MirrorHtmlMetadataTest {
           <div class="b-post">
             <h1 class="b-post__title">Бригада</h1>
             <div class="b-post__description_text">Сериал.</div>
-            <input type="hidden" id="favs" value="abc_12"/>
+            <input type="hidden" id="ctrl_favs" value="abc_12"/>
             <ul id="translators-list">
               <li data-translator_id="17">Обычная</li>
             </ul>
@@ -121,6 +121,60 @@ class MirrorHtmlMetadataTest {
         val fields = MirrorPlaybackRequest.stream(player, "17", "1", "1")
         assertEquals("abc_12", fields["favs"])
         assertEquals("get_stream", fields["action"])
+    }
+
+    @Test fun preservesDifferentSourceIssuedFavsForEachSeriesTranslator() {
+        val html = """
+          <div class="b-post">
+          <h1 class="b-post__title">Сериал</h1>
+          <div class="b-post__description_text">Сериал и его озвучки.</div>
+          <input id="favs" value="globalFallback"/>
+          <ul id="translators-list">
+            <li data-translator_id="17" data-favs="favsVoice17"
+                data-ads="1" class="active">Обычная</li>
+            <li data-translator_id="18" data-favs="favsVoice18"
+                data-ads="0">Другой перевод</li>
+          </ul>
+          <script>initCDNSeriesEvents(123,17,0,1,0);</script>
+          </div>
+        """
+        val page = requireNotNull(MirrorHtmlMetadata.parse(url, html).player)
+        assertEquals("favsVoice17", MirrorPlaybackRequest.stream(page, "17", "1", "1")["favs"])
+        assertEquals("favsVoice18", MirrorPlaybackRequest.stream(page, "18", "1", "1")["favs"])
+        assertEquals("1", MirrorPlaybackRequest.stream(page, "17", "1", "1")["is_ads"])
+        assertEquals("0", MirrorPlaybackRequest.stream(page, "18", "1", "1")["is_ads"])
+    }
+
+    @Test fun selectedTranslatorInheritsInitFlagsWhenNoDataAttributesExist() {
+        val html = """
+          <div class="b-post">
+            <h1 class="b-post__title">Сериал</h1>
+            <div class="b-post__description_text">Описание.</div>
+            <ul id="translators-list"><li data-translator_id="17" class="active">Обычная</li></ul>
+            <script>initCDNSeriesEvents(123,17,0,1,0);</script>
+          </div>
+        """
+        val player = requireNotNull(MirrorHtmlMetadata.parse(url, html).player)
+        assertEquals("1", MirrorPlaybackRequest.stream(
+            player, "17", "1", "1")["is_ads"])
+    }
+
+    @Test fun nativeSeriesParserUsesEightArgumentInitFromReference() {
+        val html = """
+          <div class="b-post">
+            <h1 class="b-post__title">Сериал</h1>
+            <div class="b-post__description_text">Описание.</div>
+            <ul id="translators-list">
+              <li data-translator_id="17" class="active">Обычная</li>
+            </ul>
+            <script>initCDNSeriesEvents(123,17,1,5,0,null,1,0);</script>
+          </div>
+        """
+        val page = requireNotNull(MirrorHtmlMetadata.parse(url, html).player)
+        assertTrue(page.isSeries)
+        assertEquals("17", page.defaultVoice)
+        assertEquals("1", MirrorPlaybackRequest.stream(page, "17", "1", "5")["is_ads"])
+        assertEquals("0", MirrorPlaybackRequest.stream(page, "17", "1", "5")["is_camrip"])
     }
 
 }
