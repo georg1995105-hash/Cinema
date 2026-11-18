@@ -665,10 +665,9 @@ internal fun FilmDetails(
         } else effectiveVoices
         chosenVoice = savedSelection?.voice?.takeIf { id ->
             initialVoices.any { it.id == id }
-        } ?: if (chosenProvider == "rezka") {
-            sourceDefaultVoice.takeIf { id -> initialVoices.any { it.id == id } }
-        } else null
-            ?: initialVoices.firstOrNull()?.id.orEmpty()
+        } ?: sourceDefaultVoice.takeIf { id ->
+            chosenProvider == "rezka" && initialVoices.any { it.id == id }
+        } ?: initialVoices.firstOrNull()?.id.orEmpty()
     }
 
     val pictures = (current?.posters.orEmpty() + movie.poster + movie.posterAlternatives)
@@ -745,10 +744,9 @@ internal fun FilmDetails(
                             } else effectiveVoices
                             chosenVoice = savedSelection?.voice?.takeIf { id ->
                                 initialVoices.any { it.id == id }
-                            } ?: if (chosenProvider == "rezka") {
-                                sourceDefaultVoice.takeIf { id -> initialVoices.any { it.id == id } }
-                            } else null
-                                ?: initialVoices.firstOrNull()?.id.orEmpty()
+                            } ?: sourceDefaultVoice.takeIf { id ->
+                                chosenProvider == "rezka" && initialVoices.any { it.id == id }
+                            } ?: initialVoices.firstOrNull()?.id.orEmpty()
                             showWatchMenu = true
                         },
                             modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) {
