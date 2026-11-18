@@ -54,6 +54,12 @@ internal object MirrorHttp {
             if (referer != null && SourceRules.sameOrigin(referer, address)) {
                 val cookies = MirrorSitePolicy.cookieScopes(address)
                     .mapNotNull { manager.getCookie(it)?.takeIf(String::isNotBlank) }
+                    .toMutableList()
+                // The reference client's CookieJar always supplies this Rezka cookie.
+                // It is part of the ordinary app request profile, not an auth bypass.
+                if (MirrorSitePolicy.isRecognizedMirror(address)) {
+                    cookies += "hdmbbs=1"
+                }
                 MirrorSitePolicy.mergeCookieHeaders(cookies).takeIf(String::isNotBlank)
                     ?.let { scoped.header("Cookie", it) }
             }
