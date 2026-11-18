@@ -154,7 +154,7 @@ class SourceFlowTest {
         <ul id="translators-list"><li data-translator_id="7" data-ads="1" data-favs="voice-fixture-token" class="active">Оригинал</li>
         <li data-translator-id="8" data-ads="0" data-premium="1">Дубляж</li></ul>
         <table class="b-post__infotable"><tr><th>Время</th><td>43 мин.</td></tr></table>
-        <input id="favs" value="fixture-token">
+        <input id="ctrl_favs" value="fixture-token">
         <script>
         window.fetch = async function(url, request) {
           const body = new URLSearchParams(request.body);
@@ -179,6 +179,8 @@ class SourceFlowTest {
         assertEquals("12", page.id)
         assertEquals(listOf("Оригинал", "Дубляж"), page.voices.map(MirrorVoice::name))
         assertEquals("7", page.defaultVoice)
+        assertEquals("fixture-token", page.favs)
+        assertEquals("voice-fixture-token", page.voices.first().favs)
         assertEquals(2_580_000L, page.expectedDurationMs)
         assertTrue(MirrorPreview.isPreview(60_000, page.expectedDurationMs))
         assertFalse(page.voices.first().requiresSubscription)
