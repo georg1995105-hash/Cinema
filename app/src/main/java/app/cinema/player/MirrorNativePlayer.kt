@@ -56,6 +56,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -91,9 +93,8 @@ internal val mirrorPlayerMetadataJavascript = """
 private suspend fun mirrorBrowserReady(web: WebView, pageUrl: String): Boolean =
     withTimeoutOrNull(8_000L) {
         while (true) {
-            val ready = suspendCancellableCoroutine<Boolean> { continuation ->
-                web.post {
-                    if (!continuation.isActive) return@post
+            val ready = withContext(Dispatchers.Main.immediate) {
+                suspendCancellableCoroutine<Boolean> { continuation ->
                     val script = """
                         (function() {
                           try {
