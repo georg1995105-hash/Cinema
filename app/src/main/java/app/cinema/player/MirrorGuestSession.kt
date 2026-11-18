@@ -26,10 +26,11 @@ internal object MirrorGuestSession {
         // The callback guarantees the cookie update is committed before the
         // navigation and its first same-origin AJAX request are started.
         manager.setCookie("$origin/", profileCookie) {
-            view.post {
-                runCatching {
-                    view.loadUrl(address, MirrorSitePolicy.webViewHeaders(address))
-                }
+            // WebView.loadUrl must run on the view's main Looper. CookieManager
+            // invokes this callback on the same Looper as setCookie(); calling
+            // view.post here can stall on a not-yet-attached hidden WebView.
+            runCatching {
+                view.loadUrl(address, MirrorSitePolicy.webViewHeaders(address))
             }
         }
     }
