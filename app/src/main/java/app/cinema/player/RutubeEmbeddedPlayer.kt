@@ -41,11 +41,14 @@ internal fun RutubeEmbeddedPlayer(embedUrl: String, onClose: () -> Unit) {
     var webView by remember(embedUrl) { mutableStateOf<WebView?>(null) }
 
     DisposableEffect(webView) {
+        // Capture the exact instance. Reading mutable state in onDispose
+        // would destroy the NEW WebView when it first replaces null.
+        val ownedView = webView
         onDispose {
-            webView?.onPause()
-            webView?.stopLoading()
-            webView?.loadUrl("about:blank")
-            webView?.destroy()
+            ownedView?.onPause()
+            ownedView?.stopLoading()
+            ownedView?.loadUrl("about:blank")
+            ownedView?.destroy()
         }
     }
 
