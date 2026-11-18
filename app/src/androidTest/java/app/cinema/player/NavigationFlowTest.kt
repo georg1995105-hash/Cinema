@@ -28,8 +28,8 @@ class NavigationFlowTest {
             compose.onNodeWithText("Избранное пока пусто").assertIsDisplayed()
 
             compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
-            compose.onNodeWithText("Источники и зеркала").performClick()
-            compose.onNodeWithText("Адрес сайта").assertIsDisplayed()
+            compose.onNodeWithText("Каталог работает без зеркал и авторизации.", substring = true)
+                .assertIsDisplayed()
             compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
             compose.onNodeWithText("Внешний вид").performClick()
             compose.onNodeWithText("Тёмная тема").assertIsDisplayed()
