@@ -227,4 +227,31 @@ class MirrorHtmlMetadataTest {
         assertEquals("0", MirrorPlaybackRequest.stream(page, "17", "1", "5")["is_camrip"])
     }
 
+
+    @Test fun sourceDivColumnsProvideCountryGenreYearAndActorPortrait() {
+        val html = """
+          <article class="b-post">
+            <div class="b-post__title"><h1>Тестовый сериал</h1></div>
+            <div class="b-post__description_text">Сюжет тестового сериала.</div>
+            <div class="b-post__infotable_left">
+              <div><span>Год</span><span>2008-2015</span></div>
+              <div><span>Страна</span><span>США</span></div>
+            </div>
+            <div class="b-post__infotable_right_inner">
+              <div><span>Жанр</span><span>Триллеры, драмы</span></div>
+              <div><span>В ролях</span>
+                <span><a href="/person/5/" data-pid="5"
+                  data-photo="/images/actor5.jpg">Актёр с фото</a></span>
+              </div>
+            </div>
+          </article>
+        """
+        val info = requireNotNull(MirrorHtmlMetadata.parse(url, html).info)
+        assertEquals("2008-2015", info.facts.first { it.first == "Год" }.second)
+        assertEquals("США", info.facts.first { it.first == "Страна" }.second)
+        assertEquals("Триллеры, драмы", info.facts.first { it.first == "Жанр" }.second)
+        assertEquals("Актёр с фото", info.cast.single().name)
+        assertEquals("https://rezka.example/images/actor5.jpg", info.cast.single().photo)
+    }
+
 }
