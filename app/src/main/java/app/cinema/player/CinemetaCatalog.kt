@@ -121,7 +121,16 @@ internal object CinemetaCatalog {
     // series record. Better to show no art until a separately ID-verified
     // source supplies the correct image than mislabel somebody else's film.
     internal fun trustedPoster(movieUrl: String, provided: String): String {
-        if (identity(movieUrl) == ("series" to "tt0337898")) return ""
+        if (identity(movieUrl) == ("series" to "tt0337898")) {
+            val origin = runCatching { URI(provided) }.getOrNull()
+            // Persist an independently ID-verified TVmaze image, but never
+            // reuse the known-wrong cover returned by Cinemeta/old snapshots.
+            return provided.takeIf {
+                MirrorPoster.isPhoto(it) &&
+                    origin?.scheme == "https" && origin.host == "static.tvmaze.com" &&
+                    origin.path.startsWith("/uploads/images/")
+            }.orEmpty()
+        }
         return provided.takeIf(MirrorPoster::isPhoto).orEmpty()
     }
 
