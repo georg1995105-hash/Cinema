@@ -364,6 +364,13 @@ internal fun CatalogGrid(
     var problem by remember(requestUrl, attempt) { mutableStateOf("") }
     var challengeActive by remember(requestUrl, attempt) { mutableStateOf(false) }
     fun recoverEmptyCatalog(reason: String) {
+        // The selected WebView may fail with HTTP403 before the parallel native
+        // fallback has checked an actually usable mirror. Do not tear down that
+        // attempt or navigate through unrelated categories prematurely.
+        if (!nativeSearchChecked) {
+            problem = reason
+            return
+        }
         if (!useUnfiltered && requestOverride == null && section != "Новинки") {
             useUnfiltered = true
         } else if (!useRootFallback && requestOverride == null) {
@@ -377,9 +384,9 @@ internal fun CatalogGrid(
     }
     // Page callbacks are not guaranteed after a network stall or blocked navigation.
     // Bound each load, then try only the standard category once before showing an error.
-    LaunchedEffect(requestUrl, attempt, loadContent, challengeActive) {
+    LaunchedEffect(requestUrl, attempt, loadContent, nativeSearchChecked, challengeActive) {
         if (loadContent && pending) {
-            delay(if (challengeActive) 28_000L else 18_000L)
+            delay(if (challengeActive) 28_000L else if (nativeSearchChecked) 8_000L else 18_000L)
             if (pending) recoverEmptyCatalog(
                 if (challengeActive) "Зеркало не завершило проверку браузера."
                 else "Источник не завершил загрузку каталога. Проверьте доступность зеркала."
