@@ -407,6 +407,7 @@ internal fun FilmDetails(
     var loadError by remember(movie.url, preferredFilmUrl) { mutableStateOf("") }
     var browserChallengeActive by remember(movie.url, preferredFilmUrl) { mutableStateOf(false) }
     var resolvedFilmUrl by remember(movie.url, preferredFilmUrl) { mutableStateOf(preferredFilmUrl) }
+    var networkResolvedUrl by remember(movie.url, preferredFilmUrl) { mutableStateOf<String?>(null) }
     var resolvedPlayer by remember(movie.url, preferredFilmUrl) { mutableStateOf<MirrorMoviePage?>(null) }
     // A real HTTP session can deliver metadata even when the hidden WebView stalls.
     // It is independent of the WebView parser, but shares Android's mirror cookies.
@@ -415,6 +416,7 @@ internal fun FilmDetails(
             preferredFilmUrl, sources, WebSettings.getDefaultUserAgent(context))
         if (MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, result.finalUrl, sources)) {
             resolvedFilmUrl = result.finalUrl
+            if (result.finalUrl != preferredFilmUrl) networkResolvedUrl = result.finalUrl
         }
         result.metadata?.player?.let { resolvedPlayer = it }
         val parsed = result.metadata?.info
@@ -627,12 +629,13 @@ internal fun FilmDetails(
     // Do not recreate the WebView during a same-origin Anubis/redirect flow.
     // When the native response picks a different mirror, navigate the existing
     // WebView only after it is no longer completing a browser challenge.
-    LaunchedEffect(webView, resolvedFilmUrl, browserChallengeActive) {
+    LaunchedEffect(webView, networkResolvedUrl, browserChallengeActive) {
         val view = webView ?: return@LaunchedEffect
-        if (!browserChallengeActive && resolvedFilmUrl != preferredFilmUrl &&
-            !SourceRules.sameOrigin(view.url.orEmpty(), resolvedFilmUrl) &&
-            MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, resolvedFilmUrl, sources)) {
-            view.loadUrl(resolvedFilmUrl, MirrorSitePolicy.webViewHeaders(resolvedFilmUrl))
+        val target = networkResolvedUrl ?: return@LaunchedEffect
+        if (!browserChallengeActive &&
+            !SourceRules.sameOrigin(view.url.orEmpty(), target) &&
+            MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, target, sources)) {
+            view.loadUrl(target, MirrorSitePolicy.webViewHeaders(target))
         }
     }
     DisposableEffect(webView) {
