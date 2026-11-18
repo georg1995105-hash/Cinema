@@ -133,18 +133,18 @@ jobs:
           CERTIFICATE="$(awk -F': ' '/certificate SHA-256 digest: /{print $NF}' <<< "$SIGNER" | sort -u)"
           test "$CERTIFICATE" = '1db504f66fa39cf51feefab727f5b8b229baef08a5ae2de80da05191514f93cb'
           sha256sum "$APK"
-      - name: Verify signed Android update from 0.4.26
+      - name: Verify signed Android update from 0.4.27
         if: steps.signing.outputs.available == 'true'
         shell: bash
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           curl --fail --silent --show-error --location --retry 2 \
-            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.26/Cinema-0.4.26.apk" \
-            --output "$RUNNER_TEMP/Cinema-0.4.26.apk"
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.27/Cinema-0.4.27.apk" \
+            --output "$RUNNER_TEMP/Cinema-0.4.27.apk"
           if adb shell pm path app.cinema.player | grep -q "^package:"; then
             adb uninstall app.cinema.player
           fi
-          adb install "$RUNNER_TEMP/Cinema-0.4.26.apk"
+          adb install "$RUNNER_TEMP/Cinema-0.4.27.apk"
           adb shell am start -W -n app.cinema.player/.MainActivity | grep -F "Status: ok"
           ORIGINAL_INSTALL="$(adb shell dumpsys package app.cinema.player | awk -F= '/firstInstallTime=/{print $2; exit}')"
           test -n "$ORIGINAL_INSTALL"
@@ -184,4 +184,4 @@ jobs:
           gh release create "$TAG" "$RUNNER_TEMP/Cinema-$VERSION.apk" \
             --target "$GITHUB_SHA" \
             --title "Cinema $VERSION" \
-            --notes "Cinema 0.4.27: ручной выбор зеркала теперь определяет, с какого HTTPS-адреса реально открывается фильм, в том числе из старой истории. Основное зеркало проверяется первым, запасные не подменяют доступные озвучки. Скрытый WebView не пересоздаётся при смене адреса и не закрывается до получения сведений плеера; неуспешная загрузка показывает причину. Android TLS тест подтверждает приоритет выбранного источника. CI проверяет сборку, тесты, постоянную подпись и установку поверх 0.4.26."
+            --notes "Cinema 0.4.28: сохраняет приоритет выбранного зеркала из 0.4.27 и дополняет сетевой профиль по референсной APK. Добавлен полный публичный Rezka mirror pool вместо первых девяти fallback-адресов, при этом выбранное зеркало по-прежнему проверяется первым. Failover использует до шести параллельных workers и продолжает весь pool без batch-barrier. Same-origin Rezka-запросы принудительно получают hdmbbs=1 даже при старом hdmbbs=0 в CookieManager. Android regression проверяет hdmbbs → Anubis PoW → auth cookie → повтор страницы → озвучки, а отдельный тест фиксирует зеркала после прежнего лимита. CI проверяет сборку, Android instrumentation, подпись и обновление поверх 0.4.27."
