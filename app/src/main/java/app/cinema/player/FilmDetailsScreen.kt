@@ -414,12 +414,7 @@ internal fun FilmDetails(
     LaunchedEffect(movie.url) {
         val result = MirrorNetworkSource.resolveFilm(
             movie.url, sources, WebSettings.getDefaultUserAgent(context))
-        val samePost = MirrorPostId.fromUrl(movie.url) != null &&
-            MirrorPostId.fromUrl(movie.url) == MirrorPostId.fromUrl(result.finalUrl)
-        val allowedMirror = (listOf(movie.url) + sources).any {
-            SourceRules.sameOrigin(it, result.finalUrl)
-        }
-        if (samePost && allowedMirror && SourceRules.isValidHttpsUrl(result.finalUrl)) {
+        if (MirrorFilmUrl.isAllowedResolved(movie.url, result.finalUrl, sources)) {
             resolvedFilmUrl = result.finalUrl
         }
         result.metadata?.player?.let { resolvedPlayer = it }
