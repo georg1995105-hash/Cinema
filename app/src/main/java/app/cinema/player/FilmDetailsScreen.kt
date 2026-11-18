@@ -408,6 +408,7 @@ internal fun FilmDetails(
     var loadDone by remember(movie.url, preferredFilmUrl) { mutableStateOf(false) }
     var loadError by remember(movie.url, preferredFilmUrl) { mutableStateOf("") }
     var browserChallengeActive by remember(movie.url, preferredFilmUrl) { mutableStateOf(false) }
+    var networkFinished by remember(movie.url, preferredFilmUrl) { mutableStateOf(false) }
     var resolvedFilmUrl by remember(movie.url, preferredFilmUrl) { mutableStateOf(preferredFilmUrl) }
     var networkResolvedUrl by remember(movie.url, preferredFilmUrl) { mutableStateOf<String?>(null) }
     var resolvedPlayer by remember(movie.url, preferredFilmUrl, verifiedPlayer) {
@@ -416,6 +417,7 @@ internal fun FilmDetails(
     // A real HTTP session can deliver metadata even when the hidden WebView stalls.
     // It is independent of the WebView parser, but shares Android's mirror cookies.
     LaunchedEffect(movie.url, preferredFilmUrl, sources) {
+        networkFinished = false
         val result = MirrorNetworkSource.resolveFilm(
             preferredFilmUrl, sources, WebSettings.getDefaultUserAgent(context))
         if (MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, result.finalUrl, sources)) {
@@ -434,24 +436,20 @@ internal fun FilmDetails(
             // A cached description cannot turn a rejected film page into a working player.
             loadError = result.reason
         }
+        networkFinished = true
     }
-    LaunchedEffect(movie.url, preferredFilmUrl, browserChallengeActive) {
-        if (!loadDone) {
-            // The reference client explicitly completes Anubis before reading
-            // Rezka metadata. Give the site's own WebView challenge time to finish.
-            delay(if (browserChallengeActive) 32_000 else 15_000)
-            if (!browserChallengeActive) {
-                if (info == null && loadError.isBlank())
-                    loadError = "Зеркало не предоставило сведения о фильме."
-                loadDone = true
-            } else {
-                // Partial cached/HTTP metadata must not leave the screen in an
-                // endless loading state when the browser challenge stalls.
-                if (info == null && loadError.isBlank())
-                    loadError = "Зеркало не завершило проверку браузера."
-                loadDone = true
-            }
+    LaunchedEffect(movie.url, preferredFilmUrl, browserChallengeActive, networkFinished) {
+        // Do not close the browser while the native resolver is still trying
+        // the selected film and its safe fallback origins.
+        if (loadDone || !networkFinished) return@LaunchedEffect
+        delay(if (browserChallengeActive) 32_000 else 8_000)
+        if (loadDone || !networkFinished) return@LaunchedEffect
+        if (resolvedPlayer == null && loadError.isBlank()) {
+            loadError = if (browserChallengeActive)
+                "Зеркало не завершило проверку браузера."
+            else "Источник не предоставил действительные сведения плеера."
         }
+        loadDone = true
     }
     var showWatchMenu by remember(movie.url, preferredFilmUrl) { mutableStateOf(false) }
     var chosenVoice by remember(movie.url, preferredFilmUrl) { mutableStateOf("") }
@@ -567,6 +565,10 @@ internal fun FilmDetails(
                                         scanningUrl = null
                                     } else if (resolvedPlayer != null) {
                                         loadDone = true
+                                    } else {
+                                        // A protected film may populate its player metadata
+                                        // after this snapshot; permit another browser scan.
+                                        scanningUrl = null
                                     }
                                 }
                             }
