@@ -78,7 +78,7 @@ private fun selectOrdinalTrack(player: ExoPlayer, tracks: Tracks, type: Int, ord
     return false
 }
 
-@OptIn(UnstableApi::class)
+@OptIn(UnstableApi::class, ExperimentalMaterial3Api::class)
 @Composable
 internal fun CollapseNativePlayer(
     filmTitle: String,
