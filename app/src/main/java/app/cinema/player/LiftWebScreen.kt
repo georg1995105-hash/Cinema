@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Fullscreen
+import androidx.compose.material.icons.outlined.FullscreenExit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -77,13 +80,16 @@ internal fun LiftWebScreen(
     var choices by remember(title) { mutableStateOf<List<LiftFilmMatch>>(emptyList()) }
     var foundDetails by remember(title) { mutableStateOf(false) }
     var lookupMessage by remember(title) { mutableStateOf("") }
-    val alive = remember(title) { AtomicBoolean(true) }
+    var browserGeneration by remember(title) { mutableIntStateOf(0) }
+    var loadCycle by remember(title) { mutableIntStateOf(0) }
+    val alive = remember(title, browserGeneration) { AtomicBoolean(true) }
+    var expanded by remember(title) { mutableStateOf(false) }
     var fullscreenView by remember { mutableStateOf<View?>(null) }
     var fullscreenCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
     val selectedTitle = remember(title) { LiftWebSource.safeTitle(title) }
     val start = remember(title) { LiftWebSource.startUrl(selectedTitle) }
 
-    val browser = remember(ctx, title) {
+    val browser = remember(ctx, title, browserGeneration) {
         WebView(ctx).apply {
             setBackgroundColor(AndroidColor.rgb(19, 24, 28))
             settings.javaScriptEnabled = true
@@ -101,15 +107,16 @@ internal fun LiftWebScreen(
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             webChromeClient = object : WebChromeClient() {
                 override fun onShowCustomView(view: View, callback: CustomViewCallback) {
-                    fullscreenCallback?.onCustomViewHidden()
+                    if (fullscreenView != null) onHideCustomView()
                     fullscreenCallback = callback
                     fullscreenView = view
                 }
 
                 override fun onHideCustomView() {
-                    fullscreenView = null
-                    fullscreenCallback?.onCustomViewHidden()
+                    val previous = fullscreenCallback
                     fullscreenCallback = null
+                    fullscreenView = null
+                    previous?.onCustomViewHidden()
                 }
             }
             webViewClient = object : WebViewClient() {
@@ -165,6 +172,7 @@ internal fun LiftWebScreen(
                 }
 
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                    loadCycle++
                     loading = true
                     failure = ""
                 }
@@ -193,6 +201,19 @@ internal fun LiftWebScreen(
                         failure = "Lift ответил HTTP ${errorResponse.statusCode}."
                     }
                 }
+
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    // WebView cannot be used after renderer termination. Replace it
+                    // without killing the Activity or retaining a dead player.
+                    (view.parent as? ViewGroup)?.removeView(view)
+                    fullscreenView = null
+                    fullscreenCallback = null
+                    matching = selectedTitle.isNotBlank()
+                    foundDetails = false
+                    choices = emptyList()
+                    browserGeneration++
+                    return true
+                }
             }
             loadUrl(start)
         }
@@ -211,10 +232,16 @@ internal fun LiftWebScreen(
             if (selectedTitle.isNotBlank()) browser.loadUrl(start)
             else browser.reload()
         }
+    }
+
+    // Timeout belongs to the current page navigation, not to the lifetime
+    // of the WebView. A later video navigation must get its own timeout.
+    LaunchedEffect(browser, loadCycle) {
+        if (!loading) return@LaunchedEffect
         delay(22_000)
         if (loading && failure.isEmpty()) {
             loading = false
-            failure = "Lift не загрузился за 22 секунды. Повторите или проверьте сеть."
+            failure = "Страница не ответила за 22 секунды. Повторите загрузку."
         }
     }
 
@@ -224,23 +251,29 @@ internal fun LiftWebScreen(
             fullscreenCallback?.onCustomViewHidden()
             fullscreenCallback = null
             fullscreenView = null
-            browser.stopLoading()
-            browser.onPause()
-            browser.destroy()
+            runCatching { browser.stopLoading() }
+            runCatching { browser.onPause() }
+            runCatching { browser.destroy() }
         }
     }
 
     BackHandler {
         if (fullscreenView != null) {
             browser.webChromeClient?.onHideCustomView()
+        } else if (expanded) {
+            expanded = false
         } else if (browser.canGoBack()) {
             browser.goBack()
         } else onClose()
     }
 
+    // The HTML5 player requests WebChromeClient full-screen. A manual
+    // expand control is also available for player sites that omit that API.
+    if (fullscreenView != null || expanded) PlayerImmersiveLifecycle(fullscreenView ?: browser)
+
     Box(Modifier.fillMaxSize().background(appBackground)) {
         Column(Modifier.fillMaxSize()) {
-            Row(
+            if (!expanded && fullscreenView == null) Row(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -259,9 +292,23 @@ internal fun LiftWebScreen(
                 IconButton(onClick = { refresh++ }) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "Повторить загрузку")
                 }
+                IconButton(onClick = { expanded = true }) {
+                    Icon(Icons.Outlined.Fullscreen, contentDescription = "На весь экран")
+                }
             }
             Box(Modifier.fillMaxSize()) {
                 AndroidView(factory = { browser }, modifier = Modifier.fillMaxSize())
+                if (expanded && fullscreenView == null) {
+                    IconButton(
+                        onClick = { expanded = false },
+                        modifier = Modifier.align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .background(appPanel.copy(alpha = 0.9f))
+                    ) {
+                        Icon(Icons.Outlined.FullscreenExit,
+                            contentDescription = "Выйти из полного экрана")
+                    }
+                }
                 if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 if (matching && !foundDetails && failure.isBlank()) {
                     Surface(
