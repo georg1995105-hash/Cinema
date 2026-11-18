@@ -17,13 +17,32 @@ class MirrorPlaybackRequestTest {
         assertEquals("1",payload["is_director"])
         assertEquals("AbC123",payload["favs"])
     }
-    @Test fun seriesHasEpisodeParametersWithoutMovieFlags() {
-        val page=MirrorMoviePage("222",true,listOf(MirrorVoice("2","Озвучка")),emptyList())
-        val fields=MirrorPlaybackRequest.stream(page,"2","1","4")
-        assertEquals("get_stream",fields["action"])
-        assertEquals("1",fields["season"])
-        assertEquals("4",fields["episode"])
-        assertFalse(fields.containsKey("is_ads"))
+    @Test fun seriesHasTranslatorFlagsJustLikeTheReferenceApk() {
+        val page = MirrorMoviePage("222", true,
+            listOf(MirrorVoice("2", "Перевод", isCamrip=1, isAds=1, isDirector=0,
+                favs="perVoice42")), emptyList(), favs="staleFilmValue")
+        val fields = MirrorPlaybackRequest.stream(page, "2", "1", "4")
+        assertEquals("get_stream", fields["action"])
+        assertEquals("1", fields["season"])
+        assertEquals("4", fields["episode"])
+        assertEquals("1", fields["is_camrip"])
+        assertEquals("1", fields["is_ads"])
+        assertEquals("0", fields["is_director"])
+        assertEquals("perVoice42", fields["favs"])
+        val episodeQuery = MirrorPlaybackRequest.episodes(page, "2")
+        assertEquals("get_episodes", episodeQuery["action"])
+        assertEquals("1", episodeQuery["is_camrip"])
+        assertEquals("perVoice42", episodeQuery["favs"])
+        assertFalse(episodeQuery.containsKey("season"))
+    }
+
+    @Test fun selectingAnotherTranslatorDoesNotLeakPreviousTranslatorsFavs() {
+        val page = MirrorMoviePage("42", true, listOf(
+            MirrorVoice("1", "Первая", favs="first"),
+            MirrorVoice("2", "Вторая", favs="second")
+        ), emptyList())
+        assertEquals("first", MirrorPlaybackRequest.stream(page, "1", "1", "1")["favs"])
+        assertEquals("second", MirrorPlaybackRequest.stream(page, "2", "1", "1")["favs"])
     }
     @Test fun rejectsNonNumericIdsInsteadOfGuessing() {
         val movie=MirrorMoviePage("",false,emptyList(),emptyList())
