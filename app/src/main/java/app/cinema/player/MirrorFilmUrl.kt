@@ -4,6 +4,14 @@ import java.net.URI
 
 /** Change only the HTTPS origin while retaining this exact film's path and ID. */
 internal object MirrorFilmUrl {
+    fun isAllowedResolved(filmUrl: String, resolvedUrl: String, mirrors: List<String>): Boolean {
+        if (!SourceRules.isValidHttpsUrl(filmUrl) || !SourceRules.isValidHttpsUrl(resolvedUrl))
+            return false
+        val expectedId = MirrorPostId.fromUrl(filmUrl) ?: return false
+        if (MirrorPostId.fromUrl(resolvedUrl) != expectedId) return false
+        return (listOf(filmUrl) + mirrors).any { SourceRules.sameOrigin(it, resolvedUrl) }
+    }
+
     fun changeOrigin(filmUrl: String, mirror: String): String? {
         if (!SourceRules.isValidHttpsUrl(filmUrl) ||
             !SourceRules.isValidHttpsUrl(mirror)) return null
