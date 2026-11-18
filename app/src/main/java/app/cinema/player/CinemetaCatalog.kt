@@ -222,9 +222,10 @@ internal object CinemetaCatalog {
     }
 
     suspend fun home(context: Context, tab: String, kind: String): List<CatalogMovie> = coroutineScope {
-        if (tab == "Смотреть") return@coroutineScope
-            (MosfilmCatalog.catalog(kind) + ArchivePublicCatalog.home(kind))
-                .distinctBy { it.url }
+        if (tab == "Смотреть") {
+            return@coroutineScope (MosfilmCatalog.catalog(kind) +
+                ArchivePublicCatalog.home(kind)).distinctBy { it.url }
+        }
         val types = if (kind == "Фильмы") listOf("movie")
                     else if (kind == "Сериалы") listOf("series")
                     else listOf("movie", "series")
