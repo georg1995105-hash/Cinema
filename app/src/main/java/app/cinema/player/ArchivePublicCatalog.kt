@@ -103,7 +103,7 @@ internal object ArchivePublicCatalog {
     private fun discover(): List<CatalogMovie> {
         val now = System.currentTimeMillis()
         discoveryCache?.let { (time, cards) ->
-            if (now - time in 0..300_000L) return cards
+            if (now - time in 0L..300_000L) return cards
         }
         val queryUrl = HttpUrl.Builder().scheme("https").host("archive.org")
             .addPathSegment("advancedsearch.php")
