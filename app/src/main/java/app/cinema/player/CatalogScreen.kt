@@ -101,7 +101,7 @@ internal object MirrorCatalog {
         .build()
 
     /** Native first: a WebView challenge or lifecycle failure must not hide an accessible catalog. */
-    suspend fun read(pageUrl: String, userAgent: String): List<CatalogMovie> =
+    suspend fun read(pageUrl: String, userAgent: String, transport: OkHttpClient = client): List<CatalogMovie> =
         withContext(Dispatchers.IO) {
             if (!SourceRules.isValidHttpsUrl(pageUrl)) return@withContext emptyList()
             runCatching {
@@ -113,7 +113,7 @@ internal object MirrorCatalog {
                         MirrorSitePolicy.requestHeaders(pageUrl, userAgent)
                             .forEach { (key, value) -> header(key, value) }
                     }.build()
-                client.newCall(request).execute().use { response ->
+                transport.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) return@use emptyList()
                     response.peekBody(maxBytes + 1).use { body ->
                         if (body.contentLength() > maxBytes) return@use emptyList()
@@ -128,15 +128,20 @@ internal object MirrorCatalog {
      * Race only a small, known mirror set after a brief head start for the
      * selected mirror. Return only genuinely parsed cards, not HTTP 200.
      */
-    suspend fun readWithFallback(pageUrl: String, userAgent: String): List<CatalogMovie> =
+    suspend fun readWithFallback(
+        pageUrl: String,
+        userAgent: String,
+        alternatives: List<String> = MirrorCatalogMirrors.provenCatalogueHosts,
+        transport: OkHttpClient = client
+    ): List<CatalogMovie> =
         supervisorScope {
-            val urls = MirrorCatalogMirrors.candidates(pageUrl)
+            val urls = MirrorCatalogMirrors.candidates(pageUrl, alternatives)
             if (urls.isEmpty()) return@supervisorScope emptyList()
             val responses = Channel<List<CatalogMovie>>(Channel.UNLIMITED)
             val workers = urls.mapIndexed { index, candidate ->
                 launch {
                     if (index > 0) delay(index * 800L)
-                    responses.send(read(candidate, userAgent))
+                    responses.send(read(candidate, userAgent, transport))
                 }
             }
             try {
