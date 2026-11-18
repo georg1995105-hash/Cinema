@@ -57,7 +57,19 @@ internal object MirrorGuestCookies {
             header.split(';').forEach { part ->
                 val name = part.substringBefore('=').trim()
                 val value = part.substringAfter('=', "").trim()
-                if (name.startsWith("techaro.lol-anubis-auth", ignoreCase = true) &&
+                // Anubis first sets a cookie-verification challenge and
+                // requires that SAME cookie on /api/pass-challenge. Dropping it
+                // causes server-side HTTP 500 on otherwise valid PoW replies.
+                // Support dynamic instance suffixes without forwarding unrelated
+                // site/account cookies across the guest request.
+                val anubisCookie = listOf(
+                    "techaro.lol-anubis-auth",
+                    "techaro.lol-anubis-cookie-verification"
+                ).any { prefix ->
+                    name.equals(prefix, ignoreCase = true) ||
+                        name.startsWith("$prefix-", ignoreCase = true)
+                }
+                if (anubisCookie &&
                     value.isNotBlank() && !name.contains(' ') && !name.contains(';')
                 ) {
                     challengeCookies[name] = value
