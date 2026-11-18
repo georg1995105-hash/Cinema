@@ -129,8 +129,10 @@ internal class MirrorAccountGateway(private val context: Context) {
 
     fun forgetLocalSession(source: String) {
         val origin = origin(source) ?: return
-        listOf("dle_user_id", "dle_password", "dle_hash").forEach { name ->
-            cookieManager.setCookie(origin, "$name=; Max-Age=0; Path=/; Secure")
+        MirrorSitePolicy.cookieScopes(origin).forEach { scope ->
+            listOf("dle_user_id", "dle_password", "dle_hash").forEach { name ->
+                cookieManager.setCookie(scope, "$name=; Max-Age=0; Path=/; Secure")
+            }
         }
         cookieManager.flush()
     }
