@@ -98,7 +98,7 @@ internal fun SearchScreen(
     val resultFilter: (CatalogMovie) -> Boolean = { movie ->
         val kindMatches = when (selectedType) {
             "Фильмы" -> "/meta/movie/" in movie.url || "/films/" in movie.url ||
-                MosfilmCatalog.isVideoUrl(movie.url) || ArchivePublicCatalog.isArchiveUrl(movie.url)
+                ArchivePublicCatalog.isArchiveUrl(movie.url)
             "Сериалы" -> "/meta/series/" in movie.url || "/series/" in movie.url
             "Мультфильмы" -> "/cartoons/" in movie.url || movie.details.contains("Мультфильм", true)
             "Аниме" -> "/animation/" in movie.url
