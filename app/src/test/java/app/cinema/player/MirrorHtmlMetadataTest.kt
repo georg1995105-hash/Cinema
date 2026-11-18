@@ -64,6 +64,8 @@ class MirrorHtmlMetadataTest {
         assertEquals("https://rezka.example/images/actor.jpg", parsed.cast[0].photo)
         assertEquals("https://rezka.example/person/31/", parsed.cast[0].url)
         assertEquals("", parsed.cast[1].photo)
+        assertEquals("31", parsed.cast[0].pid)
+        assertEquals("32", parsed.cast[1].pid)
         assertEquals(listOf("Режиссёр Третий"), parsed.directors.map { it.name })
         assertEquals("https://rezka.example/images/director.jpg", parsed.directors[0].photo)
     }
