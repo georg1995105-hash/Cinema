@@ -62,7 +62,16 @@ internal object MirrorHttp {
                 header.takeIf(String::isNotBlank)
                     ?.let { scoped.header("Cookie", it) }
             }
-            val response = chain.proceed(scoped.build())
+            val response = try {
+                chain.proceed(scoped.build())
+            } catch (issue: java.io.IOException) {
+                MirrorTrace.add(
+                    MirrorTrace.stage(address), address,
+                    result = MirrorTrace.networkFailure(issue)
+                )
+                throw issue
+            }
+            MirrorTrace.add(MirrorTrace.stage(address), address, response.code)
             val setCookies = response.headers("Set-Cookie")
             if (setCookies.isNotEmpty()) {
                 MirrorSitePolicy.cookieScopes(address).forEach { scope ->

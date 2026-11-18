@@ -227,6 +227,14 @@ internal fun MirrorNativePlayer(
         return
     }
     val context=LocalContext.current
+    LaunchedEffect(filmUrl) { MirrorTrace.clear() }
+    fun copyTrace() {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+            as? android.content.ClipboardManager
+        clipboard?.setPrimaryClip(android.content.ClipData.newPlainText(
+            "Cinema diagnostics", MirrorTrace.report()
+        ))
+    }
     var transportUrl by remember(filmUrl) { mutableStateOf(filmUrl) }
     var pageUrl by remember(filmUrl) { mutableStateOf(filmUrl) }
     var movie by remember(filmUrl){mutableStateOf<MirrorMoviePage?>(null)}
@@ -444,12 +452,16 @@ internal fun MirrorNativePlayer(
                         val failure = MirrorMediaParser.responseFailure(
                             JSONObject().put("__kinoStatus", response.statusCode)
                         )
+                        MirrorTrace.add("webview", address, response.statusCode)
                         fail(failure?.text ?: "Страница фильма вернула HTTP ${response.statusCode}.")
                     }
                 }
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, issue: android.webkit.WebResourceError) {
-                    if (request.isForMainFrame) fail("Не удалось открыть страницу фильма. Проверьте соединение.")
+                    if (request.isForMainFrame) {
+                        MirrorTrace.add("webview", request.url.toString(), result = "io")
+                        fail("Не удалось открыть страницу фильма. Проверьте соединение.")
+                    }
                 }
             }
             MirrorGuestSession.loadFilm(this, transportUrl)
@@ -589,11 +601,18 @@ internal fun MirrorNativePlayer(
         val direct = MirrorNetworkSource.playback(pageUrl, request,
             WebSettings.getDefaultUserAgent(context))
         var streams = MirrorMediaParser.parseStreamInfo(direct)
+        MirrorTrace.add("ajax", pageUrl, result =
+            if (streams.qualities.isEmpty()) "empty" else "response")
         if (MirrorStreamFallback.shouldTryBrowser(streams)) {
             // Browser-session AJAX uses the same public episode and voice.
             // Native session errors are not used to skip the browser path.
             val viaBrowser = mirrorAjax(web, pageUrl, request)
             val retry = viaBrowser?.let(MirrorMediaParser::parseStreamInfo)
+            MirrorTrace.add("webview", pageUrl, result = when {
+                viaBrowser == null -> "not_ready"
+                retry?.qualities?.isNotEmpty() == true -> "response"
+                else -> "empty"
+            })
             streams = MirrorStreamFallback.choose(streams, retry)
         }
         if (streams.qualities.isEmpty()) {
@@ -614,6 +633,7 @@ internal fun MirrorNativePlayer(
             }
         }
         if (streams.qualities.isEmpty()) {
+            MirrorTrace.add("ajax", pageUrl, result = "no_stream")
             streams.failure?.voiceAvailability()?.let { voiceAvailability[voiceKey(voice)] = it }
             message = ""
             error = streams.failure?.text ?: PlaybackFailure.UNAVAILABLE.text
@@ -914,6 +934,9 @@ internal fun MirrorNativePlayer(
                         tint = appMuted, modifier = Modifier.size(38.dp))
                     Text(error.ifBlank { "Нет доступного видеопотока" },
                         color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = ::copyTrace) {
+                        Text("Скопировать диагностику")
+                    }
                     if ((movie?.voices?.size ?: 0) > 1) {
                         TextButton(onClick = {
                             settingsSection = "Озвучка"
@@ -1034,6 +1057,9 @@ internal fun MirrorNativePlayer(
                         settingsSection = "Озвучка"
                         showSettings = true
                     }) { Text("Выбрать озвучку") }
+                    TextButton(onClick = ::copyTrace) {
+                        Text("Скопировать диагностику")
+                    }
                 }
             }
         }
