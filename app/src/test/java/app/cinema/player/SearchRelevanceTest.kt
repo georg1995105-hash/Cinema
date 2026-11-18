@@ -27,6 +27,18 @@ class SearchRelevanceTest {
         assertTrue(SearchRelevance.find(listOf(movie("Титаник")), "бригада").isEmpty())
     }
 
+    @Test fun romanianAndUnrelatedMatchesAreExcludedFromRussianBrigadaSearch() {
+        val results = SearchRelevance.find(listOf(
+            movie("First Dates"),
+            movie("Brigada Nimic"),
+            movie("Отряд Коста-дель-Соль"),
+            movie("Бригада"),
+            movie("Закон и порядок: Специальный корпус"),
+            movie("Brigada 2011")
+        ), "бригада")
+        assertEquals(listOf("Бригада"), results.map { it.title })
+    }
+
     @Test fun matchesPunctuationAndYo() {
         assertEquals(1,SearchRelevance.find(listOf(movie("Миссия: невыполнима")),
             "миссия невыполнима").size)
