@@ -39,6 +39,14 @@ internal object MirrorGuestCookies {
             !values["dle_password"].isNullOrBlank()
     }
 
+    /** A single cookie decision for the actual same-origin network request. */
+    fun cookieHeaderFor(address: String, referer: String?, raw: List<String>): String {
+        if (referer == null || !SourceRules.sameOrigin(referer, address)) return ""
+        return if (isGuestFilmRequest(address, referer) && !hasAccountSession(raw))
+            fromStoredCookies(raw)
+        else MirrorSitePolicy.mergeCookieHeaders(raw)
+    }
+
     fun fromStoredCookies(raw: List<String>): String {
         val challengeCookies = linkedMapOf<String, String>()
         raw.forEach { header ->
