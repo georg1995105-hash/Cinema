@@ -210,22 +210,7 @@ internal fun MirrorNativePlayer(
             else showSettings = false
         } else onClose()
     }
-    DisposableEffect(context, filmUrl) {
-        val activity = findHostingActivity(context)
-        val root = activity?.window?.decorView
-        val originalFlags = root?.systemUiVisibility ?: 0
-        val originalOrientation = activity?.requestedOrientation
-            ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        root?.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        onDispose {
-            root?.systemUiVisibility = originalFlags
-            activity?.requestedOrientation = originalOrientation
-        }
-    }
+    PlayerImmersiveLifecycle(filmUrl)
 
     val metadataHandler = remember(context,filmUrl,transportUrl) { Handler(Looper.getMainLooper()) }
     val web=remember(context,filmUrl,transportUrl) {
@@ -1128,8 +1113,3 @@ private fun formatVideoTime(milliseconds: Long): String {
     } else minutes.toString().padStart(2, '0') + ":" + remain.toString().padStart(2, '0')
 }
 
-private fun findHostingActivity(context: Context): Activity? = when (context) {
-    is Activity -> context
-    is ContextWrapper -> findHostingActivity(context.baseContext)
-    else -> null
-}
