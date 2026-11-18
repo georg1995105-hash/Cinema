@@ -410,6 +410,64 @@ class SourceFlowTest {
         }
     }
 
+    @Test fun blockedCatalogMirrorReturnsActualCardsFromTheSameSiteMirror() {
+        val cert = HeldCertificate.Builder().commonName("hdrezka.mn")
+            .addSubjectAlternativeName("hdrezka.mn")
+            .addSubjectAlternativeName("rezka-ua.pub").build()
+        val tls = HandshakeCertificates.Builder().heldCertificate(cert).build()
+        val trust = HandshakeCertificates.Builder()
+            .addTrustedCertificate(cert.certificate).build()
+        MockWebServer().use { blocked ->
+            MockWebServer().use { reachable ->
+                blocked.useHttps(tls.sslSocketFactory(), false)
+                reachable.useHttps(tls.sslSocketFactory(), false)
+                blocked.start()
+                reachable.start()
+                blocked.enqueue(MockResponse().setResponseCode(403)
+                    .setBody("Access denied"))
+                reachable.enqueue(MockResponse().setResponseCode(200)
+                    .addHeader("Content-Type", "text/html; charset=UTF-8")
+                    .setBody("""
+                        <div class="b-content__inline_item">
+                          <div class="b-content__inline_item-cover">
+                            <a href="/series/drama/8155-brigada-2002.html">
+                              <img src="/posters/8155.jpg" alt="Бригада">
+                            </a>
+                          </div>
+                          <div class="b-content__inline_item-link">
+                            <a href="/series/drama/8155-brigada-2002.html">Бригада</a>
+                            <div>2002, Россия, Драмы</div>
+                          </div>
+                        </div>
+                    """.trimIndent()))
+                val selected = blocked.url("/series/").newBuilder()
+                    .host("hdrezka.mn").build().toString()
+                val backup = reachable.url("/").newBuilder()
+                    .host("rezka-ua.pub").build().toString()
+                val client = MirrorHttp.client.newBuilder()
+                    .sslSocketFactory(trust.sslSocketFactory(), trust.trustManager)
+                    .dns(object : okhttp3.Dns {
+                        override fun lookup(hostname: String) =
+                            listOf(java.net.InetAddress.getByName("127.0.0.1"))
+                    })
+                    .followRedirects(false).followSslRedirects(false).build()
+                val cards = runBlocking {
+                    MirrorCatalog.readWithFallback(selected,
+                        "Cinema-Android-Test", listOf(backup), client)
+                }
+                assertEquals(1, cards.size)
+                assertEquals("Бригада", cards.single().title)
+                assertEquals("2002, Россия, Драмы", cards.single().details)
+                assertTrue(cards.single().url.startsWith("https://rezka-ua.pub:"))
+                assertEquals("8155", MirrorPostId.fromUrl(cards.single().url))
+                assertEquals("/series/", requireNotNull(reachable.takeRequest(
+                    5, TimeUnit.SECONDS)).path)
+                assertEquals("/series/", requireNotNull(blocked.takeRequest(
+                    5, TimeUnit.SECONDS)).path)
+            }
+        }
+    }
+
     @Test fun selectedMirrorWinsOverFastFallbackWhenItServesTheRealFilm() {
         val cert = HeldCertificate.Builder().commonName("localhost")
             .addSubjectAlternativeName("localhost").build()
