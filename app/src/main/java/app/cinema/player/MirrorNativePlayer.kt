@@ -601,11 +601,18 @@ internal fun MirrorNativePlayer(
         val direct = MirrorNetworkSource.playback(pageUrl, request,
             WebSettings.getDefaultUserAgent(context))
         var streams = MirrorMediaParser.parseStreamInfo(direct)
+        MirrorTrace.add("ajax", pageUrl, result =
+            if (streams.qualities.isEmpty()) "empty" else "response")
         if (MirrorStreamFallback.shouldTryBrowser(streams)) {
             // Browser-session AJAX uses the same public episode and voice.
             // Native session errors are not used to skip the browser path.
             val viaBrowser = mirrorAjax(web, pageUrl, request)
             val retry = viaBrowser?.let(MirrorMediaParser::parseStreamInfo)
+            MirrorTrace.add("webview", pageUrl, result = when {
+                viaBrowser == null -> "not_ready"
+                retry?.qualities?.isNotEmpty() == true -> "response"
+                else -> "empty"
+            })
             streams = MirrorStreamFallback.choose(streams, retry)
         }
         if (streams.qualities.isEmpty()) {
