@@ -1,6 +1,9 @@
 package app.cinema.player
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
@@ -88,6 +91,34 @@ internal object MirrorNetworkSource {
             } catch (_:Exception) {
                 FilmResult(current,reason="Не удалось получить страницу фильма по HTTPS.")
             }
+        }
+
+    /**
+     * Resolve one logical Rezka film across the user's saved mirrors.
+     * Mirrors are transport candidates, not separate playback sources in the UI.
+     * Prefer a candidate that exposes real player metadata, then one with film details.
+     */
+    suspend fun resolveFilm(url: String, mirrors: List<String>, userAgent: String): FilmResult =
+        coroutineScope {
+            if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
+                return@coroutineScope FilmResult(url, reason = "Неверный адрес фильма.")
+
+            val candidates = buildList {
+                add(url)
+                mirrors.asSequence()
+                    .filter(SourceRules::isValidHttpsUrl)
+                    .mapNotNull { MirrorFilmUrl.changeOrigin(url, it) }
+                    .forEach(::add)
+            }.distinct().take(8)
+
+            val results = candidates.map { candidate ->
+                async(Dispatchers.IO) { film(candidate, userAgent) }
+            }.awaitAll()
+
+            results.firstOrNull { it.metadata?.player != null }
+                ?: results.firstOrNull { it.metadata?.info != null }
+                ?: results.firstOrNull { it.reason.isNotBlank() }
+                ?: FilmResult(url, reason = "Зеркала не предоставили страницу фильма.")
         }
 
     /** Normal site AJAX, without fabricated Premium privileges or guessed translator IDs. */
