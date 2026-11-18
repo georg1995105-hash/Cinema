@@ -148,6 +148,31 @@ class SourceFlowTest {
         assertEquals("Бригада: Наследник", info.related.single().title)
     }
 
+    @Test fun webViewRecoversReferencePersonsListCredits() = withPage(
+        """
+        <div class="b-post__title"><h1>Бригада</h1></div>
+        <div class="b-post__description_text">Описание.</div>
+        <div class="persons-list-holder">
+          <span class="inline"><h2>В ролях актеры</h2></span>
+          <span class="item" data-pid="20" data-photo="/photos/20.jpg">
+            <a href="/person/20-actor.html"><span class="person-name-item">Актёр Первый</span></a>
+          </span>
+        </div>
+        <div class="persons-list-holder">
+          <span class="inline"><h2>Режиссёры</h2></span>
+          <span class="item" data-photo="/photos/21.jpg">
+            <a href="/person/21-director.html"><span class="person-name-item">Режиссёр Второй</span></a>
+          </span>
+        </div>
+        """.trimIndent()
+    ) { web ->
+        val info = requireNotNull(FilmPageParser.parse(evaluate(web, FilmPageParser.javascript), origin))
+        assertEquals(listOf("Актёр Первый"), info.cast.map { it.name })
+        assertEquals("$origin/photos/20.jpg", info.cast.single().photo)
+        assertEquals(listOf("Режиссёр Второй"), info.directors.map { it.name })
+        assertEquals("$origin/photos/21.jpg", info.directors.single().photo)
+    }
+
     @Test fun playerResolvesVoiceEpisodesAndAjaxResponsesFromWebView() = withPage(
         """
         <script type="application/x-fixture">sof.tv.initCDNSeriesEvents(12, 7, 1, 2, 0, null, 1, 0);</script>
