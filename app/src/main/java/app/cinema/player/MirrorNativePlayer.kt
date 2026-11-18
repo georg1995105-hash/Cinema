@@ -279,7 +279,7 @@ internal fun MirrorNativePlayer(
                         )
                         transportUrl = mapped
                         if (mapped != requested || crossOrigin) {
-                            view.loadUrl(mapped, MirrorSitePolicy.webViewHeaders(mapped))
+                            MirrorGuestSession.loadFilm(view, mapped)
                             return true
                         }
                         return false
@@ -394,9 +394,7 @@ internal fun MirrorNativePlayer(
                             error = ""
                             message = "Проверяем доступ к источнику"
                             view.postDelayed({
-                                if (movie == null) view.loadUrl(
-                                    address, MirrorSitePolicy.webViewHeaders(address)
-                                )
+                                if (movie == null) MirrorGuestSession.loadFilm(view, address)
                             }, 120)
                             return
                         }
@@ -411,7 +409,7 @@ internal fun MirrorNativePlayer(
                     if (request.isForMainFrame) fail("Не удалось открыть страницу фильма. Проверьте соединение.")
                 }
             }
-            loadUrl(transportUrl, MirrorSitePolicy.webViewHeaders(transportUrl))
+            MirrorGuestSession.loadFilm(this, transportUrl)
         }
     }
     DisposableEffect(web){
