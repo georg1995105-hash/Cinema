@@ -22,13 +22,13 @@ object SourceProbe {
         .callTimeout(7, TimeUnit.SECONDS)
         .build()
 
-    internal suspend fun inspect(url: String): MirrorProbeResult = withContext(Dispatchers.IO) {
+    internal suspend fun inspect(url: String, browserUserAgent: String? = null): MirrorProbeResult = withContext(Dispatchers.IO) {
         if (!SourceRules.isValidHttpsUrl(url))
             return@withContext MirrorProbeResult(false, null, "Неправильный адрес")
         val origin = MirrorAccountGateway.origin(url)
             ?: return@withContext MirrorProbeResult(false, null, "Неправильный адрес")
-        val userAgent = System.getProperty("http.agent").orEmpty()
-            .ifBlank { "Cinema Android" }
+        val userAgent = browserUserAgent?.takeIf(String::isNotBlank)
+            ?: System.getProperty("http.agent").orEmpty().ifBlank { "Cinema Android" }
         val builder = Request.Builder().url(url).get()
             .header("Accept", "text/html,application/xhtml+xml")
             .header("Referer", "$origin/")
@@ -62,10 +62,32 @@ object SourceProbe {
                         return@use destination
                     }
                     return@withContext when (response.code) {
-                        in 200..299 -> MirrorProbeResult(true, latency,
-                            if (redirects > 0)
-                                "Сайт отвечает после перенаправления (видео не проверено)"
-                            else "Сайт отвечает (доступность фильма не проверена)")
+                        in 200..299 -> {
+                            // A 200 on the landing page is not evidence that the
+                            // actual catalog is accessible. Check the same path
+                            // that CatalogGrid opens, with the same user agent.
+                            val catalog = java.net.URI("$currentOrigin/")
+                                .resolve("series/").toString()
+                            val catalogRequest = Request.Builder().url(catalog).get()
+                                .header("Accept", "text/html,application/xhtml+xml")
+                                .header("Referer", "$currentOrigin/")
+                                .apply {
+                                    MirrorSitePolicy.requestHeaders(catalog, userAgent)
+                                        .forEach { (name, value) -> header(name, value) }
+                                }.build()
+                            client.newCall(catalogRequest).execute().use { catalogResponse ->
+                                val checkedMs = ((System.nanoTime() - started) / 1_000_000L)
+                                    .coerceAtLeast(0L)
+                                when (catalogResponse.code) {
+                                    in 200..299 -> MirrorProbeResult(true, checkedMs,
+                                        "Главная и раздел сериалов отвечают по HTTPS (видео не проверено)")
+                                    403, 429, 503 -> MirrorProbeResult(false, checkedMs,
+                                        "Главная отвечает, каталог ограничен (HTTP ${catalogResponse.code})")
+                                    else -> MirrorProbeResult(false, checkedMs,
+                                        "Главная отвечает, каталог HTTP ${catalogResponse.code}")
+                                }
+                            }
+                        }
                         403, 429 -> MirrorProbeResult(false, latency,
                             "Сайт ограничил запрос (HTTP ${response.code})")
                         else -> MirrorProbeResult(false, latency,
