@@ -35,7 +35,9 @@ import org.json.JSONObject
 import java.net.URI
 import kotlinx.coroutines.delay
 
-internal data class FilmPerson(val name: String, val photo: String, val url: String = "")
+internal data class FilmPerson(
+    val name: String, val photo: String, val url: String = "", val pid: String = ""
+)
 internal data class FilmInfo(
     val originalTitle: String,
     val description: String,
@@ -372,7 +374,10 @@ internal object FilmPageParser {
                 if (name.isBlank() || role !in setOf("actor", "director")) continue
                 val photo = item.optString("photo").takeIf(MirrorPoster::isPhoto).orEmpty()
                 val url = item.optString("url").takeIf { SourceRules.sameOrigin(source, it) }.orEmpty()
-                add(FilmPerson(name, photo, url) to role)
+                val pid = item.optString("pid").takeIf {
+                    it.matches(Regex("[0-9]{1,12}"))
+                }.orEmpty()
+                add(FilmPerson(name, photo, url, pid) to role)
             }
         }
         val directors = credits.filter { it.second == "director" }.map { it.first }.distinctBy { it.name }
@@ -908,7 +913,8 @@ internal fun FilmDetails(
                                     ActorPortrait(
                                         person = person,
                                         source = MirrorAccountGateway.origin(resolvedFilmUrl) ?: source,
-                                        modifier = Modifier.fillMaxSize()
+                                        modifier = Modifier.fillMaxSize(),
+                                        filmUrl = resolvedFilmUrl
                                     )
                                 }
                                 Spacer(Modifier.height(5.dp))
@@ -935,7 +941,8 @@ internal fun FilmDetails(
                                     ActorPortrait(
                                         director,
                                         MirrorAccountGateway.origin(resolvedFilmUrl) ?: source,
-                                        Modifier.fillMaxSize()
+                                        Modifier.fillMaxSize(),
+                                        filmUrl = resolvedFilmUrl
                                     )
                                 }
                                 Spacer(Modifier.height(5.dp))
