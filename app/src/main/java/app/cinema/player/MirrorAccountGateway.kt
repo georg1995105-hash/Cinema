@@ -46,7 +46,10 @@ internal class MirrorAccountGateway(private val context: Context) {
 
     fun hasSession(source: String): Boolean {
         val origin = origin(source) ?: return false
-        val c = cookieManager.getCookie(origin).orEmpty()
+        val c = MirrorSitePolicy.mergeCookieHeaders(
+            MirrorSitePolicy.cookieScopes(origin)
+                .mapNotNull { cookieManager.getCookie(it)?.takeIf(String::isNotBlank) }
+        )
         return listOf("dle_user_id=", "dle_password=").all { c.contains(it) }
     }
 
