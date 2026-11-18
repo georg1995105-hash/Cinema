@@ -96,9 +96,12 @@ internal object MirrorHtmlMetadata {
         )
         for (row in factRows) {
             val tableCells = row.children().filter { it.tagName() in listOf("th", "td") }
-            val cells = if (tableCells.size >= 2) tableCells else
-                row.children().takeIf { it.size >= 2 }
-                    ?.let { listOf(it.first(), it.last()) }.orEmpty()
+            val cells: List<Element> = if (tableCells.size >= 2) tableCells else {
+                val nested = row.children()
+                if (nested.size >= 2)
+                    listOfNotNull(nested.firstOrNull(), nested.lastOrNull())
+                else emptyList()
+            }
             if (cells.size < 2) continue
             val label = cells[0].text().trim().trimEnd(':')
             val body = cells[1]
