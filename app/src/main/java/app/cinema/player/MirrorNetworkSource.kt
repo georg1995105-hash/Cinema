@@ -201,6 +201,18 @@ internal object MirrorNetworkSource {
         }
     }
 
+    internal fun candidateUrls(url: String, mirrors: List<String>): List<String> {
+        if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
+            return emptyList()
+        return buildList {
+            add(url)
+            (mirrors + MirrorSitePolicy.builtInOrigins).asSequence()
+                .filter(SourceRules::isValidHttpsUrl)
+                .mapNotNull { MirrorFilmUrl.changeOrigin(url, it) }
+                .forEach(::add)
+        }.distinct().take(30)
+    }
+
     /**
      * Resolve one logical Rezka film across the user's saved mirrors.
      * Mirrors are transport candidates, not separate playback sources in the UI.
@@ -215,13 +227,7 @@ internal object MirrorNetworkSource {
             if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
                 return@supervisorScope FilmResult(url, reason = "Неверный адрес фильма.")
 
-            val candidates = buildList {
-                add(url)
-                (mirrors + MirrorSitePolicy.builtInOrigins).asSequence()
-                    .filter(SourceRules::isValidHttpsUrl)
-                    .mapNotNull { MirrorFilmUrl.changeOrigin(url, it) }
-                    .forEach(::add)
-            }.distinct().take(30)
+            val candidates = candidateUrls(url, mirrors)
 
             var bestInfo: FilmResult? = null
             var bestFailure: FilmResult? = null
