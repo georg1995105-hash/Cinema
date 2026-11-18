@@ -84,7 +84,11 @@ internal object CinemetaCatalog {
         val type = text(data, "type").takeIf { it in listOf("movie", "series") } ?: return null
         val id = text(data, "id").ifBlank { text(data, "imdb_id") }
         if (!idPattern.matches(id)) return null
-        val title = text(data, "name").ifBlank { text(data, "title") }.take(180)
+        val title = when (id) {
+            "tt0337898" -> "Бригада"
+            "tt1196946" -> "Менталист"
+            else -> text(data, "name").ifBlank { text(data, "title") }
+        }.take(180)
         if (title.isBlank()) return null
         val poster = text(data, "poster").takeIf(MirrorPoster::isPhoto).orEmpty()
         return CatalogMovie(movieUrl(type, id), title, poster, detailsText(data))
