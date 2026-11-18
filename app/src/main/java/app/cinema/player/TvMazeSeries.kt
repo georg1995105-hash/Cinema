@@ -75,6 +75,21 @@ internal object TvMazeSeries {
         }
     }
 
+    /**
+     * Independent artwork correction for a series with confirmed IMDb ID.
+     * A title-only search is not enough to attribute an image to a film.
+     */
+    suspend fun verifiedPoster(imdb: String): String = withContext(Dispatchers.IO) {
+        if (!imdbId.matches(imdb)) return@withContext ""
+        val show = JSONObject(get("/lookup/shows?imdb=$imdb"))
+        if (show.optJSONObject("externals")?.optString("imdb") != imdb)
+            return@withContext ""
+        val images = show.optJSONObject("image")
+        (images?.optString("original").orEmpty().takeIf(MirrorPoster::isPhoto)
+            ?: images?.optString("medium").orEmpty().takeIf(MirrorPoster::isPhoto))
+            .orEmpty()
+    }
+
     suspend fun search(query: String): List<CatalogMovie> = withContext(Dispatchers.IO) {
         val encoded = URLEncoder.encode(query.trim().take(110), "UTF-8")
         parseSearch(JSONArray(get("/search/shows?q=$encoded")))
