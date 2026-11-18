@@ -215,13 +215,22 @@ internal object MirrorNetworkSource {
             if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
                 return@supervisorScope FilmResult(url, reason = "Неверный адрес фильма.")
 
-            val candidates = buildList {
-                add(url)
-                (mirrors + MirrorSitePolicy.builtInOrigins).asSequence()
-                    .filter(SourceRules::isValidHttpsUrl)
-                    .mapNotNull { MirrorFilmUrl.changeOrigin(url, it) }
-                    .forEach(::add)
-            }.distinct().take(10)
+            // The selected site's film page is authoritative. A faster response
+            // from an unrelated built-in mirror must never silently replace it.
+            val preferred = film(url, userAgent, mirrors)
+            val preferredPlayer = preferred.metadata?.player
+            val preferredCompatible = preferredPlayer != null &&
+                (requiredVoice.isBlank() ||
+                    MirrorVoiceSelection.supports(preferredPlayer, requiredVoice))
+            if (preferredCompatible) return@supervisorScope preferred
+
+            val candidates = (mirrors + MirrorSitePolicy.builtInOrigins).asSequence()
+                .filter(SourceRules::isValidHttpsUrl)
+                .mapNotNull { MirrorFilmUrl.changeOrigin(url, it) }
+                .filter { it != url }
+                .distinct()
+                .take(9)
+                .toList()
 
             val completed = Channel<FilmResult>(Channel.UNLIMITED)
             val jobs = candidates.map { candidate ->
@@ -229,9 +238,9 @@ internal object MirrorNetworkSource {
                     completed.send(film(candidate, userAgent, mirrors))
                 }
             }
-            var bestInfo: FilmResult? = null
-            var bestFailure: FilmResult? = null
-            var incompatiblePlayerSeen = false
+            var bestInfo: FilmResult? = preferred.takeIf { it.metadata?.info != null }
+            var bestFailure: FilmResult? = preferred.takeIf { it.reason.isNotBlank() }
+            var incompatiblePlayerSeen = preferredPlayer != null && !preferredCompatible
             try {
                 repeat(candidates.size) {
                     val result = completed.receive()
@@ -249,10 +258,7 @@ internal object MirrorNetworkSource {
                     if (bestFailure == null && result.reason.isNotBlank()) bestFailure = result
                 }
                 if (requiredVoice.isNotBlank() && incompatiblePlayerSeen) {
-                    FilmResult(
-                        url,
-                        reason = "Выбранная озвучка недоступна на проверенных зеркалах."
-                    )
+                    FilmResult(url, reason = "Выбранная озвучка недоступна на проверенных зеркалах.")
                 } else {
                     bestInfo ?: bestFailure
                         ?: FilmResult(url, reason = "Зеркала не предоставили страницу фильма.")
