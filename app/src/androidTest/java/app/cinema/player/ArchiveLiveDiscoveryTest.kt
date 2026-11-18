@@ -21,6 +21,19 @@ class ArchiveLiveDiscoveryTest {
         }
     }
 
+    @Test fun secondMovieExposesActualByteRangeVerifiedMp4() = runBlocking {
+        withTimeout(75_000L) {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val sources = InternetArchiveStreams.available(
+                context, ArchivePublicCatalog.url("Sita_Sings_the_Blues"))
+            assertTrue("Sita archive entry must expose an actual MP4, not just a poster",
+                sources.isNotEmpty())
+            assertTrue(sources.all {
+                it.url.startsWith("https://archive.org/download/Sita_Sings_the_Blues/")
+            })
+        }
+    }
+
     @Test fun publicDomainTitleOpensWithActualArchiveMetadata() = runBlocking {
         withTimeout(45_000L) {
             val ctx = InstrumentationRegistry.getInstrumentation().targetContext
