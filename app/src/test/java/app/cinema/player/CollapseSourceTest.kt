@@ -77,4 +77,25 @@ class CollapseSourceTest {
             ExternalFilmIdResolver.chooseImdb(raw, "Avengers: Endgame", "2019")
         )
     }
+
+    @Test fun imdbSuggestionRejectsWrongYearAndUnrelatedTitles() {
+        val wrongYear = """
+          {"d":[
+            {"id":"tt4154796","l":"Avengers: Endgame","y":2018,"q":"feature"},
+            {"id":"tt9999999","l":"Completely Different","y":2019,"q":"feature"}
+          ]}
+        """
+        assertEquals(
+            "",
+            ExternalFilmIdResolver.chooseImdb(wrongYear, "Avengers: Endgame", "2019")
+        )
+
+        val unrelated = """
+          {"d":[{"id":"tt9999999","l":"Completely Different","y":2019,"q":"feature"}]}
+        """
+        assertEquals(
+            "",
+            ExternalFilmIdResolver.chooseImdb(unrelated, "Avengers: Endgame", "2019")
+        )
+    }
 }
