@@ -460,10 +460,16 @@ internal fun FilmDetails(
     verifiedPlayer: MirrorMoviePage? = null
 ) {
     val context = LocalContext.current
-    // Reopen the same post on the mirror explicitly selected in Settings.
-    // Old history entries may still contain the host used at the time of saving.
+    // A film obtained from a verified fallback catalogue must open on THAT
+    // working host. Rewriting it to the blocked Settings mirror discarded the
+    // successful catalogue result and broke details/player.
+    // Older history entries keep the original selected source when applicable.
     val preferredFilmUrl = remember(movie.url, source) {
-        MirrorFilmUrl.changeOrigin(movie.url, source) ?: movie.url
+        when {
+            SourceRules.sameOrigin(movie.url, source) -> movie.url
+            MirrorSitePolicy.isRecognizedMirror(movie.url) -> movie.url
+            else -> MirrorFilmUrl.changeOrigin(movie.url, source) ?: movie.url
+        }
     }
     var info by remember(movie.url, preferredFilmUrl) {
         mutableStateOf(FilmInfoMemory.get(preferredFilmUrl))
