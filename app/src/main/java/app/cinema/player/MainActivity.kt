@@ -204,11 +204,18 @@ private fun CinemaApp() {
                     onResume = { film ->
                         local.rememberMovie(film)
                         selectedFilm = film
-                        playbackStorageUrl = film.url
-                        browsingSource = activeSource?.let { MirrorFilmUrl.changeOrigin(film.url, it) }
-                            ?: film.url
                         movieBack = Page.LIBRARY
-                        page = Page.FILM_PLAYER
+                        if (CinemetaCatalog.isMovieUrl(film.url)) {
+                            // An IMDb metadata URL is never a playable video URL.
+                            // Recheck the legal source in the details screen before play.
+                            page = Page.MOVIE
+                        } else {
+                            playbackStorageUrl = film.url
+                            browsingSource = activeSource?.let {
+                                MirrorFilmUrl.changeOrigin(film.url, it)
+                            } ?: film.url
+                            page = Page.FILM_PLAYER
+                        }
                     },
                     toggle = ::toggleFavourite,
                     remove = { url ->
