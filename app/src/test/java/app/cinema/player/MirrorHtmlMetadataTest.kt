@@ -49,4 +49,21 @@ class MirrorHtmlMetadataTest {
         assertNull(result.info)
         assertNull(result.player)
     }
+    @Test fun nestedTranslatorAndPlainDescriptionAreParsed() {
+        val html = """
+          <div class="b-post">
+            <div class="b-post__title"><h1>Бригада</h1></div>
+            <div class="b-post__description">Сюжет сериала, написанный обычным текстом.</div>
+            <div id="translators-list"><li>
+              <a data-translator_id="33" data-title="Стандартная">Стандартная</a>
+            </li></div>
+            <script>initCDNSeriesEvents(123,33,0,0,0);</script>
+          </div>
+        """
+        val result=MirrorHtmlMetadata.parse(url,html)
+        assertEquals("Сюжет сериала, написанный обычным текстом.",
+            result.info!!.description)
+        assertEquals("33",result.info!!.voices.single().id)
+        assertEquals("Стандартная",result.info!!.voices.single().name)
+    }
 }
