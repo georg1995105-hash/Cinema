@@ -122,7 +122,10 @@ internal object ArchivePublicCatalog {
     suspend fun home(kind: String): List<CatalogMovie> = withContext(Dispatchers.IO) {
         if (kind == "Сериалы" || kind == "Мультфильмы") return@withContext emptyList()
         val initial = featured()
-        val found = try { discover() } catch (e: Exception) { emptyList() }
+        // Propagate a network failure instead of silently replacing a healthy
+        // persisted catalog with only three fallback records.
+        // CinemetaGrid already preserves cached/featured cards on errors.
+        val found = discover()
         (initial + found).distinctBy { it.url }.take(50)
     }
 
