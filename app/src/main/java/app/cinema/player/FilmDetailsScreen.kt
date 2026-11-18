@@ -650,24 +650,25 @@ internal fun FilmDetails(
 
     LaunchedEffect(showWatchMenu, rezkaAvailable, collapseAvailable, collapseMedia) {
         if (!showWatchMenu) return@LaunchedEffect
-        val savedProvider = savedSelection?.provider.orEmpty()
-        chosenProvider = when {
-            savedProvider == "collapse" && collapseAvailable -> "collapse"
-            savedProvider == "rezka" && rezkaAvailable -> "rezka"
-            rezkaAvailable -> "rezka"
-            collapseAvailable -> "collapse"
-            else -> chosenProvider
+        val currentAvailable = when (chosenProvider) {
+            "collapse" -> collapseAvailable
+            else -> rezkaAvailable
         }
-        chosenSeason = savedSelection?.season.orEmpty()
-        chosenEpisode = savedSelection?.episode.orEmpty()
-        val initialVoices = if (chosenProvider == "collapse") {
+        if (!currentAvailable) {
+            chosenProvider = when {
+                rezkaAvailable -> "rezka"
+                collapseAvailable -> "collapse"
+                else -> chosenProvider
+            }
+        }
+        val providerVoices = if (chosenProvider == "collapse") {
             collapseMedia?.voices(chosenSeason, chosenEpisode).orEmpty()
         } else effectiveVoices
-        chosenVoice = savedSelection?.voice?.takeIf { id ->
-            initialVoices.any { it.id == id }
-        } ?: sourceDefaultVoice.takeIf { id ->
-            chosenProvider == "rezka" && initialVoices.any { it.id == id }
-        } ?: initialVoices.firstOrNull()?.id.orEmpty()
+        if (providerVoices.none { it.id == chosenVoice }) {
+            chosenVoice = sourceDefaultVoice.takeIf { id ->
+                chosenProvider == "rezka" && providerVoices.any { it.id == id }
+            } ?: providerVoices.firstOrNull()?.id.orEmpty()
+        }
     }
 
     val pictures = (current?.posters.orEmpty() + movie.poster + movie.posterAlternatives)
