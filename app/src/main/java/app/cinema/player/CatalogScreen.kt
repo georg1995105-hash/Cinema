@@ -369,6 +369,7 @@ internal fun CatalogGrid(
     var problem by remember(requestUrl, attempt) { mutableStateOf("") }
     var challengeActive by remember(requestUrl, attempt) { mutableStateOf(false) }
     fun recoverEmptyCatalog(reason: String) {
+        if (!pending || movies.isNotEmpty()) return
         // The selected WebView may fail with HTTP403 before the parallel native
         // fallback has checked an actually usable mirror. Do not tear down that
         // attempt or navigate through unrelated categories prematurely.
