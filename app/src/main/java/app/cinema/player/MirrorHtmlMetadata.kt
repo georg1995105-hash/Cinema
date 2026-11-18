@@ -105,7 +105,7 @@ internal object MirrorHtmlMetadata {
             val body = cells[1]
             val value = body.text().trim()
             if (label.isNotBlank() && value.isNotBlank() && value.length < 165 &&
-                listOf("дата выхода","страна","режисс","жанр","время","возраст","в качестве","оригинальное")
+                listOf("год","дата выхода","премьера","страна","режисс","жанр","время","возраст","в качестве","оригинальное")
                     .any { label.lowercase().contains(it) }) facts.add(label to value)
             val role = when {
                 label.startsWith("режисс", true) -> "director"
