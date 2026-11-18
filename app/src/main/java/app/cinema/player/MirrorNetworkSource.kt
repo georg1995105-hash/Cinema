@@ -34,9 +34,11 @@ internal object MirrorNetworkSource {
         .followRedirects(false).followSslRedirects(false)
         .callTimeout(11, TimeUnit.SECONDS).build()
 
-    private suspend fun execute(request: Request): Response =
-        suspendCancellableCoroutine { continuation ->
-            val call = http.newCall(request)
+    private suspend fun execute(
+        request: Request,
+        client: OkHttpClient = http
+    ): Response = suspendCancellableCoroutine { continuation ->
+            val call = client.newCall(request)
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, issue: IOException) {
@@ -56,7 +58,8 @@ internal object MirrorNetworkSource {
     private suspend fun solveAnubis(
         pageUrl: String,
         html: String,
-        userAgent: String
+        userAgent: String,
+        client: OkHttpClient = http
     ): Boolean {
         val challenge = MirrorAnubis.parse(html) ?: return false
         val solution = withContext(Dispatchers.Default) {
@@ -70,7 +73,7 @@ internal object MirrorNetworkSource {
         MirrorSitePolicy.requestHeaders(pageUrl, userAgent).forEach { (name, value) ->
             builder.header(name, value)
         }
-        execute(builder.build()).use { response ->
+        execute(builder.build(), client).use { response ->
             response.body?.charStream()?.let { bounded(it, 400_000) }
             if (response.code !in 200..399) return false
         }
@@ -94,7 +97,8 @@ internal object MirrorNetworkSource {
     suspend fun film(
         url: String,
         userAgent: String,
-        mirrors: List<String> = emptyList()
+        mirrors: List<String> = emptyList(),
+        client: OkHttpClient = http
     ): FilmResult = withContext(Dispatchers.IO) {
         if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
             return@withContext FilmResult(url, reason = "Неверный адрес фильма.")
@@ -115,7 +119,7 @@ internal object MirrorNetworkSource {
 
                 var retry = false
                 var challengeHtml: String? = null
-                execute(builder.build()).use { response ->
+                execute(builder.build(), client).use { response ->
                     if (response.code == 403 && staleCookieRetries == 0 &&
                         MirrorHttp.clearStaleAnubisCookies(current)) {
                         staleCookieRetries++
@@ -176,7 +180,7 @@ internal object MirrorNetworkSource {
                             current,
                             reason = "Зеркало повторно запросило проверку Anubis."
                         )
-                    val solved = solveAnubis(current, protectedHtml, userAgent)
+                    val solved = solveAnubis(current, protectedHtml, userAgent, client)
                     if (!solved)
                         return@withContext FilmResult(
                             current,
