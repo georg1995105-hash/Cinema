@@ -76,6 +76,7 @@ private fun CinemaApp() {
     var activeSource by remember { mutableStateOf(local.activeSource()) }
     var page by remember { mutableStateOf(Page.HOME) }
     var playing by remember { mutableStateOf<String?>(null) }
+    var playingMovieKey by remember { mutableStateOf<String?>(null) }
     var browsingSource by remember { mutableStateOf<String?>(null) }
     var playbackStorageUrl by remember { mutableStateOf<String?>(null) }
     var selectedFilm by remember { mutableStateOf<CatalogMovie?>(null) }
@@ -118,11 +119,11 @@ private fun CinemaApp() {
     playing?.let { url ->
         PlayerPane(
             url = url,
-            startPositionMs = history.firstOrNull { it.url == url }?.positionMs ?: 0,
+            startPositionMs = history.firstOrNull { it.url == (playingMovieKey ?: url) }?.positionMs ?: 0,
             seekSeconds = local.seekSeconds(),
-            onClose = { playing = null },
+            onClose = { playing = null; playingMovieKey = null },
             holdSpeed = local.holdSpeed(),
-            onSave = { saveProgress(url, it) }
+            onSave = { saveProgress(playingMovieKey ?: url, it) }
         )
         return
     }
@@ -307,7 +308,10 @@ private fun CinemaApp() {
                             isFavourite = movie.url in favourites,
                             onToggleFavourite = { toggleFavourite(movie.url) },
                             onBack = { page = movieBack },
-                            onPlay = { verifiedStreamUrl -> playing = verifiedStreamUrl }
+                            onPlay = { verifiedStreamUrl ->
+                                playingMovieKey = movie.url
+                                playing = verifiedStreamUrl
+                            }
                         )
                     } else FilmDetails(
                         movie = movie,
@@ -377,7 +381,7 @@ private fun CinemaApp() {
                     )
                 }
                 Page.ABOUT -> AboutScreen(::back)
-                Page.TEST -> VideoTestScreen(::back) { playing = it }
+                Page.TEST -> VideoTestScreen(::back) { playingMovieKey = null; playing = it }
             }
         }
     }
