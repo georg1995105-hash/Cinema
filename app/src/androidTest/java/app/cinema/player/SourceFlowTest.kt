@@ -314,8 +314,9 @@ class SourceFlowTest {
                     fixtureTrust.sslSocketFactory(),
                     fixtureTrust.trustManager
                 )
-                .dns(okhttp3.Dns {
-                    listOf(java.net.InetAddress.getByName("127.0.0.1"))
+                .dns(object : okhttp3.Dns {
+                    override fun lookup(hostname: String): List<java.net.InetAddress> =
+                        listOf(java.net.InetAddress.getByName("127.0.0.1"))
                 })
                 .followRedirects(false)
                 .followSslRedirects(false)
