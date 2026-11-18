@@ -98,7 +98,7 @@ private fun CinemaApp() {
         sources.clear()
         sources.addAll(newItems)
         local.saveSources(newItems)
-        if (activeSource !in newItems) {
+        if (activeSource !in newItems && !MirrorSitePolicy.isRecognizedMirror(activeSource.orEmpty())) {
             activeSource = null
             local.saveActiveSource(null)
         }
@@ -249,26 +249,56 @@ private fun CinemaApp() {
                 Page.FILM_PLAYER -> {
                     val playbackUrl = browsingSource ?: selectedFilm?.url.orEmpty()
                     val storageUrl = playbackStorageUrl ?: selectedFilm?.url.orEmpty()
-                    MirrorNativePlayer(
-                        filmUrl = playbackUrl,
-                        filmTitle = selectedFilm?.title.orEmpty(),
-                        mirrors = sources.toList(),
-                        startPositionMs = local.playbackSelection(storageUrl)?.positionMs
-                            ?: history.firstOrNull { it.url == storageUrl }?.positionMs ?: 0L,
-                        seekSeconds = local.seekSeconds(),
-                        holdSpeed = local.holdSpeed(),
-                        savedSelection = local.playbackSelection(storageUrl),
-                        onSaveSelection = { selection ->
-                            local.savePlaybackSelection(storageUrl, selection)
-                        },
-                        onSave = { ms ->
-                            if (storageUrl.isNotBlank()) saveProgress(storageUrl, ms)
-                        },
-                        onClose = {
-                            playbackStorageUrl = null
-                            page = Page.MOVIE
-                        }
-                    )
+                    val saved = local.playbackSelection(storageUrl)
+                    val startPosition = saved?.positionMs
+                        ?: history.firstOrNull { it.url == storageUrl }?.positionMs ?: 0L
+                    val closePlayer: () -> Unit = {
+                        playbackStorageUrl = null
+                        page = Page.MOVIE
+                    }
+                    if (saved?.provider == "collapse" &&
+                        (saved.kinopoiskId.isNotBlank() || saved.imdbId.isNotBlank())) {
+                        CollapseNativePlayer(
+                            filmTitle = selectedFilm?.title.orEmpty(),
+                            kinopoiskId = saved.kinopoiskId,
+                            imdbId = saved.imdbId,
+                            startPositionMs = startPosition,
+                            seekSeconds = local.seekSeconds(),
+                            holdSpeed = local.holdSpeed(),
+                            savedSelection = saved,
+                            onSaveSelection = { selection ->
+                                local.savePlaybackSelection(storageUrl, selection)
+                            },
+                            onSave = { ms ->
+                                if (storageUrl.isNotBlank()) saveProgress(storageUrl, ms)
+                            },
+                            onClose = closePlayer
+                        )
+                    } else {
+                        MirrorNativePlayer(
+                            filmUrl = playbackUrl,
+                            filmTitle = selectedFilm?.title.orEmpty(),
+                            mirrors = sources.toList(),
+                            startPositionMs = startPosition,
+                            seekSeconds = local.seekSeconds(),
+                            holdSpeed = local.holdSpeed(),
+                            savedSelection = saved,
+                            onSaveSelection = { selection ->
+                                local.savePlaybackSelection(
+                                    storageUrl,
+                                    selection.copy(
+                                        provider = "rezka",
+                                        kinopoiskId = saved?.kinopoiskId.orEmpty(),
+                                        imdbId = saved?.imdbId.orEmpty()
+                                    )
+                                )
+                            },
+                            onSave = { ms ->
+                                if (storageUrl.isNotBlank()) saveProgress(storageUrl, ms)
+                            },
+                            onClose = closePlayer
+                        )
+                    }
                 }
                 Page.MOVIE -> selectedFilm?.let { movie ->
                     FilmDetails(
@@ -284,21 +314,32 @@ private fun CinemaApp() {
                             page = Page.SITE
                         },
                         savedSelection = local.playbackSelection(movie.url),
-                        onWatch = { url, voice, season, episode ->
-                            if (voice.isNotBlank()) {
+                        onWatch = { request ->
+                            if (request.voice.isNotBlank()) {
                                 val storageUrl = movie.url
                                 val previous = local.playbackSelection(storageUrl) ?: PlaybackSelection()
-                                val changed = previous.voice != voice ||
-                                    (season.isNotBlank() && previous.season != season) ||
-                                    (episode.isNotBlank() && previous.episode != episode)
-                                local.savePlaybackSelection(storageUrl, previous.copy(
-                                    voice = voice,
-                                    season = season.ifBlank { if (changed) "" else previous.season },
-                                    episode = episode.ifBlank { if (changed) "" else previous.episode },
-                                    positionMs = if (changed) 0L else previous.positionMs
-                                ))
+                                val changed = previous.provider != request.provider ||
+                                    previous.voice != request.voice ||
+                                    (request.season.isNotBlank() && previous.season != request.season) ||
+                                    (request.episode.isNotBlank() && previous.episode != request.episode)
+                                local.savePlaybackSelection(
+                                    storageUrl,
+                                    previous.copy(
+                                        voice = request.voice,
+                                        season = request.season.ifBlank {
+                                            if (changed) "" else previous.season
+                                        },
+                                        episode = request.episode.ifBlank {
+                                            if (changed) "" else previous.episode
+                                        },
+                                        positionMs = if (changed) 0L else previous.positionMs,
+                                        provider = request.provider,
+                                        kinopoiskId = request.kinopoiskId,
+                                        imdbId = request.imdbId
+                                    )
+                                )
                                 playbackStorageUrl = storageUrl
-                                browsingSource = url
+                                browsingSource = request.filmUrl
                                 page = Page.FILM_PLAYER
                             }
                         },

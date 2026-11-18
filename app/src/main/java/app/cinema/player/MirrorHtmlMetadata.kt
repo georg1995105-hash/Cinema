@@ -108,6 +108,14 @@ internal object MirrorHtmlMetadata {
             .take(25).forEach { person(it,"actor") }
         document.select(".b-post__directors a[href], [itemprop=director] a[href]")
             .take(12).forEach { person(it,"director") }
+        val imdbId = document.selectFirst(
+            "span.imdb a[href], .imdb a[href], a[href*=imdb.com/title/]"
+        )?.let { Regex("""tt\d{5,12}""", RegexOption.IGNORE_CASE)
+            .find(it.attr("href").ifBlank { it.text() })?.value }.orEmpty()
+        val kinopoiskId = document.selectFirst(
+            "span.kp a[href], .kp a[href], a[href*=kinopoisk.ru/film/]"
+        )?.let { Regex("""/film/(\d{1,12})""", RegexOption.IGNORE_CASE)
+            .find(it.attr("href").ifBlank { it.text() })?.groupValues?.getOrNull(1) }.orEmpty()
         val init = Regex(
             """initCDN(Series|Movies)Events\s*\(\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?(\d{1,12})['"]?(?:\s*,\s*['"]?([01])['"]?\s*,\s*['"]?([01])['"]?(?:\s*,\s*['"]?([01])['"]?)?)?""",
             RegexOption.IGNORE_CASE
@@ -218,7 +226,9 @@ internal object MirrorHtmlMetadata {
             posters = posters,
             portraitsResolved = !unresolvedProfiles,
             defaultVoice = defaultVoice,
-            episodes = episodes
+            episodes = episodes,
+            kinopoiskId = kinopoiskId,
+            imdbId = imdbId
         )
         // Only trust source-provided player metadata matching the requested film.
         val player = if ((initId.isBlank() || initId == expectedId) &&

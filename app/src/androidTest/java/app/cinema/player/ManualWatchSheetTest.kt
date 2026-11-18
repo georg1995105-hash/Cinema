@@ -42,7 +42,7 @@ class ManualWatchSheetTest {
                     onBack = {},
                     onBrowse = {},
                     savedSelection = null,
-                    onWatch = { _, voice, _, _ -> selected = voice },
+                    onWatch = { request -> selected = request.voice },
                     onRelated = {},
                     onMetadata = {},
                     onPerson = {},

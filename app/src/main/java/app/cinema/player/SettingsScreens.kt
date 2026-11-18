@@ -16,6 +16,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 @Composable
 internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
@@ -78,8 +81,24 @@ internal fun SourcesScreen(
     var testing by remember { mutableStateOf<String?>(null) }
     val results=remember { mutableStateMapOf<String,MirrorProbeResult>() }
     val scope=rememberCoroutineScope()
+    val builtIns = MirrorSitePolicy.builtInOrigins
+    val allMirrors = (sources.toList() + builtIns).distinctBy {
+        it.trim().trimEnd('/').lowercase()
+    }
+    LaunchedEffect(allMirrors) {
+        // Checking every HTTPS endpoint at once overloads slower mobile networks.
+        // Four workers are enough to populate the latency labels progressively.
+        val limit = Semaphore(4)
+        coroutineScope {
+            allMirrors.forEach { address ->
+                launch {
+                    limit.withPermit { results[address] = SourceProbe.inspect(address) }
+                }
+            }
+        }
+    }
     Column(Modifier.fillMaxSize()) {
-        ScreenHeading("Зеркала", "Только сохранённые вами адреса", back)
+        ScreenHeading("Зеркала", "Выбор зеркала и время HTTPS-ответа", back)
         Spacer(Modifier.height(14.dp))
         Surface(color=appPanel,shape=RoundedCornerShape(16.dp)) {
             Column(Modifier.fillMaxWidth().padding(15.dp),
@@ -113,22 +132,25 @@ internal fun SourcesScreen(
             }
         }
         Spacer(Modifier.height(12.dp))
-        if(sources.isEmpty()) {
-            EmptyPanel("Зеркала не добавлены",
+        if(allMirrors.isEmpty()) {
+            EmptyPanel("Нет зеркал",
                 "Добавьте HTTPS-адрес выбранного источника.",Icons.Outlined.Public)
         } else {
             LazyColumn(verticalArrangement=Arrangement.spacedBy(9.dp),
                 contentPadding=PaddingValues(bottom=24.dp)) {
-                items(sources,key={it}){address->
+                items(allMirrors,key={it}){address->
                     var actions by remember(address){mutableStateOf(false)}
                     val check=results[address]
                     Surface(color=appCard,shape=RoundedCornerShape(14.dp)) {
                         Column(Modifier.fillMaxWidth().padding(13.dp),
                             verticalArrangement=Arrangement.spacedBy(5.dp)) {
                             Row(verticalAlignment=Alignment.CenterVertically){
-                                Text(address,modifier=Modifier.weight(1f),
-                                    maxLines=1,overflow=TextOverflow.Ellipsis)
-                                if(address==selected)Icon(Icons.Outlined.CheckCircle,
+                                Column(modifier=Modifier.weight(1f)) {
+                                    Text(address,maxLines=1,overflow=TextOverflow.Ellipsis)
+                                    Text(if (address in builtIns) "Из списка эталона" else "Добавлено вами",
+                                        color=appMuted,style=MaterialTheme.typography.labelSmall)
+                                }
+                                if(SourceRules.sameOrigin(address, selected.orEmpty()))Icon(Icons.Outlined.CheckCircle,
                                     contentDescription="Выбрано",tint=appBlue)
                             }
                             if(check!=null) {
@@ -136,9 +158,12 @@ internal fun SourcesScreen(
                                     (check.latencyMs?.let{" · "+it+" мс"}?:""),
                                     color=if(check.available)appBlue else appMuted,
                                     style=MaterialTheme.typography.bodySmall)
+                            } else {
+                                Text("Измеряем HTTPS-отклик…", color=appMuted,
+                                    style=MaterialTheme.typography.bodySmall)
                             }
                             Row(verticalAlignment=Alignment.CenterVertically){
-                                if(address!=selected){
+                                if(!SourceRules.sameOrigin(address, selected.orEmpty())){
                                     TextButton(onClick={select(address)}){Text("Выбрать")}
                                 }else{
                                     Text("Основное",color=appBlue,
@@ -161,11 +186,13 @@ internal fun SourcesScreen(
                                     DropdownMenu(expanded=actions,onDismissRequest={actions=false}){
                                         DropdownMenuItem(text={Text("Открыть")},
                                             onClick={actions=false;onBrowse(address)})
-                                        DropdownMenuItem(text={Text("Удалить")},onClick={
-                                            actions=false
-                                            change(sources.filterNot{it==address})
-                                            results.remove(address)
-                                        })
+                                        if (address in sources) {
+                                            DropdownMenuItem(text={Text("Удалить моё")},onClick={
+                                                actions=false
+                                                change(sources.filterNot{it==address})
+                                                results.remove(address)
+                                            })
+                                        }
                                     }
                                 }
                             }
