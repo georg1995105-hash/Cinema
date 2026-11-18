@@ -58,6 +58,15 @@ internal object MirrorSitePolicy {
         return values.entries.joinToString("; ") { (name, value) -> "$name=$value" }
     }
 
+    fun sessionScopes(url: String): List<String> {
+        if (!SourceRules.isValidHttpsUrl(url)) return emptyList()
+        val host = runCatching { URI(url).host.orEmpty().lowercase().removePrefix("www.") }
+            .getOrDefault("")
+        return if (host == "standby-rezka.tv" || host == "hdrezka.me")
+            listOf("https://standby-rezka.tv/", "https://hdrezka.me/")
+        else listOf(url)
+    }
+
     fun cookieScopes(url: String): List<String> {
         if (!SourceRules.isValidHttpsUrl(url)) return emptyList()
         val host = runCatching { URI(url).host.orEmpty().lowercase().removePrefix("www.") }
