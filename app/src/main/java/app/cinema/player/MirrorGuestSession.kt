@@ -35,6 +35,14 @@ internal object MirrorGuestSession {
         }
         val manager = CookieManager.getInstance()
         manager.setAcceptCookie(true)
+        // Do not force an anonymous profile onto an already signed-in WebView.
+        // Its native requests now preserve this same source-owned account session.
+        val cookies = MirrorSitePolicy.sessionScopes(origin)
+            .mapNotNull { manager.getCookie(it)?.takeIf(String::isNotBlank) }
+        if (MirrorGuestCookies.hasAccountSession(cookies)) {
+            view.loadUrl(address, MirrorSitePolicy.webViewHeaders(address))
+            return
+        }
         // The callback guarantees the cookie update is committed before the
         // navigation and its first same-origin AJAX request are started.
         manager.setCookie("$origin/", profileCookie) {
