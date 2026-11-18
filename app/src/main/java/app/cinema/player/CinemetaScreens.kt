@@ -143,7 +143,8 @@ internal fun CinemetaFilmDetails(
     movie: CatalogMovie, isFavourite: Boolean,
     onToggleFavourite: () -> Unit,
     onBack: () -> Unit,
-    onPlay: (String) -> Unit
+    onPlay: (String) -> Unit,
+    onLift: () -> Unit
 ) {
     val context = LocalContext.current
     var details by remember(movie.url) { mutableStateOf<CinemetaDetails?>(null) }
@@ -154,7 +155,7 @@ internal fun CinemetaFilmDetails(
     var checkFailure by remember(movie.url) { mutableStateOf("") }
     var retry by remember(movie.url) { mutableIntStateOf(0) }
     val couldHaveArchive = InternetArchiveStreams.canCheck(movie.url)
-    val officialEmbed = MosfilmCatalog.embedUrl(movie.url)
+    val officialEmbed: String? = null // Lift, not RUTUBE, is the selected browsing service
     LaunchedEffect(movie.url, retry) {
         loading = true
         error = ""
@@ -194,14 +195,14 @@ internal fun CinemetaFilmDetails(
                 PublicMoviePoster(movie, Modifier.width(190.dp).aspectRatio(.70f)
                     .border(1.dp, appPanel, RoundedCornerShape(14.dp)))
                 DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
-                    couldHaveArchive, officialEmbed, onPlay, { retry++ }, Modifier.weight(1f))
+                    couldHaveArchive, officialEmbed, onPlay, onLift, { retry++ }, Modifier.weight(1f))
             }
         } else {
             PublicMoviePoster(movie, Modifier.width(148.dp).aspectRatio(.70f)
                 .align(Alignment.CenterHorizontally))
             Spacer(Modifier.height(12.dp))
             DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
-                couldHaveArchive, officialEmbed, onPlay, { retry++ }, Modifier.fillMaxWidth())
+                couldHaveArchive, officialEmbed, onPlay, onLift, { retry++ }, Modifier.fillMaxWidth())
         }
         Spacer(Modifier.height(28.dp))
     }
@@ -213,22 +214,22 @@ private fun DetailsBody(
     movie: CatalogMovie, info: CinemetaDetails?, loading: Boolean, error: String,
     streams: List<InternetArchiveStreams.Video>, checking: Boolean, checkFailure: String,
     couldHaveArchive: Boolean, officialEmbed: String?,
-    onPlay: (String) -> Unit, retry: () -> Unit,
+    onPlay: (String) -> Unit, onLift: () -> Unit, retry: () -> Unit,
     modifier: Modifier
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(movie.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         if (movie.details.isNotBlank()) Text(movie.details, color = appMuted)
+        Button(onClick = onLift, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Outlined.PlayArrow, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Смотреть в Lift")
+        }
+        Text("Откроется поиск фильма в Lift. Доступность видео зависит от сервиса и региона.",
+            color = appMuted, style = MaterialTheme.typography.bodySmall)
         // Watch must be directly visible under the film title, not buried
         // below synopsis, credits and a long list of metadata.
-        if (officialEmbed != null) {
-            Button(onClick = { onPlay(officialEmbed) },
-                modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Outlined.PlayArrow, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Смотреть")
-            }
-        }
+
         if (loading && info == null) CircularProgressIndicator(Modifier.size(24.dp))
         if (error.isNotBlank()) {
             Text(error, color = MaterialTheme.colorScheme.error)
@@ -300,13 +301,7 @@ private fun DetailsBody(
         }
         HorizontalDivider(color = appMuted.copy(alpha = .2f))
         Text("Просмотр", style = MaterialTheme.typography.titleMedium)
-        if (officialEmbed != null) {
-            Text("Киноконцерн «Мосфильм» · официальный плеер RUTUBE",
-                color = appMuted, style = MaterialTheme.typography.bodyMedium)
-            Text("Управление качеством и звуком — в плеере RUTUBE.",
-                color = appMuted, style = MaterialTheme.typography.bodySmall)
-        }
-        else if (checking) Text("Проверяем реальный видеопоток…", color = appMuted)
+        if (checking) Text("Проверяем реальный видеопоток…", color = appMuted)
         else if (streams.isNotEmpty()) {
             var selecting by remember(movie.url) { mutableStateOf(false) }
             Text("Internet Archive • доступный архивный фильм", color = appMuted)
@@ -342,7 +337,7 @@ private fun DetailsBody(
             }
         } else {
             Text(if (checkFailure.isNotBlank()) checkFailure
-                else "Подтверждённый источник видео пока недоступен. Сведения и каталог работают независимо.",
+                else "Прямого подтверждённого MP4 здесь нет. Используйте поиск в Lift выше.",
                 color = appMuted)
             if (couldHaveArchive) OutlinedButton(onClick = retry) { Text("Проверить снова") }
         }
