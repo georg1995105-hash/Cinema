@@ -8,6 +8,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.Cache
+import okhttp3.CacheControl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -54,7 +55,7 @@ internal object CinemetaCatalog {
                     val url = item.optString("url")
                     val title = item.optString("title").trim().take(180)
                     if ((!isMovieUrl(url) && !ArchivePublicCatalog.isArchiveUrl(url)) || title.isBlank()) continue
-                    val poster = item.optString("poster").takeIf(MirrorPoster::isPhoto).orEmpty()
+                    val poster = trustedPoster(url, item.optString("poster"))
                     add(CatalogMovie(url, title, poster, item.optString("details").take(180)))
                 }
             }
@@ -116,6 +117,14 @@ internal object CinemetaCatalog {
         return parts[2] to parts[3].removeSuffix(".json")
     }
 
+    // Cinemeta has returned an unrelated First Dates poster for this exact IMDb
+    // series record. Better to show no art until a separately ID-verified
+    // source supplies the correct image than mislabel somebody else's film.
+    internal fun trustedPoster(movieUrl: String, provided: String): String {
+        if (identity(movieUrl) == ("series" to "tt0337898")) return ""
+        return provided.takeIf(MirrorPoster::isPhoto).orEmpty()
+    }
+
     private fun text(data: JSONObject, key: String) =
         data.optString(key).takeIf { it != "null" }.orEmpty().trim()
 
@@ -174,21 +183,23 @@ internal object CinemetaCatalog {
             else -> text(data, "name").ifBlank { text(data, "title") }
         }.take(180)
         if (title.isBlank()) return null
-        val poster = text(data, "poster").takeIf(MirrorPoster::isPhoto).orEmpty()
-        return CatalogMovie(movieUrl(type, id), title, poster, detailsText(data))
+        val url = movieUrl(type, id)
+        val poster = trustedPoster(url, text(data, "poster"))
+        return CatalogMovie(url, title, poster, detailsText(data))
     }
 
-    private fun read(context: Context, path: String): JSONObject {
+    private fun read(context: Context, path: String, forceRefresh: Boolean = false): JSONObject {
         require(path.startsWith("/catalog/") || path.startsWith("/meta/"))
         val url = "$origin$path"
         val now = System.currentTimeMillis()
         synchronized(cache) {
-            cache[url]?.let { (at, payload) ->
+            if (!forceRefresh) cache[url]?.let { (at, payload) ->
                 if (now - at < 15 * 60_000L) return JSONObject(payload)
             }
         }
         val request = Request.Builder().url(url).header("Accept", "application/json")
             .header("User-Agent", "Cinema/0.4 (Android; catalog client)")
+            .apply { if (forceRefresh) cacheControl(CacheControl.FORCE_NETWORK) }
             .get().build()
         val response = http(context).newCall(request).execute()
         response.use {
@@ -221,7 +232,8 @@ internal object CinemetaCatalog {
         }
     }
 
-    suspend fun home(context: Context, tab: String, kind: String): List<CatalogMovie> = coroutineScope {
+    suspend fun home(context: Context, tab: String, kind: String,
+        forceRefresh: Boolean = false): List<CatalogMovie> = coroutineScope {
         val types = if (kind == "Фильмы") listOf("movie")
                     else if (kind == "Сериалы") listOf("series")
                     else listOf("movie", "series")
@@ -235,7 +247,7 @@ internal object CinemetaCatalog {
                     else -> "/catalog/$type/top.json"
                 }
                 try {
-                    Pair(parseList(read(context, catalogPath)), null as Exception?)
+                    Pair(parseList(read(context, catalogPath, forceRefresh)), null as Exception?)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -258,7 +270,8 @@ internal object CinemetaCatalog {
      * metadata, not links to videos: returning them here previously produced
      * a large number of film pages without a Watch action.
      */
-    suspend fun search(context: Context, query: String, kind: String): List<CatalogMovie> = withContext(Dispatchers.IO) {
+    suspend fun search(context: Context, query: String, kind: String,
+        forceRefresh: Boolean = false): List<CatalogMovie> = withContext(Dispatchers.IO) {
         val q = query.trim().take(110)
         if (q.isBlank()) return@withContext emptyList()
         val encoded = URLEncoder.encode(q, "UTF-8").replace("+", "%20")
@@ -273,7 +286,7 @@ internal object CinemetaCatalog {
             types.map { type ->
                 async(Dispatchers.IO) {
                     try {
-                        Pair(parseList(read(context, "/catalog/$type/top/search=$encoded.json")), null as Exception?)
+                        Pair(parseList(read(context, "/catalog/$type/top/search=$encoded.json", forceRefresh)), null as Exception?)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
