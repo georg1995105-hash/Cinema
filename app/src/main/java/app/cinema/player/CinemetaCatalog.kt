@@ -222,9 +222,18 @@ internal object CinemetaCatalog {
     }
 
     suspend fun home(context: Context, tab: String, kind: String): List<CatalogMovie> = coroutineScope {
+        if (tab == "Мосфильм") return@coroutineScope MosfilmCatalog.catalog(kind)
+        if (tab == "Архив") return@coroutineScope ArchivePublicCatalog.home(kind)
         if (tab == "Смотреть") {
-            return@coroutineScope (MosfilmCatalog.catalog(kind) +
-                ArchivePublicCatalog.home(kind)).distinctBy { it.url }
+            val archive = try { ArchivePublicCatalog.home(kind) }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) {
+                    if (kind == "Сериалы" || kind == "Мультфильмы") emptyList()
+                    else ArchivePublicCatalog.featured()
+                }
+            return@coroutineScope SourceBackedCatalog.merge(
+                MosfilmCatalog.catalog(kind), archive
+            )
         }
         val types = if (kind == "Фильмы") listOf("movie")
                     else if (kind == "Сериалы") listOf("series")
