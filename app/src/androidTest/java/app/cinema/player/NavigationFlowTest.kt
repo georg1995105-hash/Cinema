@@ -19,6 +19,7 @@ class NavigationFlowTest {
         try {
             // Home is native: it must never embed the Lift website by default.
             compose.onNodeWithText("Популярное").assertIsDisplayed()
+            compose.onNodeWithText("Обновить").assertDoesNotExist()
             compose.onNodeWithText("Lift · Смотреть").assertDoesNotExist()
             compose.onNode(hasText("Поиск") and hasClickAction()).performClick()
             compose.onNodeWithText("Недавние запросы").assertIsDisplayed()
