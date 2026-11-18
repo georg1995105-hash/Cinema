@@ -50,6 +50,14 @@ class LiftMatchPolicyTest {
         assertTrue(LiftMatchPolicy.parseBrowserResults("not-json").isEmpty())
     }
 
+    @Test fun resultWithoutNameParameterUsesCleanVisibleTitle() {
+        val url = "https://liftw.ws/details.html?id=18899&year=1969"
+        val json = """[{"url":"$url","title":"FHD Красная палатка","year":"1969"}]"""
+        val match = LiftMatchPolicy.parseBrowserResults(JSONObject.quote(json)).single()
+        assertEquals("Красная палатка", match.title)
+        assertEquals(url, LiftMatchPolicy.singleExact("Красная палатка", 1969, listOf(match))?.url)
+    }
+
     @Test fun browserJavascriptQuotesUntrustedUserTitle() {
         val script = LiftMatchPolicy.searchScript("\"; alert(1); //")
         assertTrue(script.contains("input#q"))
