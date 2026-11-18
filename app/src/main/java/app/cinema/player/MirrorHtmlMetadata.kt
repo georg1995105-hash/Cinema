@@ -116,15 +116,12 @@ internal object MirrorHtmlMetadata {
             "span.kp a[href], .kp a[href], a[href*=kinopoisk.ru/film/]"
         )?.let { Regex("""/film/(\d{1,12})""", RegexOption.IGNORE_CASE)
             .find(it.attr("href").ifBlank { it.text() })?.groupValues?.getOrNull(1) }.orEmpty()
-        val init = Regex(
-            """initCDN(Series|Movies)Events\s*\(\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?(\d{1,12})['"]?(?:\s*,\s*['"]?([01])['"]?\s*,\s*['"]?([01])['"]?(?:\s*,\s*['"]?([01])['"]?)?)?""",
-            RegexOption.IGNORE_CASE
-        ).find(html)
-        val initId = init?.groupValues?.getOrNull(2).orEmpty()
-        val selectedId = init?.groupValues?.getOrNull(3).orEmpty()
-        val initCamrip = init?.groupValues?.getOrNull(4)?.toIntOrNull()?.coerceIn(0, 1) ?: 0
-        val initAds = init?.groupValues?.getOrNull(5)?.toIntOrNull()?.coerceIn(0, 1) ?: 0
-        val initDirector = init?.groupValues?.getOrNull(6)?.toIntOrNull()?.coerceIn(0, 1) ?: 0
+        val init = MirrorInitCdnParser.parse(html)
+        val initId = init?.postId.orEmpty()
+        val selectedId = init?.translatorId.orEmpty()
+        val initCamrip = init?.camrip ?: 0
+        val initAds = init?.ads ?: 0
+        val initDirector = init?.director ?: 0
         val voices = linkedMapOf<String, MirrorVoice>()
         for (entry in document.select("#translators-list li, .b-translator__item, [data-translator_id], [data-translator-id], [data-translation-id]")) {
             val inner = entry.selectFirst(
@@ -253,7 +250,7 @@ internal object MirrorHtmlMetadata {
             (voices.isNotEmpty() || defaultVoice.isNotBlank())) {
             MirrorMoviePage(
                 expectedId,
-                init?.groupValues?.getOrNull(1)?.equals("Series",true) == true ||
+                init?.isSeries == true ||
                     URI(filmUrl).path.startsWith("/series/"),
                 voices.values.toList(),
                 episodes,
