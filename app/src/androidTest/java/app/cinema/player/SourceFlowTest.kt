@@ -259,7 +259,10 @@ class SourceFlowTest {
                         "/films/fiction/30651-mstiteli-final-2019.html" -> {
                             filmRequests.incrementAndGet()
                             val cookie = request.getHeader("Cookie").orEmpty()
-                            if (cookie.contains("hdmbbs=1")) {
+                            val hdmbbs = cookie.split(';')
+                                .map(String::trim)
+                                .filter { it.startsWith("hdmbbs=") }
+                            if (hdmbbs == listOf("hdmbbs=1")) {
                                 sentReferenceCookie.set(true)
                             }
                             if (cookie.contains("techaro.lol-anubis-auth=fixture")) {
@@ -300,6 +303,12 @@ class SourceFlowTest {
             }
 
             MirrorHttp.clearStaleAnubisCookies(filmPage)
+            // Simulate an existing bad value on the user's phone. The reference
+            // network profile must override it with hdmbbs=1.
+            android.webkit.CookieManager.getInstance().apply {
+                setCookie(filmPage, "hdmbbs=0; Path=/; Secure; Max-Age=120")
+                flush()
+            }
             val client = MirrorHttp.client.newBuilder()
                 .sslSocketFactory(
                     fixtureTrust.sslSocketFactory(),
@@ -332,6 +341,10 @@ class SourceFlowTest {
                 assertTrue(MirrorHttp.hasAnubisCookie(filmPage))
             } finally {
                 MirrorHttp.clearStaleAnubisCookies(filmPage)
+                android.webkit.CookieManager.getInstance().apply {
+                    setCookie(filmPage, "hdmbbs=; Path=/; Secure; Max-Age=0")
+                    flush()
+                }
             }
         }
     }
