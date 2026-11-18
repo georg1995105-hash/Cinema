@@ -149,7 +149,7 @@ internal object FilmPageParser {
            if (!name || name.length >= 95) return;
            var url = typeof address === 'string' && address ? absolute(address) : '';
            var photo = typeof image === 'string' && image ? absolute(image) : '';
-           var pid = /^\\d{1,12}$/.test(String(rawPid || '')) ? String(rawPid) : '';
+           var pid = /^\d{1,12}$/.test(String(rawPid || '')) ? String(rawPid) : '';
            var previous = people.find(function(entry) { return entry.role === role &&
              entry.name.toLowerCase().replace(/ё/g,'е') === name.toLowerCase().replace(/ё/g,'е'); });
            photo = photo || window.__kinoPortraits?.images[url] || '';
