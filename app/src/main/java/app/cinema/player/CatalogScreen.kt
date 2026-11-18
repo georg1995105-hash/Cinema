@@ -259,6 +259,7 @@ internal fun CatalogGrid(
             val handler = Handler(Looper.getMainLooper())
             webViewClient = object : WebViewClient() {
                 private var scanningUrl: String? = null
+                private var accessCheckPending = false
 
                 override fun onPageStarted(
                     view: WebView, url: String, favicon: android.graphics.Bitmap?
@@ -266,6 +267,7 @@ internal fun CatalogGrid(
                     // A same-address challenge can reload after setting cookies;
                     // a stale previous scan must not discard the new document.
                     scanningUrl = null
+                    accessCheckPending = false
                     challengeActive = false
                 }
 
@@ -292,7 +294,7 @@ internal fun CatalogGrid(
                     val status = error.statusCode
                     MirrorTrace.add("webview", failedUrl, status,
                         result = if (status in setOf(403, 429, 503)) "blocked" else "response")
-                    if (status !in setOf(403, 429, 503)) {
+                    if (!CatalogAccessPolicy.needsBrowserInspection(status)) {
                         recoverEmptyCatalog("Зеркало вернуло HTTP $status.")
                         return
                     }
@@ -301,18 +303,24 @@ internal fun CatalogGrid(
                     // fallback destroys the browser and prevents the challenge from
                     // finishing. Inspect the loaded document before treating it as a
                     // permanent denial. Never fabricate authentication or entitlement.
-                    handler.postDelayed({
-                        if (!pending || view.url != failedUrl) return@postDelayed
+                    accessCheckPending = true
+                    fun inspectChallenge(remaining: Int) {
+                        if (!pending || view.url != failedUrl) return
                         view.evaluateJavascript(CatalogAccessPolicy.challengeJavascript) { value ->
                             if (!pending || view.url != failedUrl) return@evaluateJavascript
                             if (value == "true") {
+                                accessCheckPending = false
                                 challengeActive = true
                                 scanningUrl = null
+                            } else if (remaining > 0 && view.progress < 100) {
+                                handler.postDelayed({ inspectChallenge(remaining - 1) }, 500L)
                             } else {
+                                accessCheckPending = false
                                 recoverEmptyCatalog("Зеркало ограничило каталог (HTTP $status).")
                             }
                         }
-                    }, 950L)
+                    }
+                    handler.postDelayed({ inspectChallenge(6) }, 950L)
                 }
 
                 private fun scan(view: WebView, url: String) {
@@ -375,7 +383,7 @@ internal fun CatalogGrid(
                         else listOf(120L, 650L, 1450L)
                     timings.forEachIndexed { index, delayMs ->
                         handler.postDelayed({
-                            if (!active() || challengeActive) return@postDelayed
+                            if (!active() || challengeActive || accessCheckPending) return@postDelayed
                             view.evaluateJavascript(MirrorCatalog.javascript) { raw ->
                                 if (!active()) return@evaluateJavascript
                                 val extracted = MirrorCatalog.parse(raw, source)
