@@ -255,14 +255,29 @@ internal fun MirrorNativePlayer(
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
-                    val decision = FilmNavigationPolicy.decide(transportUrl, request.url.toString())
+                    val requested = request.url.toString()
+                    val mapped = MirrorRedirect.resolveFilmUrl(
+                        originalFilmUrl = filmUrl,
+                        fromUrl = view.url ?: transportUrl,
+                        location = requested,
+                        savedMirrors = mirrors
+                    )
+                    if (mapped != null) {
+                        transportUrl = mapped
+                        if (mapped != requested) {
+                            view.loadUrl(mapped, MirrorSitePolicy.webViewHeaders(mapped))
+                            return true
+                        }
+                        return false
+                    }
+                    val decision = FilmNavigationPolicy.decide(transportUrl, requested, mirrors)
                     if (!decision.allow) rejectedNavigation = decision.failureMessage
-                    // A blocked navigation attempt must not kill the already loaded film page.
                     return !decision.allow
                 }
 
                 private fun scan(view: WebView, url: String) {
-                    if (failed || scanningUrl == url || !MirrorPostId.canOpen(transportUrl, url)) return
+                    if (failed || scanningUrl == url ||
+                        !MirrorFilmUrl.isAllowedResolved(filmUrl, url, mirrors)) return
                     scanningUrl = url
                     message = "Определяем доступный плеер"
                     val timings = listOf(150L, 500L, 1250L, 2400L, 4100L, 6500L)
@@ -319,7 +334,7 @@ internal fun MirrorNativePlayer(
                     if (request.isForMainFrame) fail("Не удалось открыть страницу фильма. Проверьте соединение.")
                 }
             }
-            loadUrl(transportUrl)
+            loadUrl(transportUrl, MirrorSitePolicy.webViewHeaders(transportUrl))
         }
     }
     DisposableEffect(web){
