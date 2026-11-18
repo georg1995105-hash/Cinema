@@ -75,6 +75,22 @@ internal object CinemetaCatalog {
         "Sport" to "Спорт", "Thriller" to "Триллер", "War" to "Военный",
         "Western" to "Вестерн"
     )
+    internal fun localizeGenre(genre: String): String = localizedGenre[genre] ?: genre
+
+    internal fun localizeCountry(country: String): String = when (country.trim()) {
+        "Russia", "Russian Federation" -> "Россия"
+        "United States", "USA" -> "США"
+        "United Kingdom", "UK" -> "Великобритания"
+        "Canada" -> "Канада"
+        "Germany" -> "Германия"
+        "France" -> "Франция"
+        "Japan" -> "Япония"
+        "South Korea" -> "Южная Корея"
+        "Spain" -> "Испания"
+        "Italy" -> "Италия"
+        else -> country
+    }
+
     private fun detailsText(data: JSONObject): String {
         val year = text(data, "year").ifBlank { text(data, "releaseInfo") }
         val country = text(data, "country").replace("Russia", "Россия")
@@ -257,9 +273,9 @@ internal object CinemetaCatalog {
             item = item, description = text(meta, "description"),
             originalTitle = text(meta, "name"),
             rating = text(meta, "imdbRating"),
-            country = text(meta, "country"),
+            country = localizeCountry(text(meta, "country")),
             runtime = text(meta, "runtime"),
-            genres = names(meta.optJSONArray("genres") ?: meta.optJSONArray("genre")),
+            genres = names(meta.optJSONArray("genres") ?: meta.optJSONArray("genre")).map(::localizeGenre),
             directors = names(meta.optJSONArray("director")),
             actors = names(meta.optJSONArray("cast")),
             episodes = episodes
