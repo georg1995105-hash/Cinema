@@ -94,7 +94,9 @@ internal fun SourcesScreen(
         // exit just because Settings opened: rate limits can produce HTTP 403
         // on otherwise available catalog endpoints. Check only the selected
         // mirror; the remaining sites have an explicit manual test button.
-        selected?.takeIf { it in allMirrors }?.let { address ->
+        allMirrors.firstOrNull {
+            SourceRules.sameOrigin(it, selected.orEmpty())
+        }?.let { address ->
             results[address] = SourceProbe.inspect(address, browserUserAgent)
         }
     }
