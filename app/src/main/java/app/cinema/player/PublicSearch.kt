@@ -4,6 +4,10 @@ import java.net.URI
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.Jsoup
@@ -50,6 +54,35 @@ internal object PublicSearch {
                 if (matches.isNotEmpty()) return@withContext matches
             }
             emptyList()
+        }
+
+    /**
+     * Each mirror is the same site, but may be blocked independently.
+     * Never infer "no results" from a 403 or a page of login/challenge HTML.
+     * Only an actual title-matched list is returned to the UI.
+     */
+    suspend fun readWithFallback(source: String, query: String, userAgent: String): List<CatalogMovie> =
+        supervisorScope {
+            val urls = MirrorCatalogMirrors.candidates(source)
+                .mapNotNull(MirrorCatalogMirrors::origin)
+            if (urls.isEmpty()) return@supervisorScope emptyList()
+            val replies = Channel<List<CatalogMovie>>(Channel.UNLIMITED)
+            val workers = urls.mapIndexed { index, origin ->
+                launch {
+                    if (index > 0) delay(index * 900L)
+                    replies.send(read(origin, query, userAgent))
+                }
+            }
+            try {
+                repeat(urls.size) {
+                    val matches = replies.receive()
+                    if (matches.isNotEmpty()) return@supervisorScope matches
+                }
+                emptyList()
+            } finally {
+                workers.forEach { it.cancel() }
+                replies.close()
+            }
         }
 
     internal fun parse(html: String, pageUrl: String): List<CatalogMovie> {
