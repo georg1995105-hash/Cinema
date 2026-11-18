@@ -133,18 +133,18 @@ jobs:
           CERTIFICATE="$(awk -F': ' '/certificate SHA-256 digest: /{print $NF}' <<< "$SIGNER" | sort -u)"
           test "$CERTIFICATE" = '1db504f66fa39cf51feefab727f5b8b229baef08a5ae2de80da05191514f93cb'
           sha256sum "$APK"
-      - name: Verify signed Android update from 0.4.22
+      - name: Verify signed Android update from 0.4.23
         if: steps.signing.outputs.available == 'true'
         shell: bash
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           curl --fail --silent --show-error --location --retry 2 \
-            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.22/Cinema-0.4.22.apk" \
-            --output "$RUNNER_TEMP/Cinema-0.4.22.apk"
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.23/Cinema-0.4.23.apk" \
+            --output "$RUNNER_TEMP/Cinema-0.4.23.apk"
           if adb shell pm path app.cinema.player | grep -q "^package:"; then
             adb uninstall app.cinema.player
           fi
-          adb install "$RUNNER_TEMP/Cinema-0.4.22.apk"
+          adb install "$RUNNER_TEMP/Cinema-0.4.23.apk"
           adb shell am start -W -n app.cinema.player/.MainActivity | grep -F "Status: ok"
           ORIGINAL_INSTALL="$(adb shell dumpsys package app.cinema.player | awk -F= '/firstInstallTime=/{print $2; exit}')"
           test -n "$ORIGINAL_INSTALL"
@@ -184,4 +184,4 @@ jobs:
           gh release create "$TAG" "$RUNNER_TEMP/Cinema-$VERSION.apk" \
             --target "$GITHUB_SHA" \
             --title "Cinema $VERSION" \
-            --notes "Cinema 0.4.23: зеркала Rezka больше не выдаются за отдельные источники в окне просмотра. Для карточки фильма приложение автоматически проверяет сохранённые зеркала и использует рабочий URL того же фильма. Озвучки проверяются обычным AJAX-запросом источника и помечаются как доступные, требующие подписку, ролик или недоступные; неизвестная сетевая ошибка не маскируется под недоступность. Исправлены runtime/флаги initCDN, восстановление сезона и серии, percent-encoded URL и сохранение истории при переключении рабочего зеркала. Проверено CI: unit, WebView/Media3, подпись и установка поверх 0.4.22. Реальный фильм на устройстве всё равно требует пользовательской проверки."
+            --notes "Cinema 0.4.24: сетевой путь Rezka переделан по фактической схеме референсного Android-клиента. Приложение принимает и нормализует динамический редирект на новое Rezka-зеркало, сохраняет точный ID/путь фильма, использует X-Hdrezka-Android-App заголовки, специальный Host для standby-rezka.tv и двустороннюю синхронизацию cookies HTTP/WebView. Класс b-prem_translator теперь корректно считается Premium. Обычные озвучки больше не проверяются по одной AJAX-запросами перед показом меню: доступность берётся сразу со страницы, а поток запрашивается только после выбора Смотреть. Проверено CI: unit, WebView/Media3, подпись и установка поверх 0.4.23. Реальный ответ текущего зеркала дополнительно проверяется на устройстве."
