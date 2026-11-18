@@ -862,6 +862,18 @@ internal fun FilmDetails(
                 shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
             ) {
                 val availableVoices = effectiveVoices
+                val freeStreamAvailable = voiceAvailability.values.any {
+                    it == VoiceAvailability.AVAILABLE
+                }
+                val allVoicesChecked = availableVoices.isNotEmpty() &&
+                    availableVoices.all { voiceAvailability.containsKey(it.id) }
+                val sourceStatus = when {
+                    freeStreamAvailable -> "Доступен"
+                    !allVoicesChecked -> "Проверяем…"
+                    voiceAvailability.values.any { it == VoiceAvailability.SUBSCRIPTION } ->
+                        "Требует подписку"
+                    else -> "Нет доступного потока"
+                }
                 val voiceSelected = availableVoices.firstOrNull { it.id == chosenVoice }
                 val pageEpisodes = current?.episodes.orEmpty().ifEmpty {
                     resolvedPlayer?.episodes.orEmpty()
@@ -884,7 +896,7 @@ internal fun FilmDetails(
                     Text("Источник", style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold)
                     Surface(
-                        color = if (resolvedPlayer != null) appBlue.copy(alpha = .18f) else appCard,
+                        color = if (freeStreamAvailable) appBlue.copy(alpha = .18f) else appCard,
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Row(
@@ -893,12 +905,12 @@ internal fun FilmDetails(
                         ) {
                             Text(
                                 "Rezka",
-                                color = if (resolvedPlayer != null) appBlue else appMuted,
+                                color = if (freeStreamAvailable) appBlue else appMuted,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Spacer(Modifier.width(9.dp))
                             Text(
-                                if (resolvedPlayer != null) "Доступен" else "Проверяем…",
+                                sourceStatus,
                                 color = appMuted,
                                 style = MaterialTheme.typography.labelSmall
                             )
