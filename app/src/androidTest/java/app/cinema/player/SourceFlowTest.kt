@@ -150,7 +150,7 @@ class SourceFlowTest {
 
     @Test fun playerResolvesVoiceEpisodesAndAjaxResponsesFromWebView() = withPage(
         """
-        <script type="application/x-fixture">sof.tv.initCDNSeriesEvents(12, 7, 0, 1, 0);</script>
+        <script type="application/x-fixture">sof.tv.initCDNSeriesEvents(12, 7, 1, 2, 0, null, 1, 0);</script>
         <ul id="translators-list"><li data-translator_id="7" data-ads="1" data-favs="voice-fixture-token" class="active">Оригинал</li>
         <li data-translator-id="8" data-ads="0" data-premium="1">Дубляж</li></ul>
         <table class="b-post__infotable"><tr><th>Время</th><td>43 мин.</td></tr></table>
