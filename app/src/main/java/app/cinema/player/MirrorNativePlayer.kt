@@ -590,6 +590,23 @@ internal fun MirrorNativePlayer(
             streams = MirrorStreamFallback.choose(streams, retry)
         }
         if (streams.qualities.isEmpty()) {
+            // A mirror may publish a film/translator but offer no video.
+            // Try a few alternative hosts for exactly this same post, voice
+            // and episode. Each host uses its own public guest session.
+            message = "Проверяем поток на резервных зеркалах"
+            val alternative = withTimeoutOrNull(23_000L) {
+                MirrorStreamFailover.find(
+                    pageUrl, mirrors, voice, season, episode,
+                    WebSettings.getDefaultUserAgent(context)
+                )
+            }
+            if (alternative != null) {
+                pageUrl = alternative.pageUrl
+                transportUrl = alternative.pageUrl
+                streams = alternative.stream
+            }
+        }
+        if (streams.qualities.isEmpty()) {
             streams.failure?.voiceAvailability()?.let { voiceAvailability[voiceKey(voice)] = it }
             message = ""
             error = streams.failure?.text ?: PlaybackFailure.UNAVAILABLE.text
