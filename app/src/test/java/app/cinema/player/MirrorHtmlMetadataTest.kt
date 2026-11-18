@@ -159,4 +159,22 @@ class MirrorHtmlMetadataTest {
             player, "17", "1", "1")["is_ads"])
     }
 
+    @Test fun nativeSeriesParserUsesEightArgumentInitFromReference() {
+        val html = """
+          <div class="b-post">
+            <h1 class="b-post__title">Сериал</h1>
+            <div class="b-post__description_text">Описание.</div>
+            <ul id="translators-list">
+              <li data-translator_id="17" class="active">Обычная</li>
+            </ul>
+            <script>initCDNSeriesEvents(123,17,1,5,0,null,1,0);</script>
+          </div>
+        """
+        val page = requireNotNull(MirrorHtmlMetadata.parse(url, html).player)
+        assertTrue(page.isSeries)
+        assertEquals("17", page.defaultVoice)
+        assertEquals("1", MirrorPlaybackRequest.stream(page, "17", "1", "5")["is_ads"])
+        assertEquals("0", MirrorPlaybackRequest.stream(page, "17", "1", "5")["is_camrip"])
+    }
+
 }
