@@ -37,12 +37,11 @@ class ManualWatchSheetTest {
                     movie = movie,
                     source = "https://rezka.example",
                     sources = listOf("https://rezka.example", "https://another.example"),
-                    onChooseSource = {},
                     isFavourite = false,
                     onToggleFavourite = {},
                     onBack = {},
                     onBrowse = {},
-                    savedVoice = "",
+                    savedSelection = null,
                     onWatch = { _, voice, _, _ -> selected = voice },
                     onRelated = {},
                     onMetadata = {},
@@ -54,7 +53,7 @@ class ManualWatchSheetTest {
         compose.runOnIdle { assertNull(selected) }
         compose.onNodeWithText("Источник").assertExists()
         compose.onNodeWithText("Озвучка").assertExists()
-        compose.onNodeWithText("Дубляж").performClick()
+        compose.onNodeWithText("Дубляж", substring = true).performClick()
         compose.runOnIdle { assertNull(selected) }
         compose.onAllNodesWithText("Смотреть").onLast().performClick()
         compose.runOnIdle { assertEquals("27",selected) }
