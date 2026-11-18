@@ -170,13 +170,13 @@ internal fun CinemetaFilmDetails(
         if (isTablet) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 PublicMoviePoster(movie, Modifier.width(190.dp).aspectRatio(.70f)
-                    .border(1.dp, appPanel, RoundedCornerShape(14.dp)), ContentScale.Crop)
+                    .border(1.dp, appPanel, RoundedCornerShape(14.dp)))
                 DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
                     couldHaveArchive, onPlay, { retry++ }, Modifier.weight(1f))
             }
         } else {
             PublicMoviePoster(movie, Modifier.width(148.dp).aspectRatio(.70f)
-                .align(Alignment.CenterHorizontally), ContentScale.Crop)
+                .align(Alignment.CenterHorizontally))
             Spacer(Modifier.height(12.dp))
             DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
                 couldHaveArchive, onPlay, { retry++ }, Modifier.fillMaxWidth())
