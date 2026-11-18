@@ -23,12 +23,16 @@ internal data class MirrorStreamAlternative(
 internal object MirrorStreamFailover {
     fun candidates(pageUrl: String, savedMirrors: List<String>): List<String> {
         if (MirrorPostId.fromUrl(pageUrl) == null) return emptyList()
-        val origins = listOf("https://rezka.ag/") +
-            savedMirrors + MirrorSitePolicy.builtInOrigins
+        // Check the user's chosen alternatives first, not an unrelated hardcoded host.
+        // Six workers cover the twelve-candidate budget within the player's
+        // existing 23-second global timeout; the former two-worker queue often
+        // got cancelled before even visiting its seventh candidate.
+        val origins = savedMirrors + listOf("https://rezka.ag/") +
+            MirrorSitePolicy.builtInOrigins
         return origins.mapNotNull { MirrorFilmUrl.changeOrigin(pageUrl, it) }
             .filter { !SourceRules.sameOrigin(it, pageUrl) }
             .distinct()
-            .take(7)
+            .take(12)
     }
 
     suspend fun find(
@@ -46,7 +50,7 @@ internal object MirrorStreamFailover {
         candidates.forEach { queue.trySend(it) }
         queue.close()
         val results = Channel<MirrorStreamAlternative?>(Channel.UNLIMITED)
-        val workers = List(minOf(2, candidates.size)) {
+        val workers = List(minOf(6, candidates.size)) {
             launch(Dispatchers.IO) {
                 for (candidate in queue) {
                     val next = withTimeoutOrNull(14_000L) {

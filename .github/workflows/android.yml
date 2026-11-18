@@ -133,18 +133,18 @@ jobs:
           CERTIFICATE="$(awk -F': ' '/certificate SHA-256 digest: /{print $NF}' <<< "$SIGNER" | sort -u)"
           test "$CERTIFICATE" = '1db504f66fa39cf51feefab727f5b8b229baef08a5ae2de80da05191514f93cb'
           sha256sum "$APK"
-      - name: Verify signed Android update from 0.4.30
+      - name: Verify signed Android update from 0.4.31
         if: steps.signing.outputs.available == 'true'
         shell: bash
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           curl --fail --silent --show-error --location --retry 2 \
-            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.30/Cinema-0.4.30.apk" \
-            --output "$RUNNER_TEMP/Cinema-0.4.30.apk"
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.31/Cinema-0.4.31.apk" \
+            --output "$RUNNER_TEMP/Cinema-0.4.31.apk"
           if adb shell pm path app.cinema.player | grep -q "^package:"; then
             adb uninstall app.cinema.player
           fi
-          adb install "$RUNNER_TEMP/Cinema-0.4.30.apk"
+          adb install "$RUNNER_TEMP/Cinema-0.4.31.apk"
           adb shell am start -W -n app.cinema.player/.MainActivity | grep -F "Status: ok"
           ORIGINAL_INSTALL="$(adb shell dumpsys package app.cinema.player | awk -F= '/firstInstallTime=/{print $2; exit}')"
           test -n "$ORIGINAL_INSTALL"
@@ -184,4 +184,4 @@ jobs:
           gh release create "$TAG" "$RUNNER_TEMP/Cinema-$VERSION.apk" \
             --target "$GITHUB_SHA" \
             --title "Cinema $VERSION" \
-            --notes "Cinema 0.4.31: исправлен протокол запроса видеопотоков по байткоду эталонного APK. Для сериалов корректно разбирается расширенный восьмиаргументный initCDNSeriesEvents (настоящие флаги берутся из 5, 7 и 8 аргументов), поддержан старый формат. Все три флага переводчика передаются также для сериалов; favs берётся из выбранной озвучки, а не только из карточки. Выбранная дорожка сохраняет флаги initCDNSeriesEvents при отсутствии data-атрибутов. Гостевой HTTP-профиль не смешивает логин с запросами: отправляет hdmbbs=1 и только Anubis challenge cookie. Скрытый WebView не пересоздаётся при перенаправлении на зеркало. Добавлены unit и Android-инструментальные проверки этих параметров. CI сверяет постоянную подпись и обновление поверх 0.4.30. Реальный видеопоток с телефона требует отдельной проверки."
+            --notes "Cinema 0.4.32: восстановлено чтение актёров, режиссёров, фотографий и персон из эталонных блоков persons-list-holder как в нативном HTML-парсере, так и в WebView. Гостевой AJAX больше не отвергает тот же фильм только из-за query/hash в адресе. Резервная проверка потоков ставит сохранённые зеркала первыми и проверяет до 12 адресов одновременно по 6 в пределах прежнего лимита времени. Добавлены JVM и Android-тесты. CI проверяет постоянную подпись и обновление поверх 0.4.31. Работа конкретных зеркал требует проверки на устройстве; платные ограничения не обходятся."

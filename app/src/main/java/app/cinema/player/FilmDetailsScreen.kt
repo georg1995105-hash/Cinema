@@ -182,6 +182,27 @@ internal object FilmPageParser {
          ).forEach(function(node){person(node,'actor')});
          document.querySelectorAll('.b-post__directors a[href], .b-post [itemprop~="director"], .b-post__infotable [itemprop~="director"]')
            .forEach(function(node){person(node,'director')});
+         // Reference film pages often keep cast outside the facts table.
+         document.querySelectorAll('div.persons-list-holder').forEach(function(holder) {
+           var heading = norm(holder.querySelector('span.inline h2, h2')?.textContent ||
+             holder.getAttribute('data-role') || holder.getAttribute('data-id') || '').toLowerCase();
+           var role = /режисс|director/i.test(heading) ? 'director' :
+             /в ролях|акт[её]р|actor/i.test(heading) ? 'actor' : '';
+           if (!role) return;
+           var items = holder.querySelectorAll('span.item');
+           if (!items.length) items = holder.querySelectorAll('span.person-name-item');
+           Array.from(items).slice(0, 35).forEach(function(item) {
+             var label = item.querySelector('span.person-name-item') || item;
+             var name = norm(label.textContent);
+             if (name.length < 2 || name.length > 90) return;
+             var link = item.querySelector('a[href]');
+             var photo = item.getAttribute('data-photo') ||
+               label.getAttribute('data-photo') ||
+               item.querySelector('[data-photo]')?.getAttribute('data-photo') || '';
+             if (/^(?:null|undefined)$/i.test(photo) || /nopersonphoto/i.test(photo)) photo = '';
+             addPerson(role, name, link?.getAttribute('href'), photo);
+           });
+         });
          var profiles = people.slice().sort(function(a,b) {return (a.role !== "actor") - (b.role !== "actor")}).filter(function(p) {
            if (p.photo || !p.url) return false;
            var u = new URL(p.url);

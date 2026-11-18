@@ -176,7 +176,7 @@ internal suspend fun mirrorAjax(web: WebView, pageUrl: String, payload: Map<Stri
             """.trimIndent()
             fun check() {
                 if (!continuation.isActive) return
-                if (web.url != pageUrl) {
+                if (!MirrorFilmUrl.sameDocument(web.url.orEmpty(), pageUrl)) {
                     continuation.resume(JSONObject().put("__kinoFailure", "redirect").toString())
                     return
                 }
@@ -198,7 +198,7 @@ internal suspend fun mirrorAjax(web: WebView, pageUrl: String, payload: Map<Stri
             continuation.invokeOnCancellation {
                 handler.removeCallbacksAndMessages(null)
                 handler.post {
-                    if (web.url == pageUrl) web.evaluateJavascript(
+                    if (MirrorFilmUrl.sameDocument(web.url.orEmpty(), pageUrl)) web.evaluateJavascript(
                         "window['$marker']?.abort(); delete window['$marker'];"
                     ) {}
                 }
