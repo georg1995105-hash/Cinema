@@ -14,6 +14,8 @@ class LiftNavigationTest {
 
     @Test fun officialLiftWebViewIsFirstHomeTab() {
         compose.onNodeWithText("Lift · Смотреть").assertIsDisplayed()
-        compose.onNodeWithText("Популярное").assertIsDisplayed()
+        // The embedded provider already has a tab bar. Do not stack a
+        // second Cinema navigation bar on top of its watch controls.
+        compose.onNodeWithText("Популярное").assertDoesNotExist()
     }
 }
