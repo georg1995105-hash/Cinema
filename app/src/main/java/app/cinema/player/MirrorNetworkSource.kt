@@ -1,19 +1,27 @@
 package app.cinema.player
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
+import java.io.IOException
 import java.io.Reader
 import java.net.URI
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * HTTP adapter for the chosen mirror. Reuses WebView cookies through MirrorHttp.
@@ -25,6 +33,25 @@ internal object MirrorNetworkSource {
     private val http: OkHttpClient = MirrorHttp.client.newBuilder()
         .followRedirects(false).followSslRedirects(false)
         .callTimeout(11, TimeUnit.SECONDS).build()
+
+    private suspend fun execute(request: Request): Response =
+        suspendCancellableCoroutine { continuation ->
+            val call = http.newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, issue: IOException) {
+                    if (continuation.isActive) continuation.resumeWithException(issue)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    if (!continuation.isActive) {
+                        response.close()
+                        return
+                    }
+                    continuation.resume(response)
+                }
+            })
+        }
 
     private fun bounded(reader: Reader, max: Int): String? {
         val out = StringBuilder()
@@ -59,7 +86,7 @@ internal object MirrorNetworkSource {
                     val request=Request.Builder().url(current).get()
                         .header("Referer",referer).header("User-Agent",userAgent)
                         .header("Accept","text/html,application/xhtml+xml").build()
-                    http.newCall(request).execute().use { response ->
+                    execute(request).use { response ->
                         if (response.code in 300..399) {
                             val next=safeRedirect(current,response.header("Location"),url)
                                 ?:return@withContext FilmResult(current,
@@ -86,6 +113,8 @@ internal object MirrorNetworkSource {
                     }
                 }
                 FilmResult(current,reason="Слишком много перенаправлений.")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_:java.net.SocketTimeoutException) {
                 FilmResult(current,reason="Зеркало не ответило вовремя.")
             } catch (_:Exception) {
@@ -99,9 +128,9 @@ internal object MirrorNetworkSource {
      * Prefer a candidate that exposes real player metadata, then one with film details.
      */
     suspend fun resolveFilm(url: String, mirrors: List<String>, userAgent: String): FilmResult =
-        coroutineScope {
+        supervisorScope {
             if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
-                return@coroutineScope FilmResult(url, reason = "Неверный адрес фильма.")
+                return@supervisorScope FilmResult(url, reason = "Неверный адрес фильма.")
 
             val candidates = buildList {
                 add(url)
@@ -111,14 +140,30 @@ internal object MirrorNetworkSource {
                     .forEach(::add)
             }.distinct().take(8)
 
-            val results = candidates.map { candidate ->
-                async(Dispatchers.IO) { film(candidate, userAgent) }
-            }.awaitAll()
-
-            results.firstOrNull { it.metadata?.player != null }
-                ?: results.firstOrNull { it.metadata?.info != null }
-                ?: results.firstOrNull { it.reason.isNotBlank() }
-                ?: FilmResult(url, reason = "Зеркала не предоставили страницу фильма.")
+            val completed = Channel<FilmResult>(Channel.UNLIMITED)
+            val jobs = candidates.map { candidate ->
+                launch(Dispatchers.IO) {
+                    completed.send(film(candidate, userAgent))
+                }
+            }
+            var bestInfo: FilmResult? = null
+            var bestFailure: FilmResult? = null
+            try {
+                repeat(candidates.size) {
+                    val result = completed.receive()
+                    if (result.metadata?.player != null) {
+                        jobs.forEach { it.cancel() }
+                        return@supervisorScope result
+                    }
+                    if (bestInfo == null && result.metadata?.info != null) bestInfo = result
+                    if (bestFailure == null && result.reason.isNotBlank()) bestFailure = result
+                }
+                bestInfo ?: bestFailure
+                    ?: FilmResult(url, reason = "Зеркала не предоставили страницу фильма.")
+            } finally {
+                jobs.forEach { it.cancel() }
+                completed.close()
+            }
         }
 
     /** Normal site AJAX, without fabricated Premium privileges or guessed translator IDs. */
@@ -138,7 +183,7 @@ internal object MirrorNetworkSource {
                 .header("User-Agent",userAgent).header("X-Requested-With","XMLHttpRequest")
                 .header("Accept","application/json, text/plain, */*").build()
             try {
-                http.newCall(request).execute().use { response ->
+                execute(request).use { response ->
                     if (response.code in 300..399)
                         return@withContext JSONObject().put("__kinoFailure","redirect").toString()
                     if (response.code!=200)
@@ -171,6 +216,8 @@ internal object MirrorNetworkSource {
                     }
                     data.toString()
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_:java.net.SocketTimeoutException) {
                 JSONObject().put("__kinoFailure","timeout").toString()
             } catch (_:Exception) {
