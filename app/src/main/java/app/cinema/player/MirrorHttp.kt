@@ -54,9 +54,11 @@ internal object MirrorHttp {
             if (referer != null && SourceRules.sameOrigin(referer, address)) {
                 val cookies = MirrorSitePolicy.cookieScopes(address)
                     .mapNotNull { manager.getCookie(it)?.takeIf(String::isNotBlank) }
-                val header = if (MirrorGuestCookies.isGuestFilmRequest(address, referer)) {
-                    // Actual reference guest CookieJar: use the public app profile
-                    // and Anubis, not the user's unrelated account credentials.
+                // Native film/AJAX calls must use the same authenticated session
+                // as WebView. Isolate only genuinely anonymous guest requests.
+                // A session belongs to the exact request origin: no cross-site credentials.
+                val header = if (MirrorGuestCookies.isGuestFilmRequest(address, referer) &&
+                    !MirrorGuestCookies.hasAccountSession(cookies)) {
                     MirrorGuestCookies.fromStoredCookies(cookies)
                 } else MirrorSitePolicy.mergeCookieHeaders(cookies)
                 header.takeIf(String::isNotBlank)
