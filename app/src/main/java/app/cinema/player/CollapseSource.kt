@@ -1,5 +1,7 @@
 package app.cinema.player
 
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -183,25 +185,14 @@ internal object CollapseSource {
                     .header("Accept", "text/html,application/xhtml+xml")
                     .build()
                 client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful)
-                        return@use CollapseResult(
-                            reason = "Collapse: HTTP " + response.code + ".",
-                            endpoint = endpoint
-                        )
-                    val body = response.body?.string().orEmpty()
-                    if (body.length > 2_200_000)
-                        return@use CollapseResult(
-                            reason = "Collapse вернул слишком большой ответ.",
-                            endpoint = endpoint
-                        )
-                    val lower = body.lowercase()
-                    if ("видео недоступно для вашего региона" in lower ||
-                        "video is not available for your region" in lower) {
-                        return@use CollapseResult(
-                            reason = "Collapse недоступен в текущем регионе.",
-                            endpoint = endpoint
-                        )
-                    }
+                    val responseBody = response.body
+                    val body = if (responseBody == null) "" else boundedText(
+                        responseBody.byteStream(), 2_200_000
+                    ) ?: return@use CollapseResult(
+                        reason = "Collapse вернул слишком большой ответ.",
+                        endpoint = endpoint
+                    )
+                    responseFailure(response.code, body, endpoint)?.let { return@use it }
                     val media = parseHtml(body)
                     if (media?.playable() == true)
                         CollapseResult(media = media, endpoint = endpoint)
@@ -220,6 +211,35 @@ internal object CollapseSource {
             lastReason = result.reason
         }
         CollapseResult(reason = lastReason)
+    }
+
+    /** Reads at most maxBytes + 1 so an error page cannot cause an unbounded allocation. */
+    internal fun boundedText(input: InputStream, maxBytes: Int): String? {
+        val output = ByteArrayOutputStream(minOf(maxBytes + 1, 64 * 1024))
+        val buffer = ByteArray(8192)
+        var remaining = maxBytes + 1
+        while (remaining > 0) {
+            val count = input.read(buffer, 0, minOf(buffer.size, remaining))
+            if (count < 0) break
+            if (count == 0) continue
+            output.write(buffer, 0, count)
+            remaining -= count
+        }
+        val bytes = output.toByteArray()
+        if (bytes.size > maxBytes) return null
+        return String(bytes, Charsets.UTF_8)
+    }
+
+    internal fun responseFailure(code: Int, body: String, endpoint: String): CollapseResult? {
+        val lower = body.lowercase()
+        if ("видео недоступно для вашего региона" in lower ||
+            "video is not available for your region" in lower) {
+            return CollapseResult(
+                reason = "Collapse недоступен в текущем регионе.", endpoint = endpoint)
+        }
+        if (code !in 200..299) return CollapseResult(
+            reason = "Collapse: HTTP $code.", endpoint = endpoint)
+        return null
     }
 
     internal fun parseHtml(html: String): CollapseMedia? {

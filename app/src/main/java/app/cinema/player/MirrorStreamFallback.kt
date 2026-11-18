@@ -9,6 +9,29 @@ internal object MirrorStreamFallback {
     fun shouldTryBrowser(primary: MirrorStreamInfo): Boolean =
         primary.qualities.isEmpty()
 
+    fun useBrowserEpisodes(
+        primaryCount: Int,
+        primaryFailure: PlaybackFailure?,
+        browserCount: Int,
+        browserFailure: PlaybackFailure?
+    ): Boolean {
+        if (browserCount > 0) return true
+        if (primaryCount > 0 || browserFailure !in setOf(
+                PlaybackFailure.AUTH_REQUIRED,
+                PlaybackFailure.PREMIUM,
+                PlaybackFailure.DRM,
+                PlaybackFailure.BLOCKED,
+                PlaybackFailure.PREVIEW
+            )) return false
+        return primaryFailure == null || primaryFailure in setOf(
+            PlaybackFailure.INVALID_RESPONSE,
+            PlaybackFailure.NETWORK,
+            PlaybackFailure.TIMEOUT,
+            PlaybackFailure.REDIRECT,
+            PlaybackFailure.UNAVAILABLE
+        )
+    }
+
     fun choose(primary: MirrorStreamInfo, browser: MirrorStreamInfo?): MirrorStreamInfo {
         if (browser == null) return primary
         if (browser.qualities.isNotEmpty()) return browser

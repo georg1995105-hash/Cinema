@@ -38,13 +38,16 @@ internal object PublicSearch {
                         .build()
                     client.newCall(request).execute().use { response ->
                         if (!response.isSuccessful) return@use emptyList()
-                        val html = response.peekBody(maxBytes + 1)
-                        if (html.contentLength() > maxBytes) return@use emptyList()
-                        parse(html.string(), url)
+                        response.peekBody(maxBytes + 1).use { html ->
+                            if (html.contentLength() > maxBytes) return@use emptyList()
+                            parse(html.string(), url)
+                        }
                     }
                 }.getOrDefault(emptyList())
                 val matches = SearchRelevance.find(cards, query)
-                if (matches.any { it.poster.isNotBlank() }) return@withContext matches
+                // A verified film URL and title are a real result even if the
+                // source omitted artwork. Poster loading has its own fallbacks.
+                if (matches.isNotEmpty()) return@withContext matches
             }
             emptyList()
         }

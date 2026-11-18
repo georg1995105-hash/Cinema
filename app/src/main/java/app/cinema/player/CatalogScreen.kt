@@ -37,9 +37,14 @@ import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import org.json.JSONObject
+import org.jsoup.Jsoup
 import java.net.URI
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import okhttp3.Request
 
 internal data class CatalogMovie(
     val url: String,
@@ -85,6 +90,78 @@ internal object MirrorCatalog {
         "Популярное" to "popular",
         "В ожидании" to "soon"
     )
+    private const val maxBytes = 2L * 1024L * 1024L
+    private val client = MirrorHttp.client.newBuilder()
+        .followRedirects(false).followSslRedirects(false)
+        .callTimeout(10, TimeUnit.SECONDS)
+        .build()
+
+    /** Native first: a WebView challenge or lifecycle failure must not hide an accessible catalog. */
+    suspend fun read(pageUrl: String, userAgent: String): List<CatalogMovie> =
+        withContext(Dispatchers.IO) {
+            if (!SourceRules.isValidHttpsUrl(pageUrl)) return@withContext emptyList()
+            runCatching {
+                val origin = MirrorAccountGateway.origin(pageUrl) ?: return@runCatching emptyList()
+                val request = Request.Builder().url(pageUrl).get()
+                    .header("Referer", "$origin/")
+                    .header("Accept", "text/html,application/xhtml+xml")
+                    .apply {
+                        MirrorSitePolicy.requestHeaders(pageUrl, userAgent)
+                            .forEach { (key, value) -> header(key, value) }
+                    }.build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use emptyList()
+                    response.peekBody(maxBytes + 1).use { body ->
+                        if (body.contentLength() > maxBytes) return@use emptyList()
+                        parseHtml(body.string(), pageUrl)
+                    }
+                }
+            }.getOrDefault(emptyList())
+        }
+
+    internal fun parseHtml(html: String, pageUrl: String): List<CatalogMovie> {
+        val doc = Jsoup.parse(html, pageUrl)
+        return doc.select(".b-content__inline_item, .b-content__list_item, .b-content__item")
+            .take(96).mapNotNull { item ->
+                val link = item.selectFirst(".b-content__inline_item-link")
+                val anchor = if (link?.tagName() == "a") link else link?.selectFirst("a[href]")
+                val cover = item.selectFirst(".b-content__inline_item-cover")
+                val address = anchor?.attr("href").orEmpty().ifBlank {
+                    item.attr("data-url")
+                }.ifBlank {
+                    cover?.selectFirst("a[href]")?.attr("href").orEmpty()
+                }
+                if (address.isBlank()) return@mapNotNull null
+                val url = runCatching { URI(pageUrl).resolve(address).toString() }.getOrNull()
+                    ?: return@mapNotNull null
+                if (!SourceRules.sameOrigin(pageUrl, url) || MirrorPostId.fromUrl(url) == null) {
+                    return@mapNotNull null
+                }
+                val details = link?.children()
+                    ?.firstOrNull { it.tagName() == "div" }?.text().orEmpty()
+                val title = CatalogTitleCleaner.clean(
+                    anchor?.text().orEmpty().ifBlank {
+                        cover?.selectFirst("img[alt]")?.attr("alt").orEmpty()
+                    }, details
+                ).take(130)
+                if (title.isBlank()) return@mapNotNull null
+                val images = (cover ?: item).select("img").flatMap { image ->
+                    listOf("data-src", "data-original", "data-lazy-src", "src").map { attribute ->
+                        image.attr(attribute).takeIf(String::isNotBlank)?.let { value ->
+                            runCatching { URI(pageUrl).resolve(value).toString() }.getOrNull()
+                        }.orEmpty()
+                    }
+                }.filter(MirrorPoster::isPhoto).distinct().take(8)
+                CatalogMovie(url, title, images.firstOrNull().orEmpty(),
+                    details.replace(Regex("""\s+"""), " ").trim().take(110), images.drop(1))
+            }.distinctBy { MirrorPostId.fromUrl(it.url) ?: it.url }
+    }
+
+    fun filterRootFallback(
+        cards: List<CatalogMovie>, kind: String, rootFallback: Boolean, searching: Boolean
+    ): List<CatalogMovie> = if (rootFallback && !searching) {
+        cards.filter { matchesKind(it.url, kind) }
+    } else cards
 
     fun requestUrl(source: String, section: String, kind: String): String {
         val base = source.trimEnd('/') + "/"
@@ -231,14 +308,21 @@ internal fun CatalogGrid(
         mutableStateOf(if (attempt == 0) CatalogMemory.get(cacheKey).orEmpty() else emptyList())
     }
     var nativeSearchChecked by remember(requestUrl, attempt) {
-        mutableStateOf(searchText.isBlank() || movies.isNotEmpty())
+        mutableStateOf(movies.isNotEmpty())
     }
     LaunchedEffect(requestUrl, attempt, loadContent) {
         if (loadContent && !nativeSearchChecked) {
-            val cards = PublicSearch.read(source, searchText, WebSettings.getDefaultUserAgent(context))
-            if (cards.isNotEmpty()) {
-                movies = cards
-                CatalogMemory.put(cacheKey, cards)
+            val agent = WebSettings.getDefaultUserAgent(context)
+            val cards = if (searchText.isBlank()) {
+                MirrorCatalog.read(requestUrl, agent)
+            } else {
+                PublicSearch.read(source, searchText, agent)
+            }
+            val verified = MirrorCatalog.filterRootFallback(
+                cards, kind, useRootFallback, searchText.isNotBlank())
+            if (verified.isNotEmpty()) {
+                movies = verified
+                CatalogMemory.put(cacheKey, verified)
             }
             nativeSearchChecked = true
         }
@@ -356,9 +440,8 @@ internal fun CatalogGrid(
 
                     fun finish(cards: List<CatalogMovie>, failure: String = "") {
                         if (!active()) return
-                        val verified = if (useRootFallback && searchText.isBlank())
-                            cards.filter { MirrorCatalog.matchesKind(it.url, kind) }
-                            else cards
+                        val verified = MirrorCatalog.filterRootFallback(
+                            cards, kind, useRootFallback, searchText.isNotBlank())
                         if (verified.isEmpty()) {
                             recoverEmptyCatalog(failure.ifBlank {
                                 "На доступной странице зеркала нет карточек этой категории."

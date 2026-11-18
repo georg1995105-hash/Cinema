@@ -88,8 +88,6 @@ internal object MirrorHtmlMetadata {
             if (role == "director") directors.putIfAbsent(name.lowercase(), value)
             else actors.putIfAbsent(name.lowercase(), value)
         }
-        // The reference page also publishes metadata in two DIV columns, not
-        // necessarily a TABLE. Parse both structures without guessing values.
         val factRows = document.select(
             ".b-post__infotable tr, .b-post__info tr, " +
             ".b-post__infotable_left > div, .b-post__infotable_right_inner > div"
@@ -162,9 +160,10 @@ internal object MirrorHtmlMetadata {
                 val url = absolute(link).takeIf {
                     SourceRules.sameOrigin(filmUrl, it)
                 }.orEmpty()
-                val pid = entry.attr("data-pid").takeIf {
-                    it.matches(Regex("[0-9]{1,12}"))
-                }.orEmpty()
+                val pid = entry.attr("data-pid")
+                    .ifBlank { label.attr("data-pid") }
+                    .ifBlank { entry.selectFirst("[data-pid]")?.attr("data-pid").orEmpty() }
+                    .takeIf { it.matches(Regex("[0-9]{1,12}")) }.orEmpty()
                 val value = FilmPerson(name, photo, url, pid)
                 if (role == "director") directors.putIfAbsent(name.lowercase(), value)
                 else actors.putIfAbsent(name.lowercase(), value)

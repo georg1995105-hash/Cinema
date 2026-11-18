@@ -34,6 +34,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import org.json.JSONObject
 import java.net.URI
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal data class FilmPerson(
     val name: String, val photo: String, val url: String = "", val pid: String = ""
@@ -480,8 +481,12 @@ internal fun FilmDetails(
     // It is independent of the WebView parser, but shares Android's mirror cookies.
     LaunchedEffect(movie.url, preferredFilmUrl, sources) {
         networkFinished = false
-        val result = MirrorNetworkSource.resolveFilm(
-            preferredFilmUrl, sources, WebSettings.getDefaultUserAgent(context))
+        val result = withTimeoutOrNull(50_000L) {
+            MirrorNetworkSource.resolveFilm(
+                preferredFilmUrl, sources, WebSettings.getDefaultUserAgent(context))
+        } ?: MirrorNetworkSource.FilmResult(
+            preferredFilmUrl, reason = "Зеркала не завершили загрузку фильма вовремя."
+        )
         if (MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, result.finalUrl, sources)) {
             resolvedFilmUrl = result.finalUrl
             if (result.finalUrl != preferredFilmUrl) networkResolvedUrl = result.finalUrl

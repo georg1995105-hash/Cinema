@@ -70,6 +70,23 @@ class MirrorHtmlMetadataTest {
         assertEquals("https://rezka.example/images/director.jpg", parsed.directors[0].photo)
     }
 
+    @Test fun personsListHolderReadsPersonIdFromNestedName() {
+        val html = """
+          <article class="b-post">
+            <div class="b-post__title"><h1>История</h1></div>
+            <div class="b-post__description_text">Описание сюжета.</div>
+            <div class="persons-list-holder" data-id="cast">
+              <h2>В ролях актеры</h2>
+              <span class="item">
+                <a href="/person/31/"><span class="person-name-item" data-pid="31">Актёр Первый</span></a>
+              </span>
+            </div>
+          </article>
+        """
+        val parsed = requireNotNull(MirrorHtmlMetadata.parse(url, html).info)
+        assertEquals("31", parsed.cast.single().pid)
+    }
+
     @Test fun unknownPersonGroupsDoNotBecomeFakeActors() {
         val html = """
           <div class="b-post">
@@ -226,7 +243,6 @@ class MirrorHtmlMetadataTest {
         assertEquals("1", MirrorPlaybackRequest.stream(page, "17", "1", "5")["is_ads"])
         assertEquals("0", MirrorPlaybackRequest.stream(page, "17", "1", "5")["is_camrip"])
     }
-
 
     @Test fun sourceDivColumnsProvideCountryGenreYearAndActorPortrait() {
         val html = """
