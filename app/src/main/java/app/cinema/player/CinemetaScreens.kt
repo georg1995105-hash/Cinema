@@ -48,22 +48,21 @@ internal fun CinemetaGrid(
         loading = true
         error = ""
         try {
-            val initial = SourceBackedCatalog.initial(tab, kind, searchText)
             val cached = CinemetaCatalog.cachedCards(context, tab, kind, searchText)
-            // Show genuine source-backed cards immediately, even offline.
-            // A metadata refresh must never replace them with unwatcheable IMDb cards.
-            movies = SourceBackedCatalog.merge(initial, cached)
-            if (movies.isNotEmpty()) loading = false
+                .filterNot { MosfilmCatalog.isVideoUrl(it.url) }
+            if (cached.isNotEmpty()) {
+                movies = cached
+                loading = false
+            }
             val items = if (searchText.isBlank())
                 CinemetaCatalog.home(context, tab, kind)
             else CinemetaCatalog.search(context, searchText, kind)
-            val withSources = SourceBackedCatalog.merge(initial, items)
-            movies = withSources
+            movies = items
             loading = false
-            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, withSources)
-            val localized = RussianMovieTitles.enrich(withSources)
-            movies = SourceBackedCatalog.merge(initial, localized)
-            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, movies)
+            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, items)
+            val localized = RussianMovieTitles.enrich(items)
+            movies = localized
+            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, localized)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
