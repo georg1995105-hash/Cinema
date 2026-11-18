@@ -78,8 +78,9 @@ internal object InternetArchiveStreams {
             if (host != "archive.org" && !host.endsWith(".archive.org")) return@use false
             if (response.code != 206) return@use false
             if (response.header("Content-Range")?.startsWith("bytes 0-") != true) return@use false
-            val prefix = response.body?.byteStream()?.use { it.readNBytes(16) } ?: return@use false
-            prefix.size >= 8 && String(prefix.copyOfRange(4, 8), Charsets.US_ASCII) == "ftyp"
+            val prefix = ByteArray(16)
+            val bytes = response.body?.byteStream()?.use { it.read(prefix) } ?: return@use false
+            bytes >= 8 && String(prefix.copyOfRange(4, 8), Charsets.US_ASCII) == "ftyp"
         }
     }.getOrDefault(false)
 }
