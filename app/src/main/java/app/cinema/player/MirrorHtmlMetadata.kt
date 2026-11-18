@@ -150,7 +150,10 @@ internal object MirrorHtmlMetadata {
                 entry.attr("data-camrip").toIntOrNull()?.coerceIn(0,1) ?: 0,
                 entry.attr("data-ads").toIntOrNull()?.coerceIn(0,1) ?: 0,
                 entry.attr("data-director").toIntOrNull()?.coerceIn(0,1) ?: 0,
-                requiresSubscription))
+                requiresSubscription,
+                MirrorMediaParser.sanitizeFavs(
+                    entry.attr("data-favs").ifBlank { inner?.attr("data-favs").orEmpty() }
+                )))
         }
         val selected = document.selectFirst("#translators-list .active[data-translator_id], .b-translator__item.active[data-translator_id]")
             ?.attr("data-translator_id").orEmpty()
