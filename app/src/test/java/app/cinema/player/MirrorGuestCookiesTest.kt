@@ -44,6 +44,36 @@ class MirrorGuestCookiesTest {
             "https://unrelated.example/ajax/get_cdn_series/", film, cookies))
     }
 
+    @Test fun nativeAnubisPassRetainsVerificationCookieWithoutLeakingLogin() {
+        val film = "https://hdrzk.org/films/fiction/1234-movie.html"
+        val pass = "https://hdrzk.org/.within.website/x/cmd/anubis/api/pass-challenge"
+        val stored = listOf(
+            "hdmbbs=0; techaro.lol-anubis-cookie-verification=challengeA; PHPSESSID=session",
+            "dle_user_id=123; techaro.lol-anubis-auth=oldAuth",
+            "techaro.lol-anubis-cookie-verification-7af=challengeB; dle_hash=private"
+        )
+        val header = MirrorGuestCookies.cookieHeaderFor(pass, film, stored)
+        assertTrue(header.contains("hdmbbs=1"))
+        assertTrue(header.contains("techaro.lol-anubis-cookie-verification=challengeA"))
+        assertTrue(header.contains("techaro.lol-anubis-cookie-verification-7af=challengeB"))
+        assertTrue(header.contains("techaro.lol-anubis-auth=oldAuth"))
+        assertFalse(header.contains("PHPSESSID"))
+        assertFalse(header.contains("dle_user_id"))
+        assertFalse(header.contains("dle_hash"))
+        assertEquals("", MirrorGuestCookies.cookieHeaderFor(
+            "https://other.example/.within.website/x/cmd/anubis/api/pass-challenge",
+            film, stored))
+    }
+
+    @Test fun anubisCookieMatchingRejectsPrefixLookalikes() {
+        val header = MirrorGuestCookies.fromStoredCookies(listOf(
+            "techaro.lol-anubis-cookie-verificationFake=bad; " +
+                "techaro.lol-anubis-authFake=bad; " +
+                "techaro.lol-anubis-cookie-verification=good"
+        ))
+        assertEquals("hdmbbs=1; techaro.lol-anubis-cookie-verification=good", header)
+    }
+
     @Test fun anonymousMirrorStillUsesGuestProfileAndChallenge() {
         val film = "https://hdrzk.org/series/123-show.html"
         val cookies = listOf("hdmbbs=0; techaro.lol-anubis-auth=ok")
