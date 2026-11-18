@@ -41,7 +41,10 @@ class NavigationFlowTest {
             compose.onNodeWithText("Плеер").performClick()
             compose.onNodeWithText("Шаг перемотки").assertIsDisplayed()
             compose.onNode(hasText("Главная") and hasClickAction()).performClick()
-            compose.onNodeWithText("Популярное").assertIsDisplayed()
+            // Home intentionally restores the official Lift catalogue at full height.
+            // Cinema's own metadata tabs are hidden until the user exits Lift.
+            compose.onNodeWithText("Lift · Смотреть").assertIsDisplayed()
+            compose.onNodeWithText("Популярное").assertDoesNotExist()
         } finally {
             store.clearSearchHistory()
         }
