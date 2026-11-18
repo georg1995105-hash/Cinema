@@ -10,12 +10,23 @@ internal object MirrorHttp {
             val request = chain.request()
             val address = request.url.toString()
             val referer = request.header("Referer")
+            val manager = CookieManager.getInstance()
             val scoped = request.newBuilder().removeHeader("Cookie")
             if (referer != null && SourceRules.sameOrigin(referer, address)) {
-                CookieManager.getInstance().getCookie(address)?.takeIf(String::isNotBlank)
+                MirrorSitePolicy.cookieScopes(address).asSequence()
+                    .mapNotNull { manager.getCookie(it)?.takeIf(String::isNotBlank) }
+                    .firstOrNull()
                     ?.let { scoped.header("Cookie", it) }
             }
-            chain.proceed(scoped.build())
+            val response = chain.proceed(scoped.build())
+            val setCookies = response.headers("Set-Cookie")
+            if (setCookies.isNotEmpty()) {
+                MirrorSitePolicy.cookieScopes(address).forEach { scope ->
+                    setCookies.forEach { manager.setCookie(scope, it) }
+                }
+                manager.flush()
+            }
+            response
         }
         .build()
 }
