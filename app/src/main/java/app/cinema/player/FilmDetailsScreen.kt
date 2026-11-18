@@ -50,7 +50,9 @@ internal data class FilmInfo(
     val posters: List<String> = emptyList(),
     val portraitsResolved: Boolean = true,
     val defaultVoice: String = "",
-    val episodes: List<MirrorEpisode> = emptyList()
+    val episodes: List<MirrorEpisode> = emptyList(),
+    val kinopoiskId: String = "",
+    val imdbId: String = ""
 )
 
 internal object FilmInfoMemory {
@@ -208,6 +210,14 @@ internal object FilmPageParser {
            similar.push({title:title,url:address,posters:posters});
          });
          var franchise=window.__kinoFranchiseParts || [];
+         function externalId(selector, pattern) {
+           var link=document.querySelector(selector);
+           var raw=(link?.getAttribute('href') || link?.textContent || '').trim();
+           var match=raw.match(pattern);
+           return match ? match[1] || match[0] : '';
+         }
+         var imdbId=externalId('span.imdb a[href], .imdb a[href], a[href*="imdb.com/title/"]', /(tt\d{5,12})/i);
+         var kinopoiskId=externalId('span.kp a[href], .kp a[href], a[href*="kinopoisk.ru/film/"]', /\/film\/(\d{1,12})/i);
          return JSON.stringify({
            browserCheck:/captcha|verify you are human|checking your browser|проверяем.{0,30}не бот/i.test(document.title || ''),
            originalTitle:txt('.b-post__origtitle, .b-post__subtitle, .b-post__title_original'),
@@ -223,7 +233,9 @@ internal object FilmPageParser {
            related:similar.slice(0,15),
            franchise:franchise.slice(0,50),
            franchiseDone:window.__kinoFranchiseDone === true,
-           portraitsDone:!window.__kinoPortraits || window.__kinoPortraits.done
+           portraitsDone:!window.__kinoPortraits || window.__kinoPortraits.done,
+           kinopoiskId:kinopoiskId,
+           imdbId:imdbId
          });
        })();
     """.trimIndent()
@@ -373,7 +385,12 @@ internal object FilmPageParser {
             episodes = MirrorMediaParser.parseEpisodes(data.optJSONArray("episodes")),
             title = CatalogTitleCleaner.clean(data.optString("title")),
             posters = MirrorCatalog.readPosters(data),
-            portraitsResolved = data.optBoolean("portraitsDone", true)
+            portraitsResolved = data.optBoolean("portraitsDone", true),
+            kinopoiskId = data.optString("kinopoiskId")
+                .takeIf { it.matches(Regex("[0-9]{1,12}")) }.orEmpty(),
+            imdbId = data.optString("imdbId")
+                .takeIf { it.matches(Regex("tt[0-9]{5,12}", RegexOption.IGNORE_CASE)) }
+                .orEmpty()
         )
     }.getOrNull()
 }
