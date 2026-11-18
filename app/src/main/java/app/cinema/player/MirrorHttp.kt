@@ -58,7 +58,9 @@ internal object MirrorHttp {
                 // The reference client's CookieJar always supplies this Rezka cookie.
                 // It is part of the ordinary app request profile, not an auth bypass.
                 if (MirrorSitePolicy.isRecognizedMirror(address)) {
-                    cookies += "hdmbbs=1"
+                    // Put the reference value at highest priority so a stale
+                    // persisted hdmbbs=0 cannot override the app profile.
+                    cookies.add(0, "hdmbbs=1")
                 }
                 MirrorSitePolicy.mergeCookieHeaders(cookies).takeIf(String::isNotBlank)
                     ?.let { scoped.header("Cookie", it) }
