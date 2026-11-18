@@ -48,15 +48,22 @@ internal fun CinemetaGrid(
         loading = true
         error = ""
         try {
+            // Show the last real results before issuing potentially slow network
+            // calls; a cached catalogue is not presented as a live update.
+            val cached = CinemetaCatalog.cachedCards(context, tab, kind, searchText)
+            if (cached.isNotEmpty()) {
+                movies = cached
+                loading = false
+            }
             val items = if (searchText.isBlank())
                 CinemetaCatalog.home(context, tab, kind)
             else CinemetaCatalog.search(context, searchText, kind)
-            // Render confirmed cards immediately. Optional localized Russian
-            // titles are filled in later; the first screen is never delayed by
-            // Wikidata translation requests.
             movies = items
             loading = false
-            movies = RussianMovieTitles.enrich(items)
+            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, items)
+            val localized = RussianMovieTitles.enrich(items)
+            movies = localized
+            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, localized)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -71,8 +78,16 @@ internal fun CinemetaGrid(
         when {
             visible.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${visible.size} результатов", style = MaterialTheme.typography.bodySmall,
-                        color = appMuted, modifier = Modifier.weight(1f))
+                    Text(
+                        when {
+                            error.isNotBlank() -> "Сохранённые результаты · нет связи"
+                            loading -> "${visible.size} результатов · обновляем"
+                            else -> "${visible.size} результатов"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (error.isNotBlank()) MaterialTheme.colorScheme.error else appMuted,
+                        modifier = Modifier.weight(1f)
+                    )
                     if (loading) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
                     TextButton(onClick = { refresh++ }) { Text("Обновить") }
                 }
