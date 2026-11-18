@@ -94,7 +94,17 @@ internal object ArchivePublicCatalog {
         }
     }
 
+    @Volatile private var discoveryCache: Pair<Long, List<CatalogMovie>>? = null
+
+    // Several keystrokes in search must not trigger one expensive Archive
+    // request each. A cached index is only a discovery aid; actual MP4
+    // availability is checked afresh on the film screen.
+    @Synchronized
     private fun discover(): List<CatalogMovie> {
+        val now = System.currentTimeMillis()
+        discoveryCache?.let { (time, cards) ->
+            if (now - time in 0..300_000L) return cards
+        }
         val queryUrl = HttpUrl.Builder().scheme("https").host("archive.org")
             .addPathSegment("advancedsearch.php")
             .addQueryParameter("q", query)
@@ -115,7 +125,9 @@ internal object ArchivePublicCatalog {
                 throw IOException("Internet Archive: HTTP ${response.code}")
             val body = response.peekBody(2_000_001L).string()
             if (body.length > 2_000_000) throw IOException("Превышен размер каталога")
-            return parseSearch(JSONObject(body))
+            return parseSearch(JSONObject(body)).also { cards ->
+                discoveryCache = System.currentTimeMillis() to cards
+            }
         }
     }
 
