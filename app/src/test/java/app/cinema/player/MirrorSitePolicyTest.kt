@@ -37,4 +37,12 @@ class MirrorSitePolicyTest {
         assertTrue(merged.contains("guest=local"))
         assertFalse(merged.contains("guest=shared"))
     }
+
+    @Test fun logoutSessionGroupIsSymmetricForStandbyAndHdrezka() {
+        val standby = MirrorSitePolicy.sessionScopes("https://standby-rezka.tv/")
+        val primary = MirrorSitePolicy.sessionScopes("https://hdrezka.me/")
+        assertEquals(standby.toSet(), primary.toSet())
+        assertTrue(standby.contains("https://standby-rezka.tv/"))
+        assertTrue(standby.contains("https://hdrezka.me/"))
+    }
 }
