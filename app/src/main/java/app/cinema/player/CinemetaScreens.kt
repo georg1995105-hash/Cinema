@@ -54,6 +54,10 @@ internal fun CinemetaGrid(
             if (cached.isNotEmpty()) {
                 movies = cached
                 loading = false
+            } else if (tab == "Смотреть" && searchText.isBlank()) {
+                // First frame is independent of a live Archive API call.
+                movies = ArchivePublicCatalog.featured()
+                loading = false
             }
             val items = if (searchText.isBlank())
                 CinemetaCatalog.home(context, tab, kind)
