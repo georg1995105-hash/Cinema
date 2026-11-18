@@ -68,7 +68,7 @@ internal object TvMazeSeries {
                 if (premiere.matches(Regex("[0-9]{4}"))) add(premiere)
                 if (genres != null) for (i in 0 until minOf(genres.length(), 3)) {
                     val genre = genres.optString(i)
-                    if (genre.isNotBlank()) add(genre)
+                    if (genre.isNotBlank()) add(CinemetaCatalog.localizeGenre(genre))
                 }
             }.joinToString(" · ")
             add(CatalogMovie(url, name, poster, details))
@@ -98,6 +98,7 @@ internal object TvMazeSeries {
         val genres = show.optJSONArray("genres").let { arr ->
             if (arr == null) emptyList() else (0 until minOf(16, arr.length()))
                 .map { arr.optString(it) }.filter(String::isNotBlank)
+                .map(CinemetaCatalog::localizeGenre)
         }
         // Episodes, cast and crew are independent resources. Requesting them
         // sequentially previously tripled worst-case wait on poor networks.
@@ -157,7 +158,7 @@ internal object TvMazeSeries {
             rating = show.optJSONObject("rating")?.optString("average").orEmpty().let {
                 if (it == "null") "" else it
             },
-            country = networkCountry.ifBlank { streamingCountry },
+            country = CinemetaCatalog.localizeCountry(networkCountry.ifBlank { streamingCountry }),
             runtime = show.optString("runtime").takeIf { it != "null" }?.let { "$it мин" }.orEmpty(),
             genres = genres,
             directors = directors,
