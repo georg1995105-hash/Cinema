@@ -54,13 +54,8 @@ internal object MirrorHttp {
             if (referer != null && SourceRules.sameOrigin(referer, address)) {
                 val cookies = MirrorSitePolicy.cookieScopes(address)
                     .mapNotNull { manager.getCookie(it)?.takeIf(String::isNotBlank) }
-                // Native film/AJAX calls must use the same authenticated session
-                // as WebView. Isolate only genuinely anonymous guest requests.
-                // A session belongs to the exact request origin: no cross-site credentials.
-                val header = if (MirrorGuestCookies.isGuestFilmRequest(address, referer) &&
-                    !MirrorGuestCookies.hasAccountSession(cookies)) {
-                    MirrorGuestCookies.fromStoredCookies(cookies)
-                } else MirrorSitePolicy.mergeCookieHeaders(cookies)
+                // Keep native AJAX and WebView on the same source-owned session.
+                val header = MirrorGuestCookies.cookieHeaderFor(address, referer, cookies)
                 header.takeIf(String::isNotBlank)
                     ?.let { scoped.header("Cookie", it) }
             }
