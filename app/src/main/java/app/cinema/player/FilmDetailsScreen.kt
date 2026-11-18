@@ -433,8 +433,11 @@ internal fun FilmDetails(
                 if (info == null && loadError.isBlank())
                     loadError = "Зеркало не предоставило сведения о фильме."
                 loadDone = true
-            } else if (info == null) {
-                loadError = "Зеркало не завершило проверку браузера."
+            } else {
+                // Partial cached/HTTP metadata must not leave the screen in an
+                // endless loading state when the browser challenge stalls.
+                if (info == null && loadError.isBlank())
+                    loadError = "Зеркало не завершило проверку браузера."
                 loadDone = true
             }
         }
