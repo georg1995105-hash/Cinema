@@ -392,7 +392,9 @@ internal fun FilmDetails(
     onWatch: (String, String, String, String) -> Unit,
     onRelated: (CatalogMovie) -> Unit,
     onMetadata: (CatalogMovie) -> Unit,
-    onPerson: (FilmPerson) -> Unit
+    onPerson: (FilmPerson) -> Unit,
+    // Allows UI tests to provide metadata already verified by the source adapter.
+    verifiedPlayer: MirrorMoviePage? = null
 ) {
     val context = LocalContext.current
     // Reopen the same post on the mirror explicitly selected in Settings.
@@ -408,7 +410,9 @@ internal fun FilmDetails(
     var browserChallengeActive by remember(movie.url, preferredFilmUrl) { mutableStateOf(false) }
     var resolvedFilmUrl by remember(movie.url, preferredFilmUrl) { mutableStateOf(preferredFilmUrl) }
     var networkResolvedUrl by remember(movie.url, preferredFilmUrl) { mutableStateOf<String?>(null) }
-    var resolvedPlayer by remember(movie.url, preferredFilmUrl) { mutableStateOf<MirrorMoviePage?>(null) }
+    var resolvedPlayer by remember(movie.url, preferredFilmUrl, verifiedPlayer) {
+        mutableStateOf(verifiedPlayer)
+    }
     // A real HTTP session can deliver metadata even when the hidden WebView stalls.
     // It is independent of the WebView parser, but shares Android's mirror cookies.
     LaunchedEffect(movie.url, preferredFilmUrl, sources) {
