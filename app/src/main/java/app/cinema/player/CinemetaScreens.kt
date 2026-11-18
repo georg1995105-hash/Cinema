@@ -49,7 +49,7 @@ internal fun CinemetaGrid(
         error = ""
         try {
             val cached = CinemetaCatalog.cachedCards(context, tab, kind, searchText)
-                .filterNot { MosfilmCatalog.isVideoUrl(it.url) }
+                .filterNot { it.url.startsWith("https://rutube.ru/") }
             if (cached.isNotEmpty()) {
                 movies = cached
                 loading = false
@@ -154,7 +154,6 @@ internal fun CinemetaFilmDetails(
     var checkFailure by remember(movie.url) { mutableStateOf("") }
     var retry by remember(movie.url) { mutableIntStateOf(0) }
     val couldHaveArchive = InternetArchiveStreams.canCheck(movie.url)
-    val officialEmbed: String? = null // Lift, not RUTUBE, is the selected browsing service
     LaunchedEffect(movie.url, retry) {
         loading = true
         error = ""
@@ -194,14 +193,14 @@ internal fun CinemetaFilmDetails(
                 PublicMoviePoster(movie, Modifier.width(190.dp).aspectRatio(.70f)
                     .border(1.dp, appPanel, RoundedCornerShape(14.dp)))
                 DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
-                    couldHaveArchive, officialEmbed, onPlay, onLift, { retry++ }, Modifier.weight(1f))
+                    couldHaveArchive, onPlay, onLift, { retry++ }, Modifier.weight(1f))
             }
         } else {
             PublicMoviePoster(movie, Modifier.width(148.dp).aspectRatio(.70f)
                 .align(Alignment.CenterHorizontally))
             Spacer(Modifier.height(12.dp))
             DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
-                couldHaveArchive, officialEmbed, onPlay, onLift, { retry++ }, Modifier.fillMaxWidth())
+                couldHaveArchive, onPlay, onLift, { retry++ }, Modifier.fillMaxWidth())
         }
         Spacer(Modifier.height(28.dp))
     }
@@ -212,7 +211,7 @@ internal fun CinemetaFilmDetails(
 private fun DetailsBody(
     movie: CatalogMovie, info: CinemetaDetails?, loading: Boolean, error: String,
     streams: List<InternetArchiveStreams.Video>, checking: Boolean, checkFailure: String,
-    couldHaveArchive: Boolean, officialEmbed: String?,
+    couldHaveArchive: Boolean,
     onPlay: (String) -> Unit, onLift: () -> Unit, retry: () -> Unit,
     modifier: Modifier
 ) {
