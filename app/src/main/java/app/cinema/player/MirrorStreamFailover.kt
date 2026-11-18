@@ -43,7 +43,7 @@ internal object MirrorStreamFailover {
         val candidates = candidates(pageUrl, savedMirrors)
         if (candidates.isEmpty()) return@supervisorScope null
         val queue = Channel<String>(Channel.UNLIMITED)
-        candidates.forEach(queue::trySend)
+        candidates.forEach { queue.trySend(it) }
         queue.close()
         val results = Channel<MirrorStreamAlternative?>(Channel.UNLIMITED)
         val workers = List(minOf(2, candidates.size)) {
