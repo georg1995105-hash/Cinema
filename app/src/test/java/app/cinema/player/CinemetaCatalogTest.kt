@@ -32,6 +32,9 @@ class CinemetaCatalogTest {
         assertEquals("", result.poster)
         assertEquals("", CinemetaCatalog.trustedPoster(result.url,
             "https://images.example.org/posters/first-dates.jpg"))
+        assertEquals("https://static.tvmaze.com/uploads/images/medium_portrait/1/123.jpg",
+            CinemetaCatalog.trustedPoster(result.url,
+                "https://static.tvmaze.com/uploads/images/medium_portrait/1/123.jpg"))
         val other = CinemetaCatalog.movieUrl("movie", "tt1234567")
         assertEquals("https://images.example.org/posters/real.jpg",
             CinemetaCatalog.trustedPoster(other, "https://images.example.org/posters/real.jpg"))
