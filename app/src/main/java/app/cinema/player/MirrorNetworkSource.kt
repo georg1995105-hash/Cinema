@@ -4,6 +4,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -62,7 +63,7 @@ internal object MirrorNetworkSource {
         client: OkHttpClient = http
     ): Boolean {
         val challenge = MirrorAnubis.parse(html) ?: return false
-        val solution = withContext(Dispatchers.Default) {
+        val solution = runInterruptible(Dispatchers.Default) {
             MirrorAnubis.solve(challenge)
         } ?: return false
         val passUrl = MirrorAnubis.passChallengeUrl(pageUrl, challenge, solution)
