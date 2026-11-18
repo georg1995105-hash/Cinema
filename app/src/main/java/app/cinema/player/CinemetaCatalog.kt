@@ -142,6 +142,7 @@ internal object CinemetaCatalog {
     }
 
     suspend fun home(context: Context, tab: String, kind: String): List<CatalogMovie> = coroutineScope {
+        if (tab == "Смотреть") return@coroutineScope InternetArchiveStreams.catalog(context, kind)
         val types = if (kind == "Фильмы") listOf("movie")
                     else if (kind == "Сериалы") listOf("series")
                     else listOf("movie", "series")
@@ -221,6 +222,8 @@ internal object CinemetaCatalog {
 
     suspend fun metadata(context: Context, url: String): CinemetaDetails = withContext(Dispatchers.IO) {
         val (type, id) = identity(url) ?: throw IOException("Неверный идентификатор фильма")
+        if (type == "movie" && id == "tt0063350")
+            return@withContext InternetArchiveStreams.details(context)
         try {
             parseDetails(read(context, "/meta/$type/$id.json"), type, id)
         } catch (e: kotlinx.coroutines.CancellationException) {
