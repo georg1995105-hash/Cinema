@@ -9,7 +9,7 @@ internal object MirrorFilmUrl {
             return false
         val expectedId = MirrorPostId.fromUrl(filmUrl) ?: return false
         if (MirrorPostId.fromUrl(resolvedUrl) != expectedId) return false
-        return (listOf(filmUrl) + mirrors).any { SourceRules.sameOrigin(it, resolvedUrl) }
+        return MirrorSitePolicy.isAllowedMirror(resolvedUrl, listOf(filmUrl) + mirrors)
     }
 
     fun changeOrigin(filmUrl: String, mirror: String): String? {
