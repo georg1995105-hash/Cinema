@@ -87,7 +87,8 @@ internal fun CinemetaGrid(
             }) {
                 val trusted = try {
                     TvMazeSeries.verifiedPoster("tt0337898")
-                } catch (_: Exception) { "" }
+                } catch (e: CancellationException) { throw e }
+                  catch (_: Exception) { "" }
                 if (trusted.isNotBlank()) {
                     ranked = ranked.map {
                         if (CinemetaCatalog.identity(it.url) == ("series" to "tt0337898"))
