@@ -422,7 +422,7 @@ internal fun ScreenHeading(title: String, subtitle: String? = null, back: (() ->
     }
 }
 
-private val feeds = listOf("Смотреть", "Популярное", "Новинки", "Высокий рейтинг")
+private val feeds = listOf("Смотреть", "Мосфильм", "Архив")
 private val contentKinds = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы")
 
 @Composable
