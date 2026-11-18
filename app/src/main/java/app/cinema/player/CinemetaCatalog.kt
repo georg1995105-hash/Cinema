@@ -53,7 +53,7 @@ internal object CinemetaCatalog {
                     val item = data.optJSONObject(i) ?: continue
                     val url = item.optString("url")
                     val title = item.optString("title").trim().take(180)
-                    if ((!isMovieUrl(url) && !ArchivePublicCatalog.isArchiveUrl(url)) || title.isBlank()) continue
+                    if ((!isMovieUrl(url) && !ArchivePublicCatalog.isArchiveUrl(url) && !MosfilmCatalog.isVideoUrl(url)) || title.isBlank()) continue
                     val poster = item.optString("poster").takeIf(MirrorPoster::isPhoto).orEmpty()
                     add(CatalogMovie(url, title, poster, item.optString("details").take(180)))
                 }
@@ -222,7 +222,9 @@ internal object CinemetaCatalog {
     }
 
     suspend fun home(context: Context, tab: String, kind: String): List<CatalogMovie> = coroutineScope {
-        if (tab == "Смотреть") return@coroutineScope ArchivePublicCatalog.home(kind)
+        if (tab == "Смотреть") return@coroutineScope
+            (MosfilmCatalog.catalog(kind) + ArchivePublicCatalog.home(kind))
+                .distinctBy { it.url }
         val types = if (kind == "Фильмы") listOf("movie")
                     else if (kind == "Сериалы") listOf("series")
                     else listOf("movie", "series")
@@ -278,7 +280,8 @@ internal object CinemetaCatalog {
                 }
             }.awaitAll()
         }
-        val items = responses.flatMap { it.first }.toMutableList()
+        val items = (MosfilmCatalog.search(q, kind) + responses.flatMap { it.first })
+            .distinctBy { it.url }.toMutableList()
         val seriesFound = items.any { identity(it.url)?.first == "series" }
         var successes = responses.count { it.second == null }
         var failure = responses.firstNotNullOfOrNull { it.second }
@@ -292,7 +295,7 @@ internal object CinemetaCatalog {
                 failure = e
             }
         }
-        if (successes == 0) throw IOException(failure?.message ?: "Поиск недоступен")
+        if (successes == 0 && items.isEmpty()) throw IOException(failure?.message ?: "Поиск недоступен")
         items.distinctBy { it.url }.let { found ->
             if (kind == "Мультфильмы")
                 found.filter { it.details.contains("Мультфильм", ignoreCase = true) }
@@ -301,6 +304,8 @@ internal object CinemetaCatalog {
     }
 
     suspend fun metadata(context: Context, url: String): CinemetaDetails = withContext(Dispatchers.IO) {
+        if (MosfilmCatalog.isVideoUrl(url))
+            return@withContext MosfilmCatalog.metadata(url)
         if (ArchivePublicCatalog.isArchiveUrl(url))
             return@withContext InternetArchiveStreams.details(context, url)
         val (type, id) = identity(url) ?: throw IOException("Неверный идентификатор фильма")
