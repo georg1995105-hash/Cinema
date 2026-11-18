@@ -17,7 +17,9 @@ internal object MirrorGuestSession {
 
     fun loadFilm(view: WebView, address: String) {
         val origin = MirrorAccountGateway.origin(address)
-        if (origin == null || !MirrorSitePolicy.isRecognizedMirror(address)) {
+        // User-saved HTTPS mirrors need the same guest profile as built-ins.
+        // Only do this for a verified film-page shape, never arbitrary sites.
+        if (origin == null || MirrorPostId.fromUrl(address) == null) {
             view.loadUrl(address, MirrorSitePolicy.webViewHeaders(address))
             return
         }

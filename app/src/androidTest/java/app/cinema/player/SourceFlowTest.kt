@@ -553,7 +553,10 @@ class SourceFlowTest {
                     assertTrue("Playback advanced beyond 200 ms, last position: $position", position > 200)
                     val originRequest = requireNotNull(mirror.takeRequest(5, TimeUnit.SECONDS))
                     assertEquals(filmPage, originRequest.getHeader("Referer"))
-                    assertTrue(originRequest.getHeader("Cookie").orEmpty().contains("cinema_fixture=active"))
+                    // A guest film request must not leak the existing account cookie
+                    // to the stream endpoint, even on a user-configured mirror.
+                    assertTrue(originRequest.getHeader("Cookie").orEmpty().contains("hdmbbs=1"))
+                    assertFalse(originRequest.getHeader("Cookie").orEmpty().contains("cinema_fixture="))
                     val redirected = requireNotNull(cdn.takeRequest(5, TimeUnit.SECONDS))
                     assertNull(redirected.getHeader("Cookie"))
                 } finally {

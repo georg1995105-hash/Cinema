@@ -36,21 +36,46 @@ object SourceProbe {
             builder.header(name, value)
         }
         val started = System.nanoTime()
+        var current = url
+        var redirects = 0
         try {
-            client.newCall(builder.build()).execute().use { response ->
-                val latency = ((System.nanoTime() - started) / 1_000_000L)
-                    .coerceAtLeast(0L)
-                when (response.code) {
-                    in 200..299 -> MirrorProbeResult(true, latency,
-                        "Сайт отвечает (доступность фильма не проверена)")
-                    in 300..399 -> MirrorProbeResult(false, latency,
-                        "Перенаправление HTTP ${response.code}")
-                    403, 429 -> MirrorProbeResult(false, latency,
-                        "Сайт ограничил запрос (HTTP ${response.code})")
-                    else -> MirrorProbeResult(false, latency,
-                        "HTTP ${response.code}")
+            while (redirects <= 3) {
+                val currentOrigin = MirrorAccountGateway.origin(current)
+                    ?: return@withContext MirrorProbeResult(false, null, "Неправильный адрес")
+                val request = Request.Builder().url(current).get()
+                    .header("Accept", "text/html,application/xhtml+xml")
+                    .header("Referer", "$currentOrigin/")
+                    .apply {
+                        MirrorSitePolicy.requestHeaders(current, userAgent)
+                            .forEach { (name, value) -> header(name, value) }
+                    }.build()
+                val next = client.newCall(request).execute().use { response ->
+                    val latency = ((System.nanoTime() - started) / 1_000_000L)
+                        .coerceAtLeast(0L)
+                    if (response.code in 300..399) {
+                        val destination = MirrorProbeRedirect.next(
+                            current, response.header("Location")
+                        )
+                        if (destination == null || redirects >= 3)
+                            return@withContext MirrorProbeResult(false, latency,
+                                "Зеркало перенаправляет на недопустимый адрес")
+                        return@use destination
+                    }
+                    return@withContext when (response.code) {
+                        in 200..299 -> MirrorProbeResult(true, latency,
+                            if (redirects > 0)
+                                "Сайт отвечает после перенаправления (видео не проверено)"
+                            else "Сайт отвечает (доступность фильма не проверена)")
+                        403, 429 -> MirrorProbeResult(false, latency,
+                            "Сайт ограничил запрос (HTTP ${response.code})")
+                        else -> MirrorProbeResult(false, latency,
+                            "HTTP ${response.code}")
+                    }
                 }
+                current = next
+                redirects++
             }
+            MirrorProbeResult(false, null, "Слишком много перенаправлений")
         } catch (_: java.net.SocketTimeoutException) {
             MirrorProbeResult(false, null, "Превышено время ответа")
         } catch (_: Exception) {

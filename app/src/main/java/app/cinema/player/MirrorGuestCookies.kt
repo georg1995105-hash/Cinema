@@ -9,6 +9,18 @@ package app.cinema.player
  * continue to work in the UI. This is request-level guest isolation only.
  */
 internal object MirrorGuestCookies {
+    /**
+     * A custom mirror configured by the user can have an arbitrary hostname.
+     * Film and its same-origin AJAX still require the normal guest cookie jar.
+     * Never apply this rule to an unrelated site or a cross-origin redirect.
+     */
+    fun isGuestFilmRequest(address: String, referer: String?): Boolean {
+        if (referer == null || !SourceRules.sameOrigin(referer, address)) return false
+        return MirrorSitePolicy.isRecognizedMirror(address) ||
+            MirrorPostId.fromUrl(address) != null ||
+            MirrorPostId.fromUrl(referer) != null
+    }
+
     fun fromStoredCookies(raw: List<String>): String {
         val challengeCookies = linkedMapOf<String, String>()
         raw.forEach { header ->
