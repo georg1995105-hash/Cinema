@@ -51,13 +51,15 @@ internal fun CinemetaGrid(
             // Show the last real results before issuing potentially slow network
             // calls; a cached catalogue is not presented as a live update.
             val cached = CinemetaCatalog.cachedCards(context, tab, kind, searchText)
-            if (cached.isNotEmpty()) {
-                movies = cached
+            if (tab == "Смотреть" && searchText.isBlank()) {
+                // Always prepend studio films, even when last version cached
+                // ONLY the single archive test movie. This prevents the user
+                // from seeing the same one-film screen during network outages.
+                movies = (MosfilmCatalog.catalog(kind) + cached +
+                    ArchivePublicCatalog.featured()).distinctBy { it.url }
                 loading = false
-            } else if (tab == "Смотреть" && searchText.isBlank()) {
-                // Instantly surface curated, genuinely published films before
-                // optional Internet Archive discovery completes.
-                movies = MosfilmCatalog.catalog(kind) + ArchivePublicCatalog.featured()
+            } else if (cached.isNotEmpty()) {
+                movies = cached
                 loading = false
             } else if (searchText.isNotBlank()) {
                 val direct = MosfilmCatalog.search(searchText, kind)
