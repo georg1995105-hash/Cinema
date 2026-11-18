@@ -453,6 +453,7 @@ internal fun FilmDetails(
     onBrowse: (String) -> Unit,
     savedSelection: PlaybackSelection?,
     onWatch: (WatchRequest) -> Unit,
+    onLift: () -> Unit,
     onRelated: (CatalogMovie) -> Unit,
     onMetadata: (CatalogMovie) -> Unit,
     onPerson: (FilmPerson) -> Unit,
@@ -853,28 +854,11 @@ internal fun FilmDetails(
                             style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = {
-                            chosenSeason = savedSelection?.season.orEmpty()
-                            chosenEpisode = savedSelection?.episode.orEmpty()
-                            chosenProvider = when {
-                                savedSelection?.provider == "collapse" && collapseAvailable -> "collapse"
-                                savedSelection?.provider == "rezka" && rezkaAvailable -> "rezka"
-                                rezkaAvailable -> "rezka"
-                                collapseAvailable -> "collapse"
-                                else -> "rezka"
-                            }
-                            val providerVoices = if (chosenProvider == "collapse")
-                                collapseMedia?.voices(chosenSeason, chosenEpisode).orEmpty()
-                            else effectiveVoices
-                            chosenVoice = savedSelection?.voice?.takeIf { id ->
-                                providerVoices.any { it.id == id }
-                            } ?: providerVoices.firstOrNull()?.id.orEmpty()
-                            showWatchMenu = true
-                        },
+                        Button(onClick = onLift,
                             modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) {
                             Icon(Icons.Outlined.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(7.dp))
-                            Text("Смотреть")
+                            Text("Смотреть в Lift")
                         }
                         OutlinedIconButton(onClick = onToggleFavourite) {
                             Icon(if (isFavourite) Icons.Outlined.BookmarkAdded
