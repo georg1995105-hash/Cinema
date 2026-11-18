@@ -53,6 +53,30 @@ internal object MirrorNetworkSource {
             })
         }
 
+    private suspend fun solveAnubis(
+        pageUrl: String,
+        html: String,
+        userAgent: String
+    ): Boolean {
+        val challenge = MirrorAnubis.parse(html) ?: return false
+        val solution = withContext(Dispatchers.Default) {
+            MirrorAnubis.solve(challenge)
+        } ?: return false
+        val passUrl = MirrorAnubis.passChallengeUrl(pageUrl, challenge, solution)
+            ?: return false
+        val builder = Request.Builder().url(passUrl).get()
+            .header("Referer", pageUrl)
+            .header("Accept", "text/html,application/xhtml+xml")
+        MirrorSitePolicy.requestHeaders(pageUrl, userAgent).forEach { (name, value) ->
+            builder.header(name, value)
+        }
+        execute(builder.build()).use { response ->
+            response.body?.charStream()?.let { bounded(it, 400_000) }
+            if (response.code !in 200..399) return false
+        }
+        return MirrorHttp.hasAnubisCookie(pageUrl)
+    }
+
     private fun bounded(reader: Reader, max: Int): String? {
         val out = StringBuilder()
         val block = CharArray(8192)
@@ -72,60 +96,105 @@ internal object MirrorNetworkSource {
         userAgent: String,
         mirrors: List<String> = emptyList()
     ): FilmResult = withContext(Dispatchers.IO) {
-            if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
-                return@withContext FilmResult(url,reason="Неверный адрес фильма.")
-            var current=url
-            try {
-                repeat(3) { attempt ->
-                    val referer=MirrorAccountGateway.origin(current).orEmpty()+"/"
-                    val builder = Request.Builder().url(current).get()
-                        .header("Referer", referer)
-                        .header("Accept", "text/html,application/xhtml+xml")
-                    MirrorSitePolicy.requestHeaders(current, userAgent).forEach { (name, value) ->
-                        builder.header(name, value)
-                    }
-                    val request = builder.build()
-                    execute(request).use { response ->
-                        if (response.code in 300..399) {
-                            val next = MirrorRedirect.resolveFilmUrl(
-                                originalFilmUrl = url,
-                                fromUrl = current,
-                                location = response.header("Location"),
-                                savedMirrors = mirrors
-                            ) ?: return@withContext FilmResult(
-                                current,
-                                reason = "Редирект не ведёт на допустимое зеркало этого фильма."
-                            )
-                            if (next==current || attempt==2)
-                                return@withContext FilmResult(current,
-                                    reason="Зеркало не завершило перенаправление.")
-                            current=next
-                            return@repeat
-                        }
-                        if(!response.isSuccessful) {
-                            val explanation=if(response.code in setOf(403,429,503))
-                                "Зеркало ограничило доступ (HTTP "+response.code+")."
-                            else "Зеркало ответило HTTP "+response.code+"."
-                            return@withContext FilmResult(current,reason=explanation)
-                        }
-                        val body=response.body ?:return@withContext FilmResult(current,
-                            reason="Пустой ответ зеркала.")
-                        val html=bounded(body.charStream(),1_800_000)
-                            ?:return@withContext FilmResult(current,
-                                reason="Ответ зеркала слишком большой.")
-                        val parsed=MirrorHtmlMetadata.parse(current,html)
-                        return@withContext FilmResult(current,parsed,parsed.failure)
-                    }
+        if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
+            return@withContext FilmResult(url, reason = "Неверный адрес фильма.")
+
+        var current = url
+        var redirects = 0
+        var challengeAttempts = 0
+        var staleCookieRetries = 0
+        try {
+            while (redirects <= 4 && challengeAttempts <= 2) {
+                val referer = MirrorAccountGateway.origin(current).orEmpty() + "/"
+                val builder = Request.Builder().url(current).get()
+                    .header("Referer", referer)
+                    .header("Accept", "text/html,application/xhtml+xml")
+                MirrorSitePolicy.requestHeaders(current, userAgent).forEach { (name, value) ->
+                    builder.header(name, value)
                 }
-                FilmResult(current,reason="Слишком много перенаправлений.")
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_:java.net.SocketTimeoutException) {
-                FilmResult(current,reason="Зеркало не ответило вовремя.")
-            } catch (_:Exception) {
-                FilmResult(current,reason="Не удалось получить страницу фильма по HTTPS.")
+
+                var retry = false
+                var challengeHtml: String? = null
+                execute(builder.build()).use { response ->
+                    if (response.code == 403 && staleCookieRetries == 0 &&
+                        MirrorHttp.clearStaleAnubisCookies(current)) {
+                        staleCookieRetries++
+                        retry = true
+                        return@use
+                    }
+
+                    if (response.code in 300..399) {
+                        val next = MirrorRedirect.resolveFilmUrl(
+                            originalFilmUrl = url,
+                            fromUrl = current,
+                            location = response.header("Location"),
+                            savedMirrors = mirrors
+                        ) ?: return@withContext FilmResult(
+                            current,
+                            reason = "Редирект не ведёт на допустимое зеркало этого фильма."
+                        )
+                        if (next == current || redirects >= 4)
+                            return@withContext FilmResult(
+                                current,
+                                reason = "Зеркало не завершило перенаправление."
+                            )
+                        current = next
+                        redirects++
+                        retry = true
+                        return@use
+                    }
+
+                    if (!response.isSuccessful) {
+                        val explanation = if (response.code in setOf(403, 429, 503))
+                            "Зеркало ограничило доступ (HTTP ${response.code})."
+                        else "Зеркало ответило HTTP ${response.code}."
+                        return@withContext FilmResult(current, reason = explanation)
+                    }
+
+                    val body = response.body ?: return@withContext FilmResult(
+                        current, reason = "Пустой ответ зеркала."
+                    )
+                    val html = bounded(body.charStream(), 1_800_000)
+                        ?: return@withContext FilmResult(
+                            current, reason = "Ответ зеркала слишком большой."
+                        )
+
+                    if (MirrorAnubis.parse(html) != null) {
+                        challengeHtml = html
+                        return@use
+                    }
+
+                    val parsed = MirrorHtmlMetadata.parse(current, html)
+                    return@withContext FilmResult(current, parsed, parsed.failure)
+                }
+
+                if (retry) continue
+                val protectedHtml = challengeHtml
+                if (protectedHtml != null) {
+                    if (challengeAttempts >= 2)
+                        return@withContext FilmResult(
+                            current,
+                            reason = "Зеркало повторно запросило проверку Anubis."
+                        )
+                    val solved = solveAnubis(current, protectedHtml, userAgent)
+                    if (!solved)
+                        return@withContext FilmResult(
+                            current,
+                            reason = "Не удалось пройти проверку Anubis у зеркала."
+                        )
+                    challengeAttempts++
+                    continue
+                }
             }
+            FilmResult(current, reason = "Зеркало не завершило сетевую проверку.")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: java.net.SocketTimeoutException) {
+            FilmResult(current, reason = "Зеркало не ответило вовремя.")
+        } catch (_: Exception) {
+            FilmResult(current, reason = "Не удалось получить страницу фильма по HTTPS.")
         }
+    }
 
     /**
      * Resolve one logical Rezka film across the user's saved mirrors.
