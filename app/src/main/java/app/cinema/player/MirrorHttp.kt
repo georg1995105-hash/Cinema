@@ -4,6 +4,31 @@ import android.webkit.CookieManager
 import okhttp3.OkHttpClient
 
 internal object MirrorHttp {
+    /**
+     * The reference client clears a stale Anubis auth cookie after HTTP 403.
+     * Keep this scoped to the current mirror; never clear unrelated site cookies.
+     */
+    fun clearStaleAnubisCookies(url: String): Boolean {
+        if (!SourceRules.isValidHttpsUrl(url)) return false
+        val manager = CookieManager.getInstance()
+        val names = manager.getCookie(url).orEmpty()
+            .split(';')
+            .map { it.substringBefore('=').trim() }
+            .filter { it.startsWith("techaro.lol-anubis-auth", ignoreCase = true) }
+            .distinct()
+        if (names.isEmpty()) return false
+        MirrorSitePolicy.cookieScopes(url).forEach { scope ->
+            names.forEach { name ->
+                manager.setCookie(
+                    scope,
+                    "$name=; Max-Age=0; Path=/; Secure; SameSite=Lax"
+                )
+            }
+        }
+        manager.flush()
+        return true
+    }
+
     val client: OkHttpClient = OkHttpClient.Builder()
         .followSslRedirects(false)
         .addNetworkInterceptor { chain ->
