@@ -1,7 +1,9 @@
 package app.cinema.player
 
+import java.io.ByteArrayInputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -97,5 +99,26 @@ class CollapseSourceTest {
             "",
             ExternalFilmIdResolver.chooseImdb(unrelated, "Avengers: Endgame", "2019")
         )
+    }
+
+    @Test fun errorBodyIsReadOnlyUpToTheByteLimit() {
+        val region = "видео недоступно для вашего региона: US"
+        val bytes = region.toByteArray(Charsets.UTF_8)
+        assertEquals(region, CollapseSource.boundedText(
+            ByteArrayInputStream(bytes), bytes.size))
+        assertNull(CollapseSource.boundedText(
+            ByteArrayInputStream(bytes), bytes.size - 1))
+        assertEquals("", CollapseSource.boundedText(ByteArrayInputStream(byteArrayOf()), 16))
+    }
+
+    @Test fun regionDenialIsPreservedEvenWithHttp410() {
+        val result = CollapseSource.responseFailure(
+            410,
+            "<div class='error-description'>К сожалению, видео недоступно для вашего региона: US</div>",
+            "https://api.domem.ws/embed/imdb/tt1196946"
+        )
+        assertEquals("Collapse недоступен в текущем регионе.", result?.reason)
+        assertEquals("Collapse: HTTP 410.", CollapseSource.responseFailure(
+            410, "gone", "https://api.domem.ws/embed/imdb/tt1196946")?.reason)
     }
 }
