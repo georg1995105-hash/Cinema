@@ -146,10 +146,20 @@ internal object MirrorHtmlMetadata {
                     node.attr("data-is-premium") == "1" ||
                     node.attr("data-access").equals("premium", true)
             }
+            fun sourceFlag(vararg names: String, defaultValue: Int): Int {
+                for (key in names) {
+                    val raw = entry.attr(key).ifBlank { inner?.attr(key).orEmpty() }
+                    raw.toIntOrNull()?.takeIf { it in 0..1 }?.let { return it }
+                }
+                return if (id == selectedId) defaultValue else 0
+            }
             voices.putIfAbsent(id, MirrorVoice(id, name,
-                entry.attr("data-camrip").toIntOrNull()?.coerceIn(0,1) ?: 0,
-                entry.attr("data-ads").toIntOrNull()?.coerceIn(0,1) ?: 0,
-                entry.attr("data-director").toIntOrNull()?.coerceIn(0,1) ?: 0,
+                sourceFlag("data-camrip", "data-is-camrip", "data-is_camrip",
+                    defaultValue = initCamrip),
+                sourceFlag("data-ads", "data-is-ads", "data-is_ads",
+                    defaultValue = initAds),
+                sourceFlag("data-director", "data-is-director", "data-is_director",
+                    defaultValue = initDirector),
                 requiresSubscription,
                 MirrorMediaParser.sanitizeFavs(
                     entry.attr("data-favs").ifBlank { inner?.attr("data-favs").orEmpty() }
