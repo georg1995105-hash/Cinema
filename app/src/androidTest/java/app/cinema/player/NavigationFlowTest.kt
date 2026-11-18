@@ -16,7 +16,7 @@ class NavigationFlowTest {
         val store = LocalStore(compose.activity)
         store.saveSearch("Бригада")
         try {
-            compose.onNodeWithText("Мосфильм").assertIsDisplayed()
+            compose.onNodeWithText("Популярное").assertIsDisplayed()
             compose.onNode(hasText("Поиск") and hasClickAction()).performClick()
             compose.onNodeWithText("Недавние запросы").assertIsDisplayed()
             compose.onNodeWithText("Бригада").performClick()
@@ -37,7 +37,7 @@ class NavigationFlowTest {
             compose.onNodeWithText("Плеер").performClick()
             compose.onNodeWithText("Шаг перемотки").assertIsDisplayed()
             compose.onNode(hasText("Главная") and hasClickAction()).performClick()
-            compose.onNodeWithText("Мосфильм").assertIsDisplayed()
+            compose.onNodeWithText("Популярное").assertIsDisplayed()
         } finally {
             store.clearSearchHistory()
         }
