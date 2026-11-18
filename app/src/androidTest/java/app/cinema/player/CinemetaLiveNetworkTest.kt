@@ -34,6 +34,18 @@ class CinemetaLiveNetworkTest {
         }
     }
 
+    @Test fun independentTvMazeSeriesLookupReturnsRealMetadata() = runBlocking {
+        withTimeout(75_000) {
+            val search = TvMazeSeries.search("The Mentalist")
+            assertTrue("TVmaze should find real IMDb-mapped Mentalist series",
+                search.any { CinemetaCatalog.identity(it.url) == ("series" to "tt1196946") })
+            val details = TvMazeSeries.metadata("tt1196946")
+            assertTrue(details.episodes.size > 100)
+            assertTrue(details.actors.any { it.contains("Simon Baker") })
+            assertTrue(details.source.contains("CC BY-SA"))
+        }
+    }
+
     @Test fun onlyLicenseVerifiedArchiveStreamsCanBeAdvertised() = runBlocking {
         withTimeout(50_000) {
             val stream = InternetArchiveStreams.available(
