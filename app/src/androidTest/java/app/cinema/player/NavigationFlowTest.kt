@@ -17,10 +17,9 @@ class NavigationFlowTest {
         val store = LocalStore(compose.activity)
         store.saveSearch("Бригада")
         try {
-            compose.onNodeWithText("Lift · Смотреть").assertIsDisplayed()
-            compose.onNodeWithContentDescription("Назад").performClick()
-            compose.waitForIdle()
+            // Home is native: it must never embed the Lift website by default.
             compose.onNodeWithText("Популярное").assertIsDisplayed()
+            compose.onNodeWithText("Lift · Смотреть").assertDoesNotExist()
             compose.onNode(hasText("Поиск") and hasClickAction()).performClick()
             compose.onNodeWithText("Недавние запросы").assertIsDisplayed()
             compose.onNodeWithText("Бригада").performClick()
@@ -41,10 +40,9 @@ class NavigationFlowTest {
             compose.onNodeWithText("Плеер").performClick()
             compose.onNodeWithText("Шаг перемотки").assertIsDisplayed()
             compose.onNode(hasText("Главная") and hasClickAction()).performClick()
-            // Home intentionally restores the official Lift catalogue at full height.
-            // Cinema's own metadata tabs are hidden until the user exits Lift.
-            compose.onNodeWithText("Lift · Смотреть").assertIsDisplayed()
-            compose.onNodeWithText("Популярное").assertDoesNotExist()
+            // Returning from settings must show the native catalog.
+            compose.onNodeWithText("Популярное").assertIsDisplayed()
+            compose.onNodeWithText("Lift · Смотреть").assertDoesNotExist()
         } finally {
             store.clearSearchHistory()
         }
