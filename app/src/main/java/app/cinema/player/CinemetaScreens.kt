@@ -55,9 +55,16 @@ internal fun CinemetaGrid(
                 movies = cached
                 loading = false
             } else if (tab == "Смотреть" && searchText.isBlank()) {
-                // First frame is independent of a live Archive API call.
-                movies = ArchivePublicCatalog.featured()
+                // Instantly surface curated, genuinely published films before
+                // optional Internet Archive discovery completes.
+                movies = MosfilmCatalog.catalog(kind) + ArchivePublicCatalog.featured()
                 loading = false
+            } else if (searchText.isNotBlank()) {
+                val direct = MosfilmCatalog.search(searchText, kind)
+                if (direct.isNotEmpty()) {
+                    movies = direct
+                    loading = false
+                }
             }
             val items = if (searchText.isBlank())
                 CinemetaCatalog.home(context, tab, kind)
