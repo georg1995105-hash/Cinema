@@ -118,6 +118,23 @@ internal object MirrorCatalog {
         list
     }.getOrDefault(emptyList())
 
+    /**
+     * A mirror can serve cards on its HTTPS homepage while denying /series/
+     * or a ?filter= category. Root fallback must never place movies in a
+     * series-only grid or present a wrong genre as the requested category.
+     */
+    fun matchesKind(movieUrl: String, kind: String): Boolean {
+        val prefix = when (kind) {
+            "Фильмы" -> "/films/"
+            "Сериалы" -> "/series/"
+            "Мультфильмы" -> "/cartoons/"
+            "Аниме" -> "/animation/"
+            else -> return true
+        }
+        return runCatching { URI(movieUrl).path.orEmpty().startsWith(prefix) }
+            .getOrDefault(false)
+    }
+
     fun readPosters(item: JSONObject): List<String> = buildList {
         val raw = item.optJSONArray("posters")
         if (raw != null) for (index in 0 until minOf(raw.length(), 8)) {
@@ -200,10 +217,14 @@ internal fun CatalogGrid(
     var useUnfiltered by remember(source, section, kind, requestOverride, attempt) {
         mutableStateOf(false)
     }
-    val requestUrl = remember(source, section, kind, requestOverride, useUnfiltered) {
-        requestOverride ?: MirrorCatalog.requestUrl(
-            source, if (useUnfiltered) "Новинки" else section, kind
-        )
+    var useRootFallback by remember(source, section, kind, requestOverride, attempt) {
+        mutableStateOf(false)
+    }
+    val requestUrl = remember(source, section, kind, requestOverride, useUnfiltered, useRootFallback) {
+        requestOverride ?: if (useRootFallback) source.trimEnd('/') + "/"
+            else MirrorCatalog.requestUrl(
+                source, if (useUnfiltered) "Новинки" else section, kind
+            )
     }
     val cacheKey = requestUrl
     var movies by remember(requestUrl, attempt) {
@@ -228,6 +249,10 @@ internal fun CatalogGrid(
     fun recoverEmptyCatalog(reason: String) {
         if (!useUnfiltered && requestOverride == null && section != "Новинки") {
             useUnfiltered = true
+        } else if (!useRootFallback && requestOverride == null) {
+            // Root already passed the mirror's HTTPS probe. It can carry public
+            // cards when the filtered catalog route is restricted by the site.
+            useRootFallback = true
         } else {
             pending = false
             problem = reason
@@ -331,12 +356,17 @@ internal fun CatalogGrid(
 
                     fun finish(cards: List<CatalogMovie>, failure: String = "") {
                         if (!active()) return
-                        if (cards.isEmpty()) {
-                            recoverEmptyCatalog(failure.ifBlank { "По названию ничего не найдено на этом зеркале." })
+                        val verified = if (useRootFallback && searchText.isBlank())
+                            cards.filter { MirrorCatalog.matchesKind(it.url, kind) }
+                            else cards
+                        if (verified.isEmpty()) {
+                            recoverEmptyCatalog(failure.ifBlank {
+                                "На доступной странице зеркала нет карточек этой категории."
+                            })
                             return
                         }
-                        movies = cards
-                        if (cards.any { it.poster.isNotEmpty() }) CatalogMemory.put(cacheKey, cards)
+                        movies = verified
+                        if (verified.any { it.poster.isNotEmpty() }) CatalogMemory.put(cacheKey, verified)
                         pending = false
                         problem = ""
                     }
@@ -427,7 +457,7 @@ internal fun CatalogGrid(
             if (browser != null) AndroidView(factory = { browser }, modifier = Modifier.size(2.dp).alpha(0.01f))
             when {
                 visibleMovies.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
-                    Text((if (useUnfiltered) "Общий каталог • " else "") +
+                    Text((if (useRootFallback) "Главная зеркала • " else if (useUnfiltered) "Общий каталог • " else "") +
                         visibleMovies.size.toString() + " результатов", color = appMuted,
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
                     LazyVerticalGrid(
