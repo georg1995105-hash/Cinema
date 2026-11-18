@@ -52,6 +52,20 @@ class MirrorFilmUrlTest {
             film, "https://example.com/films/22-film.html", emptyList()))
     }
 
+    @Test fun browserGuestAjaxAcceptsCanonicalQueryAndHash() {
+        val page = "https://hdrezka.club/films/drama/22-film.html"
+        assertTrue(MirrorFilmUrl.sameDocument(
+            page, page + "?utm_source=site#player"))
+        assertTrue(MirrorFilmUrl.sameDocument(
+            page + "?view=full", page))
+        assertFalse(MirrorFilmUrl.sameDocument(
+            page, "https://other.example/films/drama/22-film.html"))
+        assertFalse(MirrorFilmUrl.sameDocument(
+            page, "https://hdrezka.club/films/drama/23-other.html"))
+        assertFalse(MirrorFilmUrl.sameDocument(
+            page, "https://hdrezka.club/ajax/get_cdn_series/"))
+    }
+
     @Test fun canonicalWwwAliasStillCountsAsTheSameResolvedFilm() {
         val film="https://mirror.example/series/drama/8155-brigada-2002.html"
         assertTrue(MirrorFilmUrl.isAllowedResolved(
