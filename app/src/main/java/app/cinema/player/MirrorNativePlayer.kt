@@ -83,15 +83,57 @@ internal val mirrorPlayerMetadataJavascript = """
 })()
 """.trimIndent()
 
+/**
+ * Wait until the same film document is actually ready before running the
+ * session-bound AJAX fallback. A native response can arrive before the hidden
+ * WebView has even committed its first navigation.
+ */
+private suspend fun mirrorBrowserReady(web: WebView, pageUrl: String): Boolean =
+    withTimeoutOrNull(8_000L) {
+        while (true) {
+            val ready = suspendCancellableCoroutine<Boolean> { continuation ->
+                web.post {
+                    if (!continuation.isActive) return@post
+                    val script = """
+                        (function() {
+                          try {
+                            var target = new URL(${JSONObject.quote(pageUrl)});
+                            return location.origin === target.origin &&
+                                location.pathname === target.pathname &&
+                                (document.readyState === 'complete' ||
+                                 document.readyState === 'interactive');
+                          } catch (_) { return false; }
+                        })()
+                    """.trimIndent()
+                    runCatching {
+                        web.evaluateJavascript(script) { value ->
+                            if (continuation.isActive) continuation.resume(value == "true")
+                        }
+                    }.onFailure {
+                        if (continuation.isActive) continuation.resume(false)
+                    }
+                }
+            }
+            if (ready) return@withTimeoutOrNull true
+            delay(220L)
+        }
+        false
+    } ?: false
+
 internal suspend fun mirrorAjax(web: WebView, pageUrl: String, payload: Map<String, String>): String? =
-    withTimeoutOrNull(14500L) {
+    withTimeoutOrNull(22_000L) {
+        if (!mirrorBrowserReady(web, pageUrl)) return@withTimeoutOrNull null
         suspendCancellableCoroutine { continuation ->
             val handler = Handler(Looper.getMainLooper())
             val marker = "__kinoRequest" + System.nanoTime().toString().replace("-", "")
             val body = JSONObject(payload).toString()
             val script = """
             (function(){
-               if (location.href !== ${JSONObject.quote(pageUrl)}) return 'changed';
+               try {
+                 var target = new URL(${JSONObject.quote(pageUrl)});
+                 if (location.origin !== target.origin || location.pathname !== target.pathname)
+                     return 'changed';
+               } catch (_) { return 'changed'; }
                ${MirrorVoiceDiscovery.episodesJavascript}
                var key = '$marker';
                var controller = new AbortController();
@@ -486,8 +528,9 @@ internal fun MirrorNativePlayer(
         var response = raw?.let(MirrorMediaParser::objectFromWebView)
         var failure = response?.let(MirrorMediaParser::responseFailure)
         var entries = MirrorMediaParser.parseEpisodes(response?.optJSONArray("__kinoEpisodes"))
-        if (entries.isEmpty() && failure !in setOf(
-                PlaybackFailure.PREMIUM, PlaybackFailure.AUTH_REQUIRED, PlaybackFailure.DRM)) {
+        if (entries.isEmpty()) {
+            // Same-origin guest WebView can succeed when native HTTP cannot.
+            // Do not treat an HTTP access error as definitive before this retry.
             val alternate = mirrorAjax(web, pageUrl, payload)
             val decoded = alternate?.let(MirrorMediaParser::objectFromWebView)
             val parsed = MirrorMediaParser.parseEpisodes(decoded?.optJSONArray("__kinoEpisodes"))
@@ -539,17 +582,12 @@ internal fun MirrorNativePlayer(
         val direct = MirrorNetworkSource.playback(pageUrl, request,
             WebSettings.getDefaultUserAgent(context))
         var streams = MirrorMediaParser.parseStreamInfo(direct)
-        if (streams.qualities.isEmpty() && streams.failure !in setOf(
-                PlaybackFailure.PREMIUM, PlaybackFailure.AUTH_REQUIRED, PlaybackFailure.DRM,
-                PlaybackFailure.PREVIEW)) {
-            // Browser-session AJAX is a second path if direct HTTPS is blocked.
+        if (MirrorStreamFallback.shouldTryBrowser(streams)) {
+            // Browser-session AJAX uses the same public episode and voice.
+            // Native session errors are not used to skip the browser path.
             val viaBrowser = mirrorAjax(web, pageUrl, request)
             val retry = viaBrowser?.let(MirrorMediaParser::parseStreamInfo)
-            if (retry != null && (retry.qualities.isNotEmpty() ||
-                    retry.failure in setOf(PlaybackFailure.PREMIUM,
-                        PlaybackFailure.AUTH_REQUIRED, PlaybackFailure.DRM))) {
-                streams = retry
-            }
+            streams = MirrorStreamFallback.choose(streams, retry)
         }
         if (streams.qualities.isEmpty()) {
             streams.failure?.voiceAvailability()?.let { voiceAvailability[voiceKey(voice)] = it }
