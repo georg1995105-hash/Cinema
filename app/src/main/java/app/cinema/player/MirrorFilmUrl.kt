@@ -9,6 +9,7 @@ internal object MirrorFilmUrl {
             return false
         val expectedId = MirrorPostId.fromUrl(filmUrl) ?: return false
         if (MirrorPostId.fromUrl(resolvedUrl) != expectedId) return false
+        if (MirrorPostId.canOpen(filmUrl, resolvedUrl)) return true
         return MirrorSitePolicy.isAllowedMirror(resolvedUrl, listOf(filmUrl) + mirrors)
     }
 
