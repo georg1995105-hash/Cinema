@@ -13,6 +13,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -73,7 +78,7 @@ internal fun CinemetaGrid(
                     verticalArrangement = Arrangement.spacedBy(17.dp)
                 ) {
                     items(visible, key = { it.url }) { movie ->
-                        FilmPoster(movie) { onOpen(movie) }
+                        CinemetaFilmPoster(movie) { onOpen(movie) }
                     }
                 }
             }
@@ -164,13 +169,13 @@ internal fun CinemetaFilmDetails(
         val isTablet = LocalConfiguration.current.screenWidthDp >= 600
         if (isTablet) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                MoviePosterImage(movie, Modifier.width(190.dp).aspectRatio(.70f)
+                PublicMoviePoster(movie, Modifier.width(190.dp).aspectRatio(.70f)
                     .border(1.dp, appPanel, RoundedCornerShape(14.dp)), ContentScale.Crop)
                 DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
                     couldHaveArchive, onPlay, { retry++ }, Modifier.weight(1f))
             }
         } else {
-            MoviePosterImage(movie, Modifier.width(148.dp).aspectRatio(.70f)
+            PublicMoviePoster(movie, Modifier.width(148.dp).aspectRatio(.70f)
                 .align(Alignment.CenterHorizontally), ContentScale.Crop)
             Spacer(Modifier.height(12.dp))
             DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
@@ -269,6 +274,47 @@ private fun DetailsBody(
                 else "Подтверждённый источник видео пока недоступен. Сведения и каталог работают независимо.",
                 color = appMuted)
             if (couldHaveArchive) OutlinedButton(onClick = retry) { Text("Проверить снова") }
+        }
+    }
+}
+
+/**
+ * Do not reuse MirrorHttp for independent poster hosts. It disables HTTPS
+ * redirects and injects mirror cookies; public image CDNs require neither.
+ */
+@Composable
+private fun PublicMoviePoster(movie: CatalogMovie, modifier: Modifier) {
+    val context = LocalContext.current
+    var failed by remember(movie.url, movie.poster) { mutableStateOf(false) }
+    Box(modifier.background(appCard).clip(RoundedCornerShape(14.dp)),
+        contentAlignment = Alignment.Center) {
+        if (movie.poster.isBlank() || failed) {
+            Icon(Icons.Outlined.Movie, contentDescription = null,
+                tint = appMuted, modifier = Modifier.size(38.dp))
+        } else {
+            AsyncImage(
+                model = ImageRequest.Builder(context).data(movie.poster)
+                    .crossfade(true).build(),
+                contentDescription = movie.title, contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(), onError = { failed = true }
+            )
+        }
+    }
+}
+
+@Composable
+private fun CinemetaFilmPoster(movie: CatalogMovie, onClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        PublicMoviePoster(movie, Modifier.fillMaxWidth().aspectRatio(.70f))
+        Spacer(Modifier.height(7.dp))
+        Text(movie.title, style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium, maxLines = 2,
+            overflow = TextOverflow.Ellipsis)
+        if (movie.details.isNotBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(movie.details, color = appMuted, maxLines = 2,
+                style = MaterialTheme.typography.bodySmall,
+                overflow = TextOverflow.Ellipsis)
         }
     }
 }
