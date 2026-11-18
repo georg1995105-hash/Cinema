@@ -20,8 +20,7 @@ class NavigationFlowTest {
             compose.onNode(hasText("Поиск") and hasClickAction()).performClick()
             compose.onNodeWithText("Недавние запросы").assertIsDisplayed()
             compose.onNodeWithText("Бригада").performClick()
-            compose.onNodeWithText("Добавьте зеркало").assertIsDisplayed()
-            compose.onNodeWithText("Обновить").assertDoesNotExist()
+            compose.onNodeWithText("Фильтры").assertIsDisplayed()
 
             compose.onNode(hasText("Моё") and hasClickAction()).performClick()
             compose.onNodeWithText("Просмотров пока нет").assertIsDisplayed()
@@ -38,7 +37,7 @@ class NavigationFlowTest {
             compose.onNodeWithText("Плеер").performClick()
             compose.onNodeWithText("Шаг перемотки").assertIsDisplayed()
             compose.onNode(hasText("Главная") and hasClickAction()).performClick()
-            compose.onNodeWithText("Добавьте зеркало").assertIsDisplayed()
+            compose.onNodeWithText("Популярное").assertIsDisplayed()
         } finally {
             store.clearSearchHistory()
         }
