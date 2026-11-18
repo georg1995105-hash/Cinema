@@ -275,13 +275,37 @@ private fun DetailsBody(
         Text("Просмотр", style = MaterialTheme.typography.titleMedium)
         if (checking) Text("Проверяем реальный видеопоток…", color = appMuted)
         else if (streams.isNotEmpty()) {
-            Text("Internet Archive • общественное достояние", color = appMuted)
-            streams.forEach { video ->
-                Button(onClick = { onPlay(video.url) }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Outlined.PlayArrow, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Смотреть — ${video.title}")
-                }
+            var selecting by remember(movie.url) { mutableStateOf(false) }
+            Text("Internet Archive • доступный архивный фильм", color = appMuted)
+            Button(onClick = {
+                if (streams.size == 1) onPlay(streams.first().url)
+                else selecting = true
+            }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Смотреть")
+            }
+            if (selecting) {
+                AlertDialog(
+                    onDismissRequest = { selecting = false },
+                    title = { Text("Выберите качество") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            streams.forEach { video ->
+                                TextButton(
+                                    onClick = {
+                                        selecting = false
+                                        onPlay(video.url)
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text(video.title) }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { selecting = false }) { Text("Отмена") }
+                    }
+                )
             }
         } else {
             Text(if (checkFailure.isNotBlank()) checkFailure
