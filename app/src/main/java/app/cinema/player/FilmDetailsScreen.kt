@@ -94,8 +94,8 @@ internal object FilmPageParser {
          function txt(s) {var e=document.querySelector(s);return e?norm(e.textContent):'';}
          function absolute(s) {try {return new URL(s,document.baseURI).href;} catch(e) {return '';}}
          var facts=[];
-         document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(tr) {
-           var cells=tr.cells;
+         document.querySelectorAll('.b-post__infotable tr, .b-post__info tr, .b-post__infotable_left > div, .b-post__infotable_right_inner > div').forEach(function(tr) {
+           var cells=(tr.cells && tr.cells.length>=2) ? tr.cells : (tr.children.length>=2 ? [tr.children[0],tr.children[tr.children.length-1]] : null);
            if (!cells || cells.length<2) return;
            var label=norm(cells[0].textContent).replace(/:$/,'');
            var value=norm(cells[1].textContent);
@@ -165,12 +165,16 @@ internal object FilmPageParser {
            var label = entry.querySelector('[itemprop~="name"], .person-name') ||
              anchor?.querySelector('[itemprop~="name"]') || anchor || entry;
            var name = label.getAttribute('content') || label.textContent || entry.querySelector('img')?.getAttribute('alt');
-           var photo = kinoPosters(entry,document.baseURI)[0] || '';
+           var portrait = entry.getAttribute('data-photo') || node.getAttribute('data-photo') ||
+             entry.querySelector('[data-photo]')?.getAttribute('data-photo') || '';
+           if (/nopersonphoto|^(?:null|undefined)$/i.test(portrait)) portrait = '';
+           var photo = (portrait ? absolute(portrait) : '') ||
+             kinoPosters(entry,document.baseURI)[0] || '';
            var pid = entry.getAttribute('data-pid') || entry.closest('[data-pid]')?.getAttribute('data-pid') || '';
            addPerson(role, name, anchor?.getAttribute('href'), photo, pid);
          }
-         document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(row) {
-           var cells = row.cells;
+         document.querySelectorAll('.b-post__infotable tr, .b-post__info tr, .b-post__infotable_left > div, .b-post__infotable_right_inner > div').forEach(function(row) {
+           var cells = (row.cells && row.cells.length>=2) ? row.cells : (row.children.length>=2 ? [row.children[0],row.children[row.children.length-1]] : null);
            if (!cells || cells.length < 2) return;
            var label = norm(cells[0].textContent);
            var role = /^(?:в ролях|в главных ролях|акт[её]р)/i.test(label) ? 'actor' : /^режисс/i.test(label) ? 'director' : '';
