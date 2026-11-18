@@ -3,6 +3,9 @@ package app.cinema.player
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -81,8 +84,12 @@ internal object InternetArchiveStreams {
     suspend fun details(context: Context): CinemetaDetails = withContext(Dispatchers.IO) {
         val data = verifiedMetadata()
         val info = data.getJSONObject("metadata")
-        val item = catalog(context, "Фильмы").firstOrNull()
-            ?: throw IOException("Архивный фильм недоступен")
+        val item = CatalogMovie(
+            CinemetaCatalog.movieUrl("movie", imdbId),
+            "Ночь живых мертвецов",
+            "https://archive.org/services/img/$archiveId",
+            "1968 · США · Ужасы · свободный просмотр"
+        )
         CinemetaDetails(
             item = item,
             description = Jsoup.parse(info.optString("description")).text().take(5000),
@@ -112,13 +119,16 @@ internal object InternetArchiveStreams {
                 availableFiles.add(entry.optString("name"))
             }
         }
-        buildList {
-            for ((name, label) in videoFiles) {
-                if (name !in availableFiles) continue
-                val escaped = URLEncoder.encode(name, "UTF-8").replace("+", "%20")
-                val streamUrl = "https://archive.org/download/$archiveId/$escaped"
-                if (isPlayableMp4(streamUrl)) add(Video(label, streamUrl))
-            }
+        // Both verified MP4 variants are probed concurrently. A slow or
+        // unavailable variant must not block showing an already playable one.
+        coroutineScope {
+            videoFiles.filter { it.first in availableFiles }.map { (name, label) ->
+                async(Dispatchers.IO) {
+                    val escaped = URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+                    val streamUrl = "https://archive.org/download/$archiveId/$escaped"
+                    if (isPlayableMp4(streamUrl)) Video(label, streamUrl) else null
+                }
+            }.awaitAll().filterNotNull()
         }
     }
 
