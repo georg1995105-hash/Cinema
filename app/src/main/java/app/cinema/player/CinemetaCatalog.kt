@@ -32,7 +32,7 @@ internal object CinemetaCatalog {
             .connectTimeout(7, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
             .callTimeout(14, TimeUnit.SECONDS)
-            .followSslRedirects(false)
+            .followSslRedirects(true)
             .build().also { client = it }
     }
 
@@ -190,7 +190,7 @@ internal object CinemetaCatalog {
     fun parseDetails(json: JSONObject, type: String, id: String): CinemetaDetails {
         val meta = json.optJSONObject("meta") ?: throw IOException("Карточка фильма отсутствует")
         val item = parseMovie(meta) ?: throw IOException("Неверная карточка фильма")
-        if (identity(item.url) != type to id) {
+        if (identity(item.url) != (type to id)) {
             throw IOException("Несоответствие данных фильма")
         }
         val episodes = buildList {
