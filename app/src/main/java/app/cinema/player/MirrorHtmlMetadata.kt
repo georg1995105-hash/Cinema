@@ -132,7 +132,8 @@ internal object MirrorHtmlMetadata {
             }.ifBlank { entry.text() }.trim().take(75)
             if (name.isBlank()) continue
             val requiresSubscription = listOfNotNull(entry, inner).any { node ->
-                node.hasClass("b-translator__premium") ||
+                node.hasClass("b-prem_translator") ||
+                    node.hasClass("b-translator__premium") ||
                     node.attr("data-premium") == "1" ||
                     node.attr("data-is-premium") == "1" ||
                     node.attr("data-access").equals("premium", true)
