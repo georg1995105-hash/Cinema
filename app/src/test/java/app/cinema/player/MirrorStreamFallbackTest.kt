@@ -42,4 +42,17 @@ class MirrorStreamFallbackTest {
         )
         assertFalse(MirrorStreamFallback.shouldTryBrowser(native))
     }
+
+    @Test fun browserEpisodeAccessErrorIsNotDiscarded() {
+        assertTrue(MirrorStreamFallback.useBrowserEpisodes(
+            0, PlaybackFailure.INVALID_RESPONSE, 0, PlaybackFailure.AUTH_REQUIRED))
+        assertTrue(MirrorStreamFallback.useBrowserEpisodes(
+            0, null, 0, PlaybackFailure.BLOCKED))
+        assertFalse(MirrorStreamFallback.useBrowserEpisodes(
+            0, PlaybackFailure.PREMIUM, 0, PlaybackFailure.AUTH_REQUIRED))
+        assertFalse(MirrorStreamFallback.useBrowserEpisodes(
+            0, PlaybackFailure.INVALID_RESPONSE, 0, null))
+        assertTrue(MirrorStreamFallback.useBrowserEpisodes(
+            0, PlaybackFailure.INVALID_RESPONSE, 4, null))
+    }
 }

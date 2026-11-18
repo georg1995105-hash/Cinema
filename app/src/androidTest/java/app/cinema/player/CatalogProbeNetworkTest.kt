@@ -41,7 +41,7 @@ class CatalogProbeNetworkTest {
         }
     }
 
-    @Test fun catalog200IsExplicitlyNotVideoAvailability() {
+    @Test fun catalog200ChallengeIsNotAvailable() {
         val certificate = HeldCertificate.Builder()
             .addSubjectAlternativeName("localhost").build()
         val trust = HandshakeCertificates.Builder()
@@ -51,8 +51,40 @@ class CatalogProbeNetworkTest {
                 HandshakeCertificates.Builder().heldCertificate(certificate).build().sslSocketFactory(),
                 false
             )
-            server.enqueue(MockResponse().setResponseCode(200))
-            server.enqueue(MockResponse().setResponseCode(200))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("<html>root</html>"))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(
+                "<html><script id='anubis_challenge'>{}</script></html>"))
+            server.start()
+            val transport = MirrorHttp.client.newBuilder()
+                .sslSocketFactory(trust.sslSocketFactory(), trust.trustManager)
+                .build()
+            val result = runBlocking {
+                SourceProbe.inspect(server.url("/").toString(), "Browser UA", transport)
+            }
+            assertFalse(result.available)
+            assertTrue(result.message.contains("не содержит карточки"))
+        }
+    }
+
+    @Test fun catalogCardsAreExplicitlyNotVideoAvailability() {
+        val certificate = HeldCertificate.Builder()
+            .addSubjectAlternativeName("localhost").build()
+        val trust = HandshakeCertificates.Builder()
+            .addTrustedCertificate(certificate.certificate).build()
+        MockWebServer().use { server ->
+            server.useHttps(
+                HandshakeCertificates.Builder().heldCertificate(certificate).build().sslSocketFactory(),
+                false
+            )
+            val card = """
+                <div class="b-content__inline_item">
+                  <div class="b-content__inline_item-link">
+                    <a href="/series/drama/8155-brigada-2002.html">Бригада</a>
+                  </div>
+                </div>
+            """.trimIndent()
+            server.enqueue(MockResponse().setResponseCode(200).setBody("<html>root</html>"))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(card))
             server.start()
             val transport = MirrorHttp.client.newBuilder()
                 .sslSocketFactory(trust.sslSocketFactory(), trust.trustManager)
@@ -61,6 +93,7 @@ class CatalogProbeNetworkTest {
                 SourceProbe.inspect(server.url("/").toString(), "Browser UA", transport)
             }
             assertTrue(result.available)
+            assertTrue(result.message.contains("Каталог содержит карточки"))
             assertTrue(result.message.contains("видео не проверено"))
         }
     }
