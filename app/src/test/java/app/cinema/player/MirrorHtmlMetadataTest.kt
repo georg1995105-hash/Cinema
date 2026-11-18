@@ -145,4 +145,18 @@ class MirrorHtmlMetadataTest {
         assertEquals("0", MirrorPlaybackRequest.stream(page, "18", "1", "1")["is_ads"])
     }
 
+    @Test fun selectedTranslatorInheritsInitFlagsWhenNoDataAttributesExist() {
+        val html = """
+          <div class="b-post">
+            <h1 class="b-post__title">Сериал</h1>
+            <div class="b-post__description_text">Описание.</div>
+            <ul id="translators-list"><li data-translator_id="17" class="active">Обычная</li></ul>
+            <script>initCDNSeriesEvents(123,17,0,1,0);</script>
+          </div>
+        """
+        val player = requireNotNull(MirrorHtmlMetadata.parse(url, html).player)
+        assertEquals("1", MirrorPlaybackRequest.stream(
+            player, "17", "1", "1")["is_ads"])
+    }
+
 }
