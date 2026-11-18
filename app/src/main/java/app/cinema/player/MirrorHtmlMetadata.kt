@@ -230,6 +230,11 @@ internal object MirrorHtmlMetadata {
             kinopoiskId = kinopoiskId,
             imdbId = imdbId
         )
+        // Preserve source-provided request state even when the native HTTP
+        // metadata parser finishes before the WebView's page scripts execute.
+        val favs = document.selectFirst("#favs, input[name=favs]")?.attr("value").orEmpty()
+            .ifBlank { document.selectFirst("[data-favs]")?.attr("data-favs").orEmpty() }
+            .takeIf { it.matches(Regex("[A-Za-z0-9_+=/-]{1,256}")) }.orEmpty()
         // Only trust source-provided player metadata matching the requested film.
         val player = if ((initId.isBlank() || initId == expectedId) &&
             (voices.isNotEmpty() || defaultVoice.isNotBlank())) {
@@ -239,6 +244,7 @@ internal object MirrorHtmlMetadata {
                     URI(filmUrl).path.startsWith("/series/"),
                 voices.values.toList(),
                 episodes,
+                favs = favs,
                 defaultVoice = defaultVoice,
                 defaultFlags = voices[defaultVoice],
                 expectedDurationMs = expectedDurationMs
