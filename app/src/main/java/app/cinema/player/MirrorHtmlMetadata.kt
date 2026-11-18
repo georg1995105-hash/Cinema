@@ -109,11 +109,14 @@ internal object MirrorHtmlMetadata {
         document.select(".b-post__directors a[href], [itemprop=director] a[href]")
             .take(12).forEach { person(it,"director") }
         val init = Regex(
-            """initCDN(Series|Movies)Events\s*\(\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?(\d{1,12})""",
+            """initCDN(Series|Movies)Events\s*\(\s*['"]?(\d{1,12})['"]?\s*,\s*['"]?(\d{1,12})['"]?(?:\s*,\s*['"]?([01])['"]?\s*,\s*['"]?([01])['"]?(?:\s*,\s*['"]?([01])['"]?)?)?""",
             RegexOption.IGNORE_CASE
         ).find(html)
         val initId = init?.groupValues?.getOrNull(2).orEmpty()
         val selectedId = init?.groupValues?.getOrNull(3).orEmpty()
+        val initCamrip = init?.groupValues?.getOrNull(4)?.toIntOrNull()?.coerceIn(0, 1) ?: 0
+        val initAds = init?.groupValues?.getOrNull(5)?.toIntOrNull()?.coerceIn(0, 1) ?: 0
+        val initDirector = init?.groupValues?.getOrNull(6)?.toIntOrNull()?.coerceIn(0, 1) ?: 0
         val voices = linkedMapOf<String, MirrorVoice>()
         for (entry in document.select("#translators-list li, .b-translator__item, [data-translator_id], [data-translator-id], [data-translation-id]")) {
             val inner = entry.selectFirst(
@@ -128,8 +131,12 @@ internal object MirrorHtmlMetadata {
                 inner?.attr("data-title").orEmpty()
             }.ifBlank { entry.text() }.trim().take(75)
             if (name.isBlank()) continue
-            val requiresSubscription = entry.hasClass("b-translator__premium") ||
-                entry.attr("data-premium") == "1" || entry.attr("data-access") == "premium"
+            val requiresSubscription = listOfNotNull(entry, inner).any { node ->
+                node.hasClass("b-translator__premium") ||
+                    node.attr("data-premium") == "1" ||
+                    node.attr("data-is-premium") == "1" ||
+                    node.attr("data-access").equals("premium", true)
+            }
             voices.putIfAbsent(id, MirrorVoice(id, name,
                 entry.attr("data-camrip").toIntOrNull()?.coerceIn(0,1) ?: 0,
                 entry.attr("data-ads").toIntOrNull()?.coerceIn(0,1) ?: 0,
@@ -139,6 +146,13 @@ internal object MirrorHtmlMetadata {
         val selected = document.selectFirst("#translators-list .active[data-translator_id], .b-translator__item.active[data-translator_id]")
             ?.attr("data-translator_id").orEmpty()
         val defaultVoice = selected.takeIf { it in voices }.orEmpty().ifBlank { selectedId }
+        if (defaultVoice.matches(Regex("[0-9]{1,12}")) && defaultVoice !in voices) {
+            // Some pages expose the valid translator only through initCDN*Events.
+            // Keep that source-provided ID usable instead of disabling playback.
+            voices[defaultVoice] = MirrorVoice(
+                defaultVoice, "По умолчанию", initCamrip, initAds, initDirector
+            )
+        }
         val seasons = document.select(".b-simple_season__item[data-tab_id], .b-simple_season__item[data-season_id]")
         val soleSeason = if (seasons.size == 1)
             seasons.first()?.attr("data-tab_id").orEmpty().ifBlank {
@@ -174,6 +188,20 @@ internal object MirrorHtmlMetadata {
                 MirrorPostId.fromUrl(url) == null) return@mapNotNull null
             CatalogMovie(url, a.text().trim().take(140), poster(item), "")
         }.filter { it.title.isNotBlank() }.distinctBy { it.url }.take(15)
+        val runtimeValue = document.selectFirst(
+            ".b-post [itemprop=duration], .b-post__infotable [itemprop=duration], meta[property=video:duration]"
+        )?.let { node ->
+            node.attr("content").ifBlank { node.attr("datetime") }.ifBlank { node.text() }
+        }.orEmpty().ifBlank {
+            facts.firstOrNull { (label, _) ->
+                Regex("""(?iu)^(время|длительность|продолжительность|хронометраж)""")
+                    .containsMatchIn(label.trim())
+            }?.second.orEmpty()
+        }
+        val expectedDurationMs = MirrorPreview.expectedDuration(runtimeValue)
+        val unresolvedProfiles = (actors.values + directors.values).any {
+            it.photo.isBlank() && it.url.isNotBlank()
+        }
         val info = FilmInfo(
             originalTitle = document.selectFirst(".b-post__origtitle, .b-post__subtitle, .b-post__title_original")?.text().orEmpty(),
             description = description,
@@ -187,17 +215,23 @@ internal object MirrorHtmlMetadata {
             voices = voices.values.toList(),
             title = CatalogTitleCleaner.clean(title),
             posters = posters,
-            portraitsResolved = true,
+            portraitsResolved = !unresolvedProfiles,
             defaultVoice = defaultVoice,
             episodes = episodes
         )
         // Only trust source-provided player metadata matching the requested film.
         val player = if ((initId.isBlank() || initId == expectedId) &&
             (voices.isNotEmpty() || defaultVoice.isNotBlank())) {
-            MirrorMoviePage(expectedId,
+            MirrorMoviePage(
+                expectedId,
                 init?.groupValues?.getOrNull(1)?.equals("Series",true) == true ||
                     URI(filmUrl).path.startsWith("/series/"),
-                voices.values.toList(),episodes,defaultVoice=defaultVoice)
+                voices.values.toList(),
+                episodes,
+                defaultVoice = defaultVoice,
+                defaultFlags = voices[defaultVoice],
+                expectedDurationMs = expectedDurationMs
+            )
         } else null
         return Result(info, player)
     }
