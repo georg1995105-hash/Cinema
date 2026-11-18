@@ -81,20 +81,21 @@ internal fun SourcesScreen(
     var testing by remember { mutableStateOf<String?>(null) }
     val results=remember { mutableStateMapOf<String,MirrorProbeResult>() }
     val scope=rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val browserUserAgent = remember(context) {
+        android.webkit.WebSettings.getDefaultUserAgent(context)
+    }
     val builtIns = MirrorSitePolicy.builtInOrigins
     val allMirrors = (sources.toList() + builtIns).distinctBy {
         it.trim().trimEnd('/').lowercase()
     }
-    LaunchedEffect(allMirrors) {
-        // Checking every HTTPS endpoint at once overloads slower mobile networks.
-        // Four workers are enough to populate the latency labels progressively.
-        val limit = Semaphore(4)
-        coroutineScope {
-            allMirrors.forEach { address ->
-                launch {
-                    limit.withPermit { results[address] = SourceProbe.inspect(address) }
-                }
-            }
+    LaunchedEffect(selected, browserUserAgent) {
+        // Do not send two dozen automatic requests from one mobile/VPN
+        // exit just because Settings opened: rate limits can produce HTTP 403
+        // on otherwise available catalog endpoints. Check only the selected
+        // mirror; the remaining sites have an explicit manual test button.
+        selected?.takeIf { it in allMirrors }?.let { address ->
+            results[address] = SourceProbe.inspect(address, browserUserAgent)
         }
     }
     Column(Modifier.fillMaxSize()) {
@@ -159,7 +160,8 @@ internal fun SourcesScreen(
                                     color=if(check.available)appBlue else appMuted,
                                     style=MaterialTheme.typography.bodySmall)
                             } else {
-                                Text("Измеряем HTTPS-отклик…", color=appMuted,
+                                Text(if (SourceRules.sameOrigin(address, selected.orEmpty()))
+                                    "Проверяем каталог…" else "Нажмите «Проверить»", color=appMuted,
                                     style=MaterialTheme.typography.bodySmall)
                             }
                             Row(verticalAlignment=Alignment.CenterVertically){
@@ -173,7 +175,7 @@ internal fun SourcesScreen(
                                 TextButton(enabled=testing!=address,onClick={
                                     testing=address
                                     scope.launch {
-                                        results[address]=SourceProbe.inspect(address)
+                                        results[address]=SourceProbe.inspect(address, browserUserAgent)
                                         testing=null
                                     }
                                 }){Text(if(testing==address)"Проверка…" else "Проверить")}
