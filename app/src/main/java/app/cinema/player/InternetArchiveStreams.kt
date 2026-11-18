@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import org.jsoup.Jsoup
 import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -32,23 +33,76 @@ internal object InternetArchiveStreams {
 
     data class Video(val title: String, val url: String)
 
-    suspend fun available(context: Context, url: String): List<Video> = withContext(Dispatchers.IO) {
-        val identity = CinemetaCatalog.identity(url)
-        if (identity != ("movie" to imdbId)) return@withContext emptyList()
-        val metadata = Request.Builder()
+    private fun verifiedMetadata(): JSONObject {
+        val request = Request.Builder()
             .url("https://archive.org/metadata/$archiveId")
             .header("Accept", "application/json").build()
-        val data = client.newCall(metadata).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("Архив недоступен: HTTP ${response.code}")
-            val payload = response.body?.string().orEmpty()
+        val data = client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful ||
+                response.request.url.host != "archive.org")
+                throw IOException("Архив недоступен: HTTP ${response.code}")
+            val payload = response.peekBody(3_000_001L).string()
             if (payload.length > 3_000_000) throw IOException("Недопустимый размер метаданных")
             JSONObject(payload)
         }
-        val info = data.optJSONObject("metadata") ?: return@withContext emptyList()
+        val info = data.optJSONObject("metadata")
+            ?: throw IOException("Нет метаданных архивного фильма")
         val license = info.optString("licenseurl")
-        val rights = license.startsWith("https://$publicDomainMark") ||
-            license.startsWith("http://$publicDomainMark")
-        if (!rights) return@withContext emptyList()
+        if (!license.startsWith("https://$publicDomainMark") &&
+            !license.startsWith("http://$publicDomainMark"))
+            throw IOException("Не подтверждена лицензия на свободный просмотр")
+        return data
+    }
+
+    /** A short, verified playable-content tab; it must not pretend to be a
+     * general catalogue of commercial films, or offer a dead Watch button. */
+    suspend fun catalog(context: Context, kind: String): List<CatalogMovie> = withContext(Dispatchers.IO) {
+        if (kind == "Сериалы" || kind == "Мультфильмы") return@withContext emptyList()
+        val data = verifiedMetadata()
+        val files = data.optJSONArray("files") ?: return@withContext emptyList()
+        var hasPublishedMp4 = false
+        for (i in 0 until files.length()) {
+            val entry = files.optJSONObject(i) ?: continue
+            if (entry.optString("name") in videoFiles.map { it.first } &&
+                entry.optLong("size") > 10_000_000 && entry.optString("private").isBlank()) {
+                hasPublishedMp4 = true
+                break
+            }
+        }
+        if (!hasPublishedMp4) return@withContext emptyList()
+        listOf(CatalogMovie(
+            CinemetaCatalog.movieUrl("movie", imdbId),
+            "Ночь живых мертвецов",
+            "https://archive.org/services/img/$archiveId",
+            "1968 · США · Ужасы · свободный просмотр"
+        ))
+    }
+
+    suspend fun details(context: Context): CinemetaDetails = withContext(Dispatchers.IO) {
+        val data = verifiedMetadata()
+        val info = data.getJSONObject("metadata")
+        val item = catalog(context, "Фильмы").firstOrNull()
+            ?: throw IOException("Архивный фильм недоступен")
+        CinemetaDetails(
+            item = item,
+            description = Jsoup.parse(info.optString("description")).text().take(5000),
+            originalTitle = "Night of the Living Dead",
+            rating = "",
+            country = "США",
+            runtime = "",
+            genres = listOf("Ужасы"),
+            directors = emptyList(),
+            actors = emptyList(),
+            episodes = emptyList(),
+            source = "Internet Archive · Public Domain Mark 1.0",
+            sourceUrl = "https://archive.org/details/$archiveId"
+        )
+    }
+
+    suspend fun available(context: Context, url: String): List<Video> = withContext(Dispatchers.IO) {
+        val identity = CinemetaCatalog.identity(url)
+        if (identity != ("movie" to imdbId)) return@withContext emptyList()
+        val data = verifiedMetadata()
         val published = data.optJSONArray("files") ?: return@withContext emptyList()
         val availableFiles = mutableSetOf<String>()
         for (i in 0 until published.length()) {
