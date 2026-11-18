@@ -46,7 +46,7 @@ internal object CinemetaCatalog {
     ): List<CatalogMovie> = withContext(Dispatchers.IO) {
         runCatching {
             val file = snapshotFile(context, section, kind, query)
-            if (!file.isFile || file.length() !in 2..250_000) return@runCatching emptyList()
+            if (!file.isFile || file.length() !in 2L..250_000L) return@runCatching emptyList()
             val data = JSONArray(file.readText(Charsets.UTF_8))
             buildList {
                 for (i in 0 until minOf(100, data.length())) {
