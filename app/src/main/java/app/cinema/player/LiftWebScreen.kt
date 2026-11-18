@@ -253,6 +253,49 @@ internal fun LiftWebScreen(
             Box(Modifier.fillMaxSize()) {
                 AndroidView(factory = { browser }, modifier = Modifier.fillMaxSize())
                 if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                if (matching && !foundDetails && failure.isBlank()) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.TopCenter).padding(12.dp),
+                        color = appPanel,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Подбираем фильм «$selectedTitle» по названию и году…",
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                if (!matching && !foundDetails && failure.isBlank() &&
+                    selectedTitle.isNotBlank() && lookupMessage.isNotBlank()) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
+                        color = appPanel,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                        shadowElevation = 5.dp
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text(lookupMessage,
+                                style = MaterialTheme.typography.bodyMedium)
+                            choices.take(6).forEach { candidate ->
+                                TextButton(onClick = {
+                                    if (LiftMatchPolicy.safeDetailsUrl(candidate.url)) {
+                                        foundDetails = true
+                                        choices = emptyList()
+                                        lookupMessage = ""
+                                        browser.loadUrl(candidate.url)
+                                    }
+                                }) {
+                                    Text(candidate.title +
+                                        (candidate.year?.let { " · $it" } ?: ""),
+                                        maxLines = 2)
+                                }
+                            }
+                            TextButton(onClick = {
+                                lookupMessage = ""
+                                choices = emptyList()
+                            }) { Text("Продолжить поиск вручную") }
+                        }
+                    }
+                }
                 if (failure.isNotBlank()) {
                     Column(
                         Modifier.align(Alignment.Center)
