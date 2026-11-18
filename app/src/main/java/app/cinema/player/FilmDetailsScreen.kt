@@ -395,20 +395,25 @@ internal fun FilmDetails(
     onPerson: (FilmPerson) -> Unit
 ) {
     val context = LocalContext.current
-    var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
-    var loadDone by remember(movie.url) {
-        mutableStateOf(info?.let { FilmInfoReadiness.canFinish(it) && it.portraitsResolved } == true)
+    // Reopen the same post on the mirror explicitly selected in Settings.
+    // Old history entries may still contain the host used at the time of saving.
+    val preferredFilmUrl = remember(movie.url, source) {
+        MirrorFilmUrl.changeOrigin(movie.url, source) ?: movie.url
     }
+    var info by remember(movie.url, preferredFilmUrl) {
+        mutableStateOf(FilmInfoMemory.get(preferredFilmUrl))
+    }
+    var loadDone by remember(movie.url, preferredFilmUrl) { mutableStateOf(false) }
     var loadError by remember(movie.url) { mutableStateOf("") }
     var browserChallengeActive by remember(movie.url) { mutableStateOf(false) }
-    var resolvedFilmUrl by remember(movie.url) { mutableStateOf(movie.url) }
+    var resolvedFilmUrl by remember(movie.url, preferredFilmUrl) { mutableStateOf(preferredFilmUrl) }
     var resolvedPlayer by remember(movie.url) { mutableStateOf<MirrorMoviePage?>(null) }
     // A real HTTP session can deliver metadata even when the hidden WebView stalls.
     // It is independent of the WebView parser, but shares Android's mirror cookies.
-    LaunchedEffect(movie.url) {
+    LaunchedEffect(movie.url, preferredFilmUrl, sources) {
         val result = MirrorNetworkSource.resolveFilm(
-            movie.url, sources, WebSettings.getDefaultUserAgent(context))
-        if (MirrorFilmUrl.isAllowedResolved(movie.url, result.finalUrl, sources)) {
+            preferredFilmUrl, sources, WebSettings.getDefaultUserAgent(context))
+        if (MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, result.finalUrl, sources)) {
             resolvedFilmUrl = result.finalUrl
         }
         result.metadata?.player?.let { resolvedPlayer = it }
@@ -416,19 +421,19 @@ internal fun FilmDetails(
         if (parsed != null && FilmInfoReadiness.hasContent(parsed)) {
             val merged = FilmInfoMerger.merge(info, parsed)
             info = merged
-            FilmInfoMemory.put(movie.url, merged)
-            if (FilmInfoReadiness.canFinish(merged) && merged.portraitsResolved)
-                loadDone = true
+            FilmInfoMemory.put(preferredFilmUrl, merged)
+            if (FilmInfoReadiness.canFinish(merged) && merged.portraitsResolved &&
+                resolvedPlayer != null) loadDone = true
         } else if (info == null && result.reason.isNotBlank()) {
             // Keep the actual HTTP failure, even while WebView retries in parallel.
             loadError = result.reason
         }
     }
-    LaunchedEffect(movie.url, browserChallengeActive) {
+    LaunchedEffect(movie.url, preferredFilmUrl, browserChallengeActive) {
         if (!loadDone) {
             // The reference client explicitly completes Anubis before reading
             // Rezka metadata. Give the site's own WebView challenge time to finish.
-            delay(if (browserChallengeActive) 32_000 else 9_500)
+            delay(if (browserChallengeActive) 32_000 else 15_000)
             if (!browserChallengeActive) {
                 if (info == null && loadError.isBlank())
                     loadError = "Зеркало не предоставило сведения о фильме."
@@ -446,7 +451,7 @@ internal fun FilmDetails(
     var chosenVoice by remember(movie.url) { mutableStateOf("") }
     var chosenSeason by remember(movie.url) { mutableStateOf("") }
     var chosenEpisode by remember(movie.url) { mutableStateOf("") }
-    val webView = if (!loadDone) remember(context, movie.url, resolvedFilmUrl) {
+    val webView = if (!loadDone) remember(context, movie.url, preferredFilmUrl) {
         val handler = Handler(Looper.getMainLooper())
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
@@ -470,7 +475,7 @@ internal fun FilmDetails(
                         return false
                     }
                     val mapped = MirrorRedirect.resolveFilmUrl(
-                        originalFilmUrl = movie.url,
+                        originalFilmUrl = preferredFilmUrl,
                         fromUrl = view.url ?: resolvedFilmUrl,
                         location = requested,
                         savedMirrors = sources
@@ -502,7 +507,7 @@ internal fun FilmDetails(
                         return
                     }
                     if (loadDone || scanningUrl == pageUrl ||
-                        !MirrorFilmUrl.isAllowedResolved(movie.url, pageUrl, sources)) return
+                        !MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, pageUrl, sources)) return
                     scanningUrl = pageUrl
                     val timings = listOf(100L, 480L, 1200L, 2450L, 4400L, 6800L)
                     timings.forEachIndexed { index, wait ->
@@ -515,7 +520,7 @@ internal fun FilmDetails(
                                 if (parsed != null && FilmInfoReadiness.hasContent(parsed)) {
                                     val merged = FilmInfoMerger.merge(info, parsed)
                                     info = merged
-                                    FilmInfoMemory.put(movie.url, merged)
+                                    FilmInfoMemory.put(preferredFilmUrl, merged)
                                     if (resolvedPlayer == null) {
                                         val pageId = MirrorPostId.fromUrl(pageUrl)
                                         val fallbackVoices = merged.voices
@@ -538,7 +543,7 @@ internal fun FilmDetails(
                                         }
                                     }
                                     if (FilmInfoReadiness.canFinish(merged) &&
-                                        merged.portraitsResolved &&
+                                        merged.portraitsResolved && resolvedPlayer != null &&
                                         (merged.cast.isNotEmpty() || merged.directors.isNotEmpty() ||
                                             index >= 4)) {
                                         loadDone = true
@@ -554,7 +559,7 @@ internal fun FilmDetails(
                                         browserChallengeActive = true
                                         loadError = ""
                                         scanningUrl = null
-                                    } else {
+                                    } else if (resolvedPlayer != null) {
                                         loadDone = true
                                     }
                                 }
@@ -572,7 +577,7 @@ internal fun FilmDetails(
                         browserChallengeActive = true
                         loadError = ""
                     } else if (browserChallengeActive &&
-                        MirrorFilmUrl.isAllowedResolved(movie.url, url, sources)) {
+                        MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, url, sources)) {
                         // Challenge finished and the site navigated back to the film.
                         browserChallengeActive = false
                         scanningUrl = null
@@ -619,6 +624,17 @@ internal fun FilmDetails(
             loadUrl(resolvedFilmUrl, MirrorSitePolicy.webViewHeaders(resolvedFilmUrl))
         }
     } else null
+    // Do not recreate the WebView during a same-origin Anubis/redirect flow.
+    // When the native response picks a different mirror, navigate the existing
+    // WebView only after it is no longer completing a browser challenge.
+    LaunchedEffect(webView, resolvedFilmUrl, browserChallengeActive) {
+        val view = webView ?: return@LaunchedEffect
+        if (!browserChallengeActive && view.url != null &&
+            !SourceRules.sameOrigin(view.url.orEmpty(), resolvedFilmUrl) &&
+            MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, resolvedFilmUrl, sources)) {
+            view.loadUrl(resolvedFilmUrl, MirrorSitePolicy.webViewHeaders(resolvedFilmUrl))
+        }
+    }
     DisposableEffect(webView) {
         onDispose {
             (webView?.tag as? Handler)?.removeCallbacksAndMessages(null)
@@ -911,6 +927,7 @@ internal fun FilmDetails(
                     freeStreamAvailable -> "Доступен"
                     availableVoices.isNotEmpty() -> "Требует подписку"
                     !loadDone -> "Загрузка…"
+                    loadError.isNotBlank() -> "Ошибка источника"
                     else -> "Нет озвучек"
                 }
                 Column(
@@ -946,7 +963,7 @@ internal fun FilmDetails(
                         fontWeight = FontWeight.SemiBold)
                     if (availableVoices.isEmpty()) {
                         Text(if (!loadDone) "Ищем озвучки…" else
-                            "Зеркало не предоставило список озвучек.",
+                            loadError.ifBlank { "Источник не предоставил список озвучек." },
                             color = appMuted, style = MaterialTheme.typography.bodySmall)
                     } else {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
