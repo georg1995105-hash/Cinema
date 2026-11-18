@@ -400,6 +400,7 @@ internal fun FilmDetails(
         mutableStateOf(info?.let { FilmInfoReadiness.canFinish(it) && it.portraitsResolved } == true)
     }
     var loadError by remember(movie.url) { mutableStateOf("") }
+    var browserChallengeActive by remember(movie.url) { mutableStateOf(false) }
     var resolvedFilmUrl by remember(movie.url) { mutableStateOf(movie.url) }
     var resolvedPlayer by remember(movie.url) { mutableStateOf<MirrorMoviePage?>(null) }
     // A real HTTP session can deliver metadata even when the hidden WebView stalls.
@@ -423,12 +424,19 @@ internal fun FilmDetails(
             loadError = result.reason
         }
     }
-    LaunchedEffect(movie.url) {
+    LaunchedEffect(movie.url, browserChallengeActive) {
         if (!loadDone) {
-            delay(9500)
-            if (info == null && loadError.isBlank())
-                loadError = "Зеркало не предоставило сведения о фильме."
-            loadDone = true
+            // The reference client explicitly completes Anubis before reading
+            // Rezka metadata. Give the site's own WebView challenge time to finish.
+            delay(if (browserChallengeActive) 32_000 else 9_500)
+            if (!browserChallengeActive) {
+                if (info == null && loadError.isBlank())
+                    loadError = "Зеркало не предоставило сведения о фильме."
+                loadDone = true
+            } else if (info == null) {
+                loadError = "Зеркало не завершило проверку браузера."
+                loadDone = true
+            }
         }
     }
     var showWatchMenu by remember(movie.url) { mutableStateOf(false) }
@@ -451,6 +459,12 @@ internal fun FilmDetails(
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
                     val requested = request.url.toString()
+                    val from = view.url ?: resolvedFilmUrl
+                    if (MirrorAnubis.isChallengeUrl(from, requested)) {
+                        browserChallengeActive = true
+                        loadError = ""
+                        return false
+                    }
                     val mapped = MirrorRedirect.resolveFilmUrl(
                         originalFilmUrl = movie.url,
                         fromUrl = view.url ?: resolvedFilmUrl,
@@ -477,6 +491,12 @@ internal fun FilmDetails(
                 }
 
                 private fun scan(view: WebView, pageUrl: String) {
+                    if (MirrorAnubis.isChallengeUrl(resolvedFilmUrl, pageUrl)) {
+                        browserChallengeActive = true
+                        loadError = ""
+                        scanningUrl = null
+                        return
+                    }
                     if (loadDone || scanningUrl == pageUrl ||
                         !MirrorFilmUrl.isAllowedResolved(movie.url, pageUrl, sources)) return
                     scanningUrl = pageUrl
@@ -521,14 +541,37 @@ internal fun FilmDetails(
                                     }
                                 }
                                 if (index == timings.lastIndex) {
-                                    if (info == null && MirrorMediaParser.objectFromWebView(raw)
-                                            ?.optBoolean("browserCheck") == true) {
-                                        loadError = "Зеркало запросило проверку браузера. Откройте сайт в настройках источника."
+                                    val browserCheck = MirrorMediaParser.objectFromWebView(raw)
+                                        ?.optBoolean("browserCheck") == true
+                                    if (info == null && browserCheck) {
+                                        // Do not destroy the WebView here. Anubis solves in-page and
+                                        // redirects back to the same film URL with an auth cookie.
+                                        browserChallengeActive = true
+                                        loadError = ""
+                                        scanningUrl = null
+                                    } else {
+                                        loadDone = true
                                     }
-                                    loadDone = true
                                 }
                             }
                         }, wait)
+                    }
+                }
+
+                override fun onPageStarted(
+                    view: WebView,
+                    url: String,
+                    favicon: android.graphics.Bitmap?
+                ) {
+                    if (MirrorAnubis.isChallengeUrl(resolvedFilmUrl, url)) {
+                        browserChallengeActive = true
+                        loadError = ""
+                    } else if (browserChallengeActive &&
+                        MirrorFilmUrl.isAllowedResolved(movie.url, url, sources)) {
+                        // Challenge finished and the site navigated back to the film.
+                        browserChallengeActive = false
+                        scanningUrl = null
+                        loadError = ""
                     }
                 }
 
@@ -537,6 +580,12 @@ internal fun FilmDetails(
 
                 override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: android.webkit.WebResourceResponse) {
                     if (request.isForMainFrame) {
+                        val address = request.url.toString()
+                        if (MirrorAnubis.isChallengeUrl(resolvedFilmUrl, address)) {
+                            browserChallengeActive = true
+                            loadError = ""
+                            return
+                        }
                         if (info == null)
                             loadError = "Источник вернул HTTP ${response.statusCode}."
                     }
