@@ -2,6 +2,10 @@ package app.cinema.player
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.Cache
 import okhttp3.OkHttpClient
@@ -137,23 +141,32 @@ internal object CinemetaCatalog {
         }
     }
 
-    suspend fun home(context: Context, tab: String, kind: String): List<CatalogMovie> = withContext(Dispatchers.IO) {
+    suspend fun home(context: Context, tab: String, kind: String): List<CatalogMovie> = coroutineScope {
         val types = if (kind == "Фильмы") listOf("movie")
                     else if (kind == "Сериалы") listOf("series")
                     else listOf("movie", "series")
-        val result = mutableListOf<CatalogMovie>()
-        var failure: Throwable? = null
-        for (type in types) {
-            val catalogPath = when (tab) {
-                "Новинки" -> "/catalog/$type/year/genre=2026.json"
-                "Высокий рейтинг" -> "/catalog/$type/imdbRating.json"
-                else -> "/catalog/$type/top.json"
+        // Independent requests run in parallel; two slow 14s calls must never
+        // make the user wait for 28s. One failing category does not hide another.
+        val responses = types.map { type ->
+            async(Dispatchers.IO) {
+                val catalogPath = when (tab) {
+                    "Новинки" -> "/catalog/$type/year/genre=2026.json"
+                    "Высокий рейтинг" -> "/catalog/$type/imdbRating.json"
+                    else -> "/catalog/$type/top.json"
+                }
+                try {
+                    Pair(parseList(read(context, catalogPath)), null as Exception?)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Pair(emptyList<CatalogMovie>(), e)
+                }
             }
-            try {
-                result.addAll(parseList(read(context, catalogPath)))
-            } catch (e: Exception) { failure = e }
+        }.awaitAll()
+        val result = responses.flatMap { it.first }
+        if (result.isEmpty() && responses.all { it.second != null }) {
+            throw IOException(responses.firstNotNullOfOrNull { it.second?.message } ?: "Каталог недоступен")
         }
-        if (result.isEmpty() && failure != null) throw IOException(failure.message ?: "Каталог недоступен")
         val filtered = if (kind == "Мультфильмы") result.filter {
             it.details.contains("Мультфильм", ignoreCase = true)
         } else result
@@ -169,25 +182,30 @@ internal object CinemetaCatalog {
             "Сериалы" -> listOf("series")
             else -> listOf("series", "movie")
         }
-        val items = mutableListOf<CatalogMovie>()
-        var successes = 0
-        var seriesFound = false
-        var failure: Throwable? = null
-        for (type in types) {
-            try {
-                val found = parseList(read(context, "/catalog/$type/top/search=$encoded.json"))
-                items.addAll(found)
-                if (type == "series" && found.isNotEmpty()) seriesFound = true
-                successes++
-            } catch (e: Exception) { failure = e }
+        // Search film and series concurrently. Previously, the series request
+        // had to time out before films could even begin loading.
+        val responses = coroutineScope {
+            types.map { type ->
+                async(Dispatchers.IO) {
+                    try {
+                        Pair(parseList(read(context, "/catalog/$type/top/search=$encoded.json")), null as Exception?)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Pair(emptyList<CatalogMovie>(), e)
+                    }
+                }
+            }.awaitAll()
         }
-        // Independent licensed fallback. Do not confuse an empty Cinemeta search
-        // with a network failure, and never use TVmaze as a video provider.
+        val items = responses.flatMap { it.first }.toMutableList()
+        val seriesFound = items.any { identity(it.url)?.first == "series" }
+        var successes = responses.count { it.second == null }
+        var failure = responses.firstNotNullOfOrNull { it.second }
         if ("series" in types && !seriesFound) {
             try {
                 items.addAll(TvMazeSeries.search(q))
                 successes++
-            } catch (e: kotlinx.coroutines.CancellationException) {
+            } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 failure = e
