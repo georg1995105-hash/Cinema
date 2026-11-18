@@ -458,8 +458,11 @@ internal fun FilmDetails(
                         savedMirrors = sources
                     )
                     if (mapped != null) {
+                        val crossOrigin = !SourceRules.sameOrigin(
+                            view.url ?: resolvedFilmUrl, mapped
+                        )
                         resolvedFilmUrl = mapped
-                        if (mapped != requested) {
+                        if (mapped != requested || crossOrigin) {
                             view.loadUrl(mapped, MirrorSitePolicy.webViewHeaders(mapped))
                             return true
                         }
