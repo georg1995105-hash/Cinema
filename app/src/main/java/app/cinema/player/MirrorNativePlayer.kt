@@ -190,6 +190,7 @@ internal fun MirrorNativePlayer(
     var message by remember(filmUrl){mutableStateOf("Получаем данные фильма")}
     var error by remember(filmUrl){mutableStateOf("")}
     var browserChallengeActive by remember(filmUrl) { mutableStateOf(false) }
+    var networkFinished by remember(filmUrl) { mutableStateOf(false) }
     var rejectedNavigation by remember(filmUrl) { mutableStateOf("") }
     var voice by remember(filmUrl){mutableStateOf("")}
     var episodes by remember(filmUrl){mutableStateOf<List<MirrorEpisode>>(emptyList())}
@@ -421,6 +422,7 @@ internal fun MirrorNativePlayer(
         }
     }
     LaunchedEffect(filmUrl, mirrors) {
+        networkFinished = false
         val fetched = MirrorNetworkSource.resolveFilm(
             filmUrl,
             mirrors,
@@ -451,10 +453,12 @@ internal fun MirrorNativePlayer(
         } else if (movie == null && fetched.reason.isNotBlank() && error.isBlank()) {
             rejectedNavigation = fetched.reason
         }
+        networkFinished = true
     }
-    LaunchedEffect(filmUrl, browserChallengeActive) {
-        delay(if (browserChallengeActive) 32_000 else 10_000)
-        if (movie == null && error.isBlank()) {
+    LaunchedEffect(filmUrl, browserChallengeActive, networkFinished) {
+        if (movie != null || !networkFinished) return@LaunchedEffect
+        delay(if (browserChallengeActive) 32_000 else 8_000)
+        if (movie == null && networkFinished && error.isBlank()) {
             message = ""
             error = if (browserChallengeActive) {
                 "Источник не завершил проверку браузера."
