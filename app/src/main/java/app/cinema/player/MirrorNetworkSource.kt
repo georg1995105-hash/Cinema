@@ -127,8 +127,12 @@ internal object MirrorNetworkSource {
      * Mirrors are transport candidates, not separate playback sources in the UI.
      * Prefer a candidate that exposes real player metadata, then one with film details.
      */
-    suspend fun resolveFilm(url: String, mirrors: List<String>, userAgent: String): FilmResult =
-        supervisorScope {
+    suspend fun resolveFilm(
+        url: String,
+        mirrors: List<String>,
+        userAgent: String,
+        requiredVoice: String = ""
+    ): FilmResult = supervisorScope {
             if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
                 return@supervisorScope FilmResult(url, reason = "Неверный адрес фильма.")
 
@@ -148,18 +152,32 @@ internal object MirrorNetworkSource {
             }
             var bestInfo: FilmResult? = null
             var bestFailure: FilmResult? = null
+            var incompatiblePlayerSeen = false
             try {
                 repeat(candidates.size) {
                     val result = completed.receive()
-                    if (result.metadata?.player != null) {
-                        jobs.forEach { it.cancel() }
-                        return@supervisorScope result
+                    val player = result.metadata?.player
+                    if (player != null) {
+                        val compatible = requiredVoice.isBlank() ||
+                            MirrorVoiceSelection.supports(player, requiredVoice)
+                        if (compatible) {
+                            jobs.forEach { it.cancel() }
+                            return@supervisorScope result
+                        }
+                        incompatiblePlayerSeen = true
                     }
                     if (bestInfo == null && result.metadata?.info != null) bestInfo = result
                     if (bestFailure == null && result.reason.isNotBlank()) bestFailure = result
                 }
-                bestInfo ?: bestFailure
-                    ?: FilmResult(url, reason = "Зеркала не предоставили страницу фильма.")
+                if (requiredVoice.isNotBlank() && incompatiblePlayerSeen) {
+                    FilmResult(
+                        url,
+                        reason = "Выбранная озвучка недоступна на проверенных зеркалах."
+                    )
+                } else {
+                    bestInfo ?: bestFailure
+                        ?: FilmResult(url, reason = "Зеркала не предоставили страницу фильма.")
+                }
             } finally {
                 jobs.forEach { it.cancel() }
                 completed.close()
