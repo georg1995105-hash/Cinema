@@ -32,6 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.json.JSONObject
 import java.net.URI
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 
 internal data class FilmPerson(val name: String, val photo: String, val url: String = "")
@@ -384,12 +387,11 @@ internal fun FilmDetails(
     movie: CatalogMovie,
     source: String,
     sources: List<String>,
-    onChooseSource: (String) -> Unit,
     isFavourite: Boolean,
     onToggleFavourite: () -> Unit,
     onBack: () -> Unit,
-    onBrowse: () -> Unit,
-    savedVoice: String,
+    onBrowse: (String) -> Unit,
+    savedSelection: PlaybackSelection?,
     onWatch: (String, String, String, String) -> Unit,
     onRelated: (CatalogMovie) -> Unit,
     onMetadata: (CatalogMovie) -> Unit,
@@ -401,11 +403,20 @@ internal fun FilmDetails(
         mutableStateOf(info?.let { FilmInfoReadiness.canFinish(it) && it.portraitsResolved } == true)
     }
     var loadError by remember(movie.url) { mutableStateOf("") }
+    var resolvedFilmUrl by remember(movie.url) { mutableStateOf(movie.url) }
+    var resolvedPlayer by remember(movie.url) { mutableStateOf<MirrorMoviePage?>(null) }
+    var voiceAvailability by remember(movie.url) {
+        mutableStateOf<Map<String, VoiceAvailability>>(emptyMap())
+    }
     // A real HTTP session can deliver metadata even when the hidden WebView stalls.
     // It is independent of the WebView parser, but shares Android's mirror cookies.
     LaunchedEffect(movie.url) {
-        val result = MirrorNetworkSource.film(
-            movie.url, WebSettings.getDefaultUserAgent(context))
+        val result = MirrorNetworkSource.resolveFilm(
+            movie.url, sources, WebSettings.getDefaultUserAgent(context))
+        if (MirrorPostId.isSameFilm(movie.url, result.finalUrl)) {
+            resolvedFilmUrl = result.finalUrl
+        }
+        result.metadata?.player?.let { resolvedPlayer = it }
         val parsed = result.metadata?.info
         if (parsed != null && FilmInfoReadiness.hasContent(parsed)) {
             val merged = FilmInfoMerger.merge(info, parsed)
@@ -430,7 +441,7 @@ internal fun FilmDetails(
     var chosenVoice by remember(movie.url) { mutableStateOf("") }
     var chosenSeason by remember(movie.url) { mutableStateOf("") }
     var chosenEpisode by remember(movie.url) { mutableStateOf("") }
-    val webView = if (!loadDone) remember(context, movie.url) {
+    val webView = if (!loadDone) remember(context, movie.url, resolvedFilmUrl) {
         val handler = Handler(Looper.getMainLooper())
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
@@ -445,7 +456,7 @@ internal fun FilmDetails(
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
-                    val decision = FilmNavigationPolicy.decide(movie.url, request.url.toString())
+                    val decision = FilmNavigationPolicy.decide(resolvedFilmUrl, request.url.toString())
                     if (!decision.allow && info == null && loadError.isBlank())
                         loadError = decision.failureMessage
                     // Block unrelated navigation, but do NOT destroy the original film page.
@@ -453,7 +464,7 @@ internal fun FilmDetails(
                 }
 
                 private fun scan(view: WebView, pageUrl: String) {
-                    if (loadDone || scanningUrl == pageUrl || !MirrorPostId.canOpen(movie.url, pageUrl)) return
+                    if (loadDone || scanningUrl == pageUrl || !MirrorPostId.canOpen(resolvedFilmUrl, pageUrl)) return
                     scanningUrl = pageUrl
                     val timings = listOf(100L, 480L, 1200L, 2450L, 4400L, 6800L)
                     timings.forEachIndexed { index, wait ->
@@ -467,6 +478,27 @@ internal fun FilmDetails(
                                     val merged = FilmInfoMerger.merge(info, parsed)
                                     info = merged
                                     FilmInfoMemory.put(movie.url, merged)
+                                    if (resolvedPlayer == null) {
+                                        val pageId = MirrorPostId.fromUrl(pageUrl)
+                                        val fallbackVoices = merged.voices
+                                        val fallbackDefault = merged.defaultVoice
+                                        if (pageId != null &&
+                                            (fallbackVoices.isNotEmpty() || fallbackDefault.isNotBlank())) {
+                                            val fallbackFlags = fallbackVoices.firstOrNull {
+                                                it.id == fallbackDefault
+                                            }
+                                            resolvedPlayer = MirrorMoviePage(
+                                                id = pageId,
+                                                isSeries = merged.episodes.isNotEmpty() ||
+                                                    runCatching { URI(pageUrl).path.startsWith("/series/") }
+                                                        .getOrDefault(false),
+                                                voices = fallbackVoices,
+                                                episodes = merged.episodes,
+                                                defaultVoice = fallbackDefault,
+                                                defaultFlags = fallbackFlags
+                                            )
+                                        }
+                                    }
                                     if (FilmInfoReadiness.canFinish(merged) &&
                                         merged.portraitsResolved &&
                                         (merged.cast.isNotEmpty() || merged.directors.isNotEmpty() ||
@@ -504,7 +536,7 @@ internal fun FilmDetails(
                 }
             }
             setTag(handler)
-            loadUrl(movie.url)
+            loadUrl(resolvedFilmUrl)
         }
     } else null
     DisposableEffect(webView) {
@@ -516,6 +548,78 @@ internal fun FilmDetails(
     }
 
     val current = info
+    val sourceDefaultVoice = resolvedPlayer?.defaultVoice.orEmpty()
+        .ifBlank { current?.defaultVoice.orEmpty() }
+    val effectiveVoices = remember(current?.voices, resolvedPlayer?.voices, sourceDefaultVoice) {
+        val values = linkedMapOf<String, MirrorVoice>()
+        (resolvedPlayer?.voices.orEmpty() + current?.voices.orEmpty()).forEach {
+            if (it.id.isNotBlank()) values.putIfAbsent(it.id, it)
+        }
+        if (sourceDefaultVoice.matches(Regex("[0-9]{1,12}")) &&
+            sourceDefaultVoice !in values) {
+            values[sourceDefaultVoice] = resolvedPlayer?.defaultFlags
+                ?.takeIf { it.id == sourceDefaultVoice }
+                ?.copy(name = "По умолчанию")
+                ?: MirrorVoice(sourceDefaultVoice, "По умолчанию")
+        }
+        values.values.toList()
+    }
+    LaunchedEffect(showWatchMenu, resolvedFilmUrl, effectiveVoices, current?.episodes, resolvedPlayer) {
+        if (!showWatchMenu || effectiveVoices.isEmpty()) return@LaunchedEffect
+        val filmId = MirrorPostId.fromUrl(resolvedFilmUrl) ?: return@LaunchedEffect
+        val episodes = current?.episodes.orEmpty().ifEmpty { resolvedPlayer?.episodes.orEmpty() }
+        val isSeries = resolvedPlayer?.isSeries == true || episodes.isNotEmpty() ||
+            runCatching { URI(resolvedFilmUrl).path.startsWith("/series/") }.getOrDefault(false)
+        val baselineSeason = savedSelection?.season?.takeIf { saved ->
+            episodes.any { it.season == saved }
+        } ?: episodes.firstOrNull()?.season.orEmpty()
+        val baselineEpisode = savedSelection?.episode?.takeIf { saved ->
+            episodes.any { it.season == baselineSeason && it.id == saved }
+        } ?: episodes.firstOrNull { it.season == baselineSeason }?.id.orEmpty()
+        if (isSeries && (baselineSeason.isBlank() || baselineEpisode.isBlank()))
+            return@LaunchedEffect
+
+        val page = (resolvedPlayer ?: MirrorMoviePage(
+            id = filmId,
+            isSeries = isSeries,
+            voices = effectiveVoices,
+            episodes = episodes,
+            defaultVoice = sourceDefaultVoice
+        )).copy(voices = effectiveVoices, episodes = episodes)
+
+        var statuses = effectiveVoices.filter { it.requiresSubscription }
+            .associate { it.id to VoiceAvailability.SUBSCRIPTION }
+        voiceAvailability = statuses
+        val toProbe = effectiveVoices.filterNot { it.requiresSubscription }.take(12)
+        for (chunk in toProbe.chunked(3)) {
+            val checked = coroutineScope {
+                chunk.map { voice ->
+                    async {
+                        val fields = runCatching {
+                            MirrorPlaybackRequest.stream(
+                                page, voice.id,
+                                if (isSeries) baselineSeason else "",
+                                if (isSeries) baselineEpisode else ""
+                            )
+                        }.getOrNull() ?: return@async voice.id to null
+                        val raw = MirrorNetworkSource.playback(
+                            resolvedFilmUrl, fields, WebSettings.getDefaultUserAgent(context)
+                        )
+                        val stream = MirrorMediaParser.parseStreamInfo(raw)
+                        val availability = when {
+                            stream.qualities.isNotEmpty() -> VoiceAvailability.AVAILABLE
+                            else -> stream.failure?.voiceAvailability()
+                        }
+                        voice.id to availability
+                    }
+                }.awaitAll()
+            }
+            statuses = statuses + checked.mapNotNull { (id, status) ->
+                status?.let { id to it }
+            }.toMap()
+            voiceAvailability = statuses
+        }
+    }
     val pictures = (current?.posters.orEmpty() + movie.poster + movie.posterAlternatives)
         .filter(MirrorPoster::isPhoto).distinct()
     val visibleMovie = movie.copy(
@@ -576,11 +680,15 @@ internal fun FilmDetails(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Button(onClick = {
-                            chosenVoice = savedVoice.takeIf { id ->
-                                info?.voices.orEmpty().any { it.id == id }
-                            }.orEmpty()
-                            chosenSeason = ""
-                            chosenEpisode = ""
+                            chosenVoice = savedSelection?.voice?.takeIf { id ->
+                                effectiveVoices.any { it.id == id }
+                            } ?: sourceDefaultVoice.takeIf { id ->
+                                effectiveVoices.any { it.id == id }
+                            }.orEmpty().ifBlank {
+                                effectiveVoices.singleOrNull()?.id.orEmpty()
+                            }
+                            chosenSeason = savedSelection?.season.orEmpty()
+                            chosenEpisode = savedSelection?.episode.orEmpty()
                             showWatchMenu = true
                         },
                             modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) {
@@ -643,7 +751,7 @@ internal fun FilmDetails(
                                 ) {
                                     ActorPortrait(
                                         person = person,
-                                        source = source,
+                                        source = MirrorAccountGateway.origin(resolvedFilmUrl) ?: source,
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 }
@@ -668,7 +776,11 @@ internal fun FilmDetails(
                                 Box(Modifier.fillMaxWidth().aspectRatio(.80f)
                                     .clip(RoundedCornerShape(12.dp)).background(appCard),
                                     contentAlignment = Alignment.Center) {
-                                    ActorPortrait(director, source, Modifier.fillMaxSize())
+                                    ActorPortrait(
+                                        director,
+                                        MirrorAccountGateway.origin(resolvedFilmUrl) ?: source,
+                                        Modifier.fillMaxSize()
+                                    )
                                 }
                                 Spacer(Modifier.height(5.dp))
                                 Text(director.name, color = appBlue,
@@ -739,7 +851,7 @@ internal fun FilmDetails(
                         } else "Описание не предоставлено выбранным зеркалом.",
                         color = appMuted
                     )
-                    TextButton(onClick = onBrowse) { Text("Открыть страницу на сайте") }
+                    TextButton(onClick = { onBrowse(resolvedFilmUrl) }) { Text("Открыть страницу на сайте") }
                 }
             }
         }
@@ -749,12 +861,12 @@ internal fun FilmDetails(
                 containerColor = appPanel,
                 shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
             ) {
-                val availableVoices = info?.voices.orEmpty()
+                val availableVoices = effectiveVoices
                 val voiceSelected = availableVoices.firstOrNull { it.id == chosenVoice }
-                val pageEpisodes = info?.episodes.orEmpty()
-                val showEpisodes = voiceSelected != null && pageEpisodes.isNotEmpty() &&
-                    (info?.defaultVoice.isNullOrBlank() ||
-                     info?.defaultVoice == chosenVoice || availableVoices.size == 1)
+                val pageEpisodes = current?.episodes.orEmpty().ifEmpty {
+                    resolvedPlayer?.episodes.orEmpty()
+                }
+                val showEpisodes = voiceSelected != null && pageEpisodes.isNotEmpty()
                 val seasons = if (showEpisodes) pageEpisodes.map { it.season }.distinct()
                     else emptyList()
                 val currentSeason = chosenSeason.takeIf { it in seasons }
@@ -771,35 +883,27 @@ internal fun FilmDetails(
                 ) {
                     Text("Источник", style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold)
-                    Text("Rezka", color = appBlue,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(vertical = 3.dp))
-                    Text("Зеркало Rezka", style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        (listOf(source) + sources).filter(SourceRules::isValidHttpsUrl)
-                            .distinctBy { MirrorAccountGateway.origin(it) }
-                            .forEach { candidate ->
-                                val origin = MirrorAccountGateway.origin(candidate).orEmpty()
-                                val selected = SourceRules.sameOrigin(source, candidate)
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = {
-                                        if (!selected && MirrorFilmUrl.changeOrigin(movie.url, candidate) != null) {
-                                            showWatchMenu = false
-                                            onChooseSource(candidate)
-                                        }
-                                    },
-                                    label = {
-                                        Text(runCatching { URI(candidate).host.orEmpty() }
-                                            .getOrDefault("Rezka"), maxLines = 1)
-                                    }
-                                )
-                            }
+                    Surface(
+                        color = if (resolvedPlayer != null) appBlue.copy(alpha = .18f) else appCard,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 13.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Rezka",
+                                color = if (resolvedPlayer != null) appBlue else appMuted,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(Modifier.width(9.dp))
+                            Text(
+                                if (resolvedPlayer != null) "Доступен" else "Проверяем…",
+                                color = appMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
                     }
-                    Text("Выбранный адрес применяется к этому фильму. Состояние видеопотока проверяется при просмотре.",
-                        color = appMuted, style = MaterialTheme.typography.labelSmall)
                     Text("Озвучка", style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold)
                     if (availableVoices.isEmpty()) {
@@ -820,12 +924,22 @@ internal fun FilmDetails(
                                         }
                                     },
                                     label = {
-                                        Text(candidate.name +
-                                            if (candidate.requiresSubscription) " · Подписка" else "",
-                                            maxLines = 2)
+                                        val status = voiceAvailability[candidate.id]
+                                        Text(
+                                            candidate.name + when (status) {
+                                                VoiceAvailability.AVAILABLE -> " · доступна"
+                                                VoiceAvailability.SUBSCRIPTION -> " · подписка"
+                                                VoiceAvailability.PREVIEW -> " · ролик"
+                                                VoiceAvailability.UNAVAILABLE -> " · недоступна"
+                                                null -> " · проверяем"
+                                            },
+                                            maxLines = 2
+                                        )
                                     },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = appBlue.copy(alpha = 0.19f),
+                                        selectedContainerColor = if (
+                                            voiceAvailability[candidate.id] == VoiceAvailability.AVAILABLE
+                                        ) appBlue.copy(alpha = 0.26f) else appBlue.copy(alpha = 0.14f),
                                         selectedLabelColor = appBlue
                                     )
                                 )
@@ -867,12 +981,17 @@ internal fun FilmDetails(
                             onClick = {
                                 if (voiceSelected != null) {
                                     showWatchMenu = false
-                                    onWatch(movie.url, voiceSelected.id,
+                                    onWatch(resolvedFilmUrl, voiceSelected.id,
                                         if (showEpisodes) currentSeason else "",
                                         if (showEpisodes) currentEpisode else "")
                                 }
                             },
-                            enabled = WatchChoicePolicy.validChoice(availableVoices, chosenVoice),
+                            enabled = WatchChoicePolicy.validChoice(availableVoices, chosenVoice) &&
+                                voiceAvailability[chosenVoice] !in setOf(
+                                    VoiceAvailability.SUBSCRIPTION,
+                                    VoiceAvailability.PREVIEW,
+                                    VoiceAvailability.UNAVAILABLE
+                                ),
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         ) {
@@ -881,7 +1000,7 @@ internal fun FilmDetails(
                             Text("Смотреть")
                         }
                         OutlinedButton(
-                            onClick = { showWatchMenu = false; onBrowse() },
+                            onClick = { showWatchMenu = false; onBrowse(resolvedFilmUrl) },
                             shape = RoundedCornerShape(12.dp)
                         ) { Text("На сайте") }
                     }
