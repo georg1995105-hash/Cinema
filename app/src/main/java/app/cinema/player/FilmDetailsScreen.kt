@@ -408,12 +408,18 @@ internal fun FilmDetails(
     var voiceAvailability by remember(movie.url) {
         mutableStateOf<Map<String, VoiceAvailability>>(emptyMap())
     }
+    var voiceAvailabilityKey by remember(movie.url) { mutableStateOf("") }
     // A real HTTP session can deliver metadata even when the hidden WebView stalls.
     // It is independent of the WebView parser, but shares Android's mirror cookies.
     LaunchedEffect(movie.url) {
         val result = MirrorNetworkSource.resolveFilm(
             movie.url, sources, WebSettings.getDefaultUserAgent(context))
-        if (MirrorPostId.isSameFilm(movie.url, result.finalUrl)) {
+        val samePost = MirrorPostId.fromUrl(movie.url) != null &&
+            MirrorPostId.fromUrl(movie.url) == MirrorPostId.fromUrl(result.finalUrl)
+        val allowedMirror = (listOf(movie.url) + sources).any {
+            SourceRules.sameOrigin(it, result.finalUrl)
+        }
+        if (samePost && allowedMirror && SourceRules.isValidHttpsUrl(result.finalUrl)) {
             resolvedFilmUrl = result.finalUrl
         }
         result.metadata?.player?.let { resolvedPlayer = it }
@@ -564,16 +570,23 @@ internal fun FilmDetails(
         }
         values.values.toList()
     }
-    LaunchedEffect(showWatchMenu, resolvedFilmUrl, effectiveVoices, current?.episodes, resolvedPlayer) {
+    LaunchedEffect(
+        showWatchMenu, resolvedFilmUrl, effectiveVoices, current?.episodes, resolvedPlayer,
+        chosenSeason, chosenEpisode
+    ) {
         if (!showWatchMenu || effectiveVoices.isEmpty()) return@LaunchedEffect
         val filmId = MirrorPostId.fromUrl(resolvedFilmUrl) ?: return@LaunchedEffect
         val episodes = current?.episodes.orEmpty().ifEmpty { resolvedPlayer?.episodes.orEmpty() }
         val isSeries = resolvedPlayer?.isSeries == true || episodes.isNotEmpty() ||
             runCatching { URI(resolvedFilmUrl).path.startsWith("/series/") }.getOrDefault(false)
-        val baselineSeason = savedSelection?.season?.takeIf { saved ->
+        val baselineSeason = chosenSeason.takeIf { selected ->
+            episodes.any { it.season == selected }
+        } ?: savedSelection?.season?.takeIf { saved ->
             episodes.any { it.season == saved }
         } ?: episodes.firstOrNull()?.season.orEmpty()
-        val baselineEpisode = savedSelection?.episode?.takeIf { saved ->
+        val baselineEpisode = chosenEpisode.takeIf { selected ->
+            episodes.any { it.season == baselineSeason && it.id == selected }
+        } ?: savedSelection?.episode?.takeIf { saved ->
             episodes.any { it.season == baselineSeason && it.id == saved }
         } ?: episodes.firstOrNull { it.season == baselineSeason }?.id.orEmpty()
         if (isSeries && (baselineSeason.isBlank() || baselineEpisode.isBlank()))
@@ -587,6 +600,8 @@ internal fun FilmDetails(
             defaultVoice = sourceDefaultVoice
         )).copy(voices = effectiveVoices, episodes = episodes)
 
+        val probeKey = if (isSeries) "$baselineSeason:$baselineEpisode" else "movie"
+        voiceAvailabilityKey = probeKey
         var statuses = effectiveVoices.filter { it.requiresSubscription }
             .associate { it.id to VoiceAvailability.SUBSCRIPTION }
         voiceAvailability = statuses
@@ -862,18 +877,6 @@ internal fun FilmDetails(
                 shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
             ) {
                 val availableVoices = effectiveVoices
-                val freeStreamAvailable = voiceAvailability.values.any {
-                    it == VoiceAvailability.AVAILABLE
-                }
-                val allVoicesChecked = availableVoices.isNotEmpty() &&
-                    availableVoices.all { voiceAvailability.containsKey(it.id) }
-                val sourceStatus = when {
-                    freeStreamAvailable -> "Доступен"
-                    !allVoicesChecked -> "Проверяем…"
-                    voiceAvailability.values.any { it == VoiceAvailability.SUBSCRIPTION } ->
-                        "Требует подписку"
-                    else -> "Нет доступного потока"
-                }
                 val voiceSelected = availableVoices.firstOrNull { it.id == chosenVoice }
                 val pageEpisodes = current?.episodes.orEmpty().ifEmpty {
                     resolvedPlayer?.episodes.orEmpty()
@@ -882,11 +885,30 @@ internal fun FilmDetails(
                 val seasons = if (showEpisodes) pageEpisodes.map { it.season }.distinct()
                     else emptyList()
                 val currentSeason = chosenSeason.takeIf { it in seasons }
+                    ?: savedSelection?.season?.takeIf { it in seasons }
                     ?: seasons.firstOrNull().orEmpty()
                 val currentEpisodes = pageEpisodes.filter { showEpisodes && it.season == currentSeason }
                 val currentEpisode = chosenEpisode.takeIf { id ->
                     currentEpisodes.any { it.id == id }
+                } ?: savedSelection?.episode?.takeIf { id ->
+                    currentEpisodes.any { it.id == id }
                 } ?: currentEpisodes.firstOrNull()?.id.orEmpty()
+                val currentAvailabilityKey = if (pageEpisodes.isNotEmpty())
+                    "$currentSeason:$currentEpisode" else "movie"
+                val displayedAvailability = if (voiceAvailabilityKey == currentAvailabilityKey)
+                    voiceAvailability else emptyMap()
+                val freeStreamAvailable = displayedAvailability.values.any {
+                    it == VoiceAvailability.AVAILABLE
+                }
+                val allVoicesChecked = availableVoices.isNotEmpty() &&
+                    availableVoices.all { displayedAvailability.containsKey(it.id) }
+                val sourceStatus = when {
+                    freeStreamAvailable -> "Доступен"
+                    !allVoicesChecked -> "Проверяем…"
+                    displayedAvailability.values.any { it == VoiceAvailability.SUBSCRIPTION } ->
+                        "Требует подписку"
+                    else -> "Нет доступного потока"
+                }
                 Column(
                     Modifier.fillMaxWidth().heightIn(max = 620.dp)
                         .verticalScroll(rememberScrollState())
@@ -931,12 +953,10 @@ internal fun FilmDetails(
                                     onClick = {
                                         if (chosenVoice != candidate.id) {
                                             chosenVoice = candidate.id
-                                            chosenSeason = ""
-                                            chosenEpisode = ""
                                         }
                                     },
                                     label = {
-                                        val status = voiceAvailability[candidate.id]
+                                        val status = displayedAvailability[candidate.id]
                                         Text(
                                             candidate.name + when (status) {
                                                 VoiceAvailability.AVAILABLE -> " · доступна"
@@ -950,7 +970,7 @@ internal fun FilmDetails(
                                     },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = if (
-                                            voiceAvailability[candidate.id] == VoiceAvailability.AVAILABLE
+                                            displayedAvailability[candidate.id] == VoiceAvailability.AVAILABLE
                                         ) appBlue.copy(alpha = 0.26f) else appBlue.copy(alpha = 0.14f),
                                         selectedLabelColor = appBlue
                                     )
@@ -999,7 +1019,7 @@ internal fun FilmDetails(
                                 }
                             },
                             enabled = WatchChoicePolicy.validChoice(availableVoices, chosenVoice) &&
-                                voiceAvailability[chosenVoice].let { status ->
+                                displayedAvailability[chosenVoice].let { status ->
                                     status == null || status == VoiceAvailability.AVAILABLE
                                 },
                             modifier = Modifier.weight(1f),
