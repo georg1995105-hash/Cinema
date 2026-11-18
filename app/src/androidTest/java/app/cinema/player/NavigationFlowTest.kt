@@ -16,7 +16,7 @@ class NavigationFlowTest {
         val store = LocalStore(compose.activity)
         store.saveSearch("Бригада")
         try {
-            compose.onNodeWithText("Добавьте зеркало").assertIsDisplayed()
+            compose.onNodeWithText("Популярное").assertIsDisplayed()
             compose.onNode(hasText("Поиск") and hasClickAction()).performClick()
             compose.onNodeWithText("Недавние запросы").assertIsDisplayed()
             compose.onNodeWithText("Бригада").performClick()
