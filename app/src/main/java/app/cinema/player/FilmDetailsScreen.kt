@@ -431,9 +431,24 @@ internal fun FilmDetails(
     LaunchedEffect(movie.url, browserChallengeActive, networkFinished) {
         if (loadDone || !networkFinished) return@LaunchedEffect
 
-        // The network resolver owns its own bounded timeouts. Never declare the
-        // film unavailable while it is still checking mirrors.
-        delay(if (browserChallengeActive) 8_000 else 1_500)
+        // The native resolver owns its own bounded timeouts. After it finishes,
+        // keep the WebView alive long enough for its existing 6.8 s scan/enrichment
+        // window: it may still discover voices or actor portraits that native HTML
+        // did not expose.
+        if (browserChallengeActive) {
+            delay(8_000)
+        } else {
+            delay(1_500)
+            if (loadDone || !networkFinished) return@LaunchedEffect
+            val currentInfo = info
+            val readyToDispose = resolvedPlayer != null &&
+                (currentInfo == null || currentInfo.portraitsResolved)
+            if (readyToDispose) {
+                loadDone = true
+                return@LaunchedEffect
+            }
+            delay(5_800)
+        }
         if (loadDone || !networkFinished) return@LaunchedEffect
 
         if (resolvedPlayer != null) {
