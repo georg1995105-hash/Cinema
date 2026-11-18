@@ -24,4 +24,23 @@ class MirrorFilmUrlTest {
             "https://hdrezka.club")
         assertEquals("https://hdrezka.club/films/22-film.html?lang=ru",actual)
     }
+
+    @Test fun preservesAlreadyEncodedPathAndQuery() {
+        val actual=MirrorFilmUrl.changeOrigin(
+            "https://rezka-ua.pub/films/22-a%20b.html?q=x%2Fy",
+            "https://hdrezka.club"
+        )
+        assertEquals("https://hdrezka.club/films/22-a%20b.html?q=x%2Fy",actual)
+    }
+
+    @Test fun acceptsOnlySavedMirrorForSameFilmId() {
+        val film="https://rezka-ua.pub/films/22-film.html"
+        val saved=listOf("https://hdrezka.club", "https://hdrezka.website")
+        assertTrue(MirrorFilmUrl.isAllowedResolved(
+            film, "https://hdrezka.club/films/22-film.html", saved))
+        assertFalse(MirrorFilmUrl.isAllowedResolved(
+            film, "https://unknown.example/films/22-film.html", saved))
+        assertFalse(MirrorFilmUrl.isAllowedResolved(
+            film, "https://hdrezka.club/films/23-other.html", saved))
+    }
 }

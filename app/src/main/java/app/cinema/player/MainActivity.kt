@@ -77,6 +77,7 @@ private fun CinemaApp() {
     var page by remember { mutableStateOf(Page.HOME) }
     var playing by remember { mutableStateOf<String?>(null) }
     var browsingSource by remember { mutableStateOf<String?>(null) }
+    var playbackStorageUrl by remember { mutableStateOf<String?>(null) }
     var selectedFilm by remember { mutableStateOf<CatalogMovie?>(null) }
     var movieBack by remember { mutableStateOf(Page.HOME) }
     var selectedPerson by remember { mutableStateOf<FilmPerson?>(null) }
@@ -106,7 +107,11 @@ private fun CinemaApp() {
         if (page == Page.SITE) { page = browseReturn; return }
         if (page == Page.MOVIE) { page = movieBack; return }
         if (page == Page.PERSON) { selectedFilm = previousFilm; page = Page.MOVIE; return }
-        if (page == Page.FILM_PLAYER) { page = Page.MOVIE; return }
+        if (page == Page.FILM_PLAYER) {
+            playbackStorageUrl = null
+            page = Page.MOVIE
+            return
+        }
         page = if (page in listOf(Page.SOURCES, Page.PLAYER, Page.APPEARANCE, Page.ABOUT, Page.TEST, Page.UPDATES, Page.ACCOUNT))
             Page.SETTINGS else Page.HOME
     }
@@ -198,6 +203,7 @@ private fun CinemaApp() {
                     onResume = { film ->
                         local.rememberMovie(film)
                         selectedFilm = film
+                        playbackStorageUrl = film.url
                         browsingSource = film.url
                         movieBack = Page.LIBRARY
                         page = Page.FILM_PLAYER
@@ -239,62 +245,58 @@ private fun CinemaApp() {
                     accountMode = browseReturn == Page.ACCOUNT,
                     readFilmMetadata = browseReturn == Page.MOVIE
                 )
-                Page.FILM_PLAYER -> MirrorNativePlayer(
-                    filmUrl = browsingSource ?: selectedFilm?.url.orEmpty(),
-                    filmTitle = selectedFilm?.title.orEmpty(),
-                    startPositionMs = local.playbackSelection(
-                        browsingSource ?: selectedFilm?.url.orEmpty()
-                    )?.positionMs ?: history.firstOrNull {
-                        it.url == (browsingSource ?: selectedFilm?.url)
-                    }?.positionMs ?: 0L,
-                    seekSeconds = local.seekSeconds(),
-                    holdSpeed = local.holdSpeed(),
-                    savedSelection = local.playbackSelection(
-                        browsingSource ?: selectedFilm?.url.orEmpty()
-                    ),
-                    onSaveSelection = { selection ->
-                        local.savePlaybackSelection(
-                            browsingSource ?: selectedFilm?.url.orEmpty(), selection
-                        )
-                    },
-                    onSave = { ms ->
-                        val address = browsingSource ?: selectedFilm?.url
-                        if (address != null) saveProgress(address, ms)
-                    },
-                    onClose = { page = Page.MOVIE }
-                )
+                Page.FILM_PLAYER -> {
+                    val playbackUrl = browsingSource ?: selectedFilm?.url.orEmpty()
+                    val storageUrl = playbackStorageUrl ?: selectedFilm?.url.orEmpty()
+                    MirrorNativePlayer(
+                        filmUrl = playbackUrl,
+                        filmTitle = selectedFilm?.title.orEmpty(),
+                        mirrors = sources.toList(),
+                        startPositionMs = local.playbackSelection(storageUrl)?.positionMs
+                            ?: history.firstOrNull { it.url == storageUrl }?.positionMs ?: 0L,
+                        seekSeconds = local.seekSeconds(),
+                        holdSpeed = local.holdSpeed(),
+                        savedSelection = local.playbackSelection(storageUrl),
+                        onSaveSelection = { selection ->
+                            local.savePlaybackSelection(storageUrl, selection)
+                        },
+                        onSave = { ms ->
+                            if (storageUrl.isNotBlank()) saveProgress(storageUrl, ms)
+                        },
+                        onClose = {
+                            playbackStorageUrl = null
+                            page = Page.MOVIE
+                        }
+                    )
+                }
                 Page.MOVIE -> selectedFilm?.let { movie ->
                     FilmDetails(
                         movie = movie,
                         source = MirrorAccountGateway.origin(movie.url) ?: activeSource.orEmpty(),
                         sources = sources.toList(),
-                        onChooseSource = { mirror ->
-                            val nextUrl = MirrorFilmUrl.changeOrigin(movie.url, mirror)
-                            if (nextUrl != null) {
-                                activeSource = mirror
-                                local.saveActiveSource(mirror)
-                                val changed = movie.copy(url = nextUrl)
-                                local.rememberMovie(changed)
-                                selectedFilm = changed
-                            }
-                        },
                         isFavourite = movie.url in favourites,
                         onToggleFavourite = { toggleFavourite(movie.url) },
                         onBack = { page = movieBack },
-                        onBrowse = { browsingSource = movie.url; browseReturn = Page.MOVIE; page = Page.SITE },
-                        savedVoice = local.playbackSelection(movie.url)?.voice.orEmpty(),
+                        onBrowse = { url ->
+                            browsingSource = url
+                            browseReturn = Page.MOVIE
+                            page = Page.SITE
+                        },
+                        savedSelection = local.playbackSelection(movie.url),
                         onWatch = { url, voice, season, episode ->
                             if (voice.isNotBlank()) {
-                                val previous = local.playbackSelection(url) ?: PlaybackSelection()
+                                val storageUrl = movie.url
+                                val previous = local.playbackSelection(storageUrl) ?: PlaybackSelection()
                                 val changed = previous.voice != voice ||
                                     (season.isNotBlank() && previous.season != season) ||
                                     (episode.isNotBlank() && previous.episode != episode)
-                                local.savePlaybackSelection(url, previous.copy(
+                                local.savePlaybackSelection(storageUrl, previous.copy(
                                     voice = voice,
                                     season = season.ifBlank { if (changed) "" else previous.season },
                                     episode = episode.ifBlank { if (changed) "" else previous.episode },
                                     positionMs = if (changed) 0L else previous.positionMs
                                 ))
+                                playbackStorageUrl = storageUrl
                                 browsingSource = url
                                 page = Page.FILM_PLAYER
                             }
