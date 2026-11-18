@@ -490,7 +490,9 @@ class SourceFlowTest {
         val context = instrumentation.targetContext
         val clip = instrumentation.context.assets.open("kino-test-video.mp4").use { it.readBytes() }
         val certificate = HeldCertificate.Builder()
-            .commonName("localhost").addSubjectAlternativeName("localhost").build()
+            .commonName("localhost").addSubjectAlternativeName("localhost")
+            .addSubjectAlternativeName("mirror.example")
+            .addSubjectAlternativeName("cdn.example").build()
         val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()
         val fixtureTrust = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
         MockWebServer().use { mirror ->
@@ -499,10 +501,13 @@ class SourceFlowTest {
                     it.useHttps(serverTls.sslSocketFactory(), false)
                     it.start()
                 }
-                fun localUrl(server: MockWebServer, path: String) =
-                    server.url(path).newBuilder().host("localhost").build()
-                val filmPage = localUrl(mirror, "/films/drama/12-brigada.html").toString()
-                val cdnOrigin = localUrl(cdn, "/").toString()
+                fun localUrl(server: MockWebServer, path: String, host: String) =
+                    server.url(path).newBuilder().host(host).build()
+                // Cookies are host-scoped, not port-scoped. Distinct hosts are
+                // required to prove that mirror credentials never reach a CDN.
+                val filmPage = localUrl(
+                    mirror, "/films/drama/12-brigada.html", "mirror.example").toString()
+                val cdnOrigin = localUrl(cdn, "/", "cdn.example").toString()
                 val cookies = android.webkit.CookieManager.getInstance()
                 cookies.setCookie(filmPage, "cinema_fixture=active; Path=/; Secure; Max-Age=120")
                 cookies.setCookie(cdnOrigin, "cdn_session=active; Path=/; Secure; Max-Age=120")
@@ -510,7 +515,7 @@ class SourceFlowTest {
                 mirror.dispatcher = object : Dispatcher() {
                     override fun dispatch(request: RecordedRequest) =
                         MockResponse().setResponseCode(302)
-                            .addHeader("Location", localUrl(cdn, "/clip.mp4").toString())
+                            .addHeader("Location", localUrl(cdn, "/clip.mp4", "cdn.example").toString())
                 }
                 cdn.dispatcher = object : Dispatcher() {
                     override fun dispatch(request: RecordedRequest): MockResponse {
@@ -528,9 +533,17 @@ class SourceFlowTest {
                             .setBody(Buffer().write(clip, start, end - start + 1))
                     }
                 }
-                val stream = MirrorMediaParser.parseQualityList("[720p]" + localUrl(mirror, "/stream.mp4")).single()
+                val stream = MirrorMediaParser.parseQualityList(
+                    "[720p]" + localUrl(mirror, "/stream.mp4", "mirror.example")
+                ).single()
                 val client = MirrorHttp.client.newBuilder()
-                    .sslSocketFactory(fixtureTrust.sslSocketFactory(), fixtureTrust.trustManager).build()
+                    .sslSocketFactory(fixtureTrust.sslSocketFactory(), fixtureTrust.trustManager)
+                    .dns(object : okhttp3.Dns {
+                        override fun lookup(hostname: String): List<java.net.InetAddress> =
+                            if (hostname in setOf("mirror.example", "cdn.example")) {
+                                listOf(java.net.InetAddress.getByName("127.0.0.1"))
+                            } else okhttp3.Dns.SYSTEM.lookup(hostname)
+                    }).build()
                 val data = OkHttpDataSource.Factory(client)
                     .setDefaultRequestProperties(mapOf("Referer" to filmPage))
                 val playing = CountDownLatch(1)
