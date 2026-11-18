@@ -21,6 +21,24 @@ internal object MirrorGuestCookies {
             MirrorPostId.fromUrl(referer) != null
     }
 
+    /** A real account session requires both source-issued DLE cookies on this mirror. */
+    fun hasAccountSession(raw: List<String>): Boolean {
+        val values = linkedMapOf<String, String>()
+        raw.forEach { header ->
+            header.split(';').forEach { part ->
+                val index = part.indexOf('=')
+                if (index > 0) {
+                    val name = part.substring(0, index).trim()
+                    if (name == "dle_user_id" || name == "dle_password") {
+                        values[name] = part.substring(index + 1).trim()
+                    }
+                }
+            }
+        }
+        return !values["dle_user_id"].isNullOrBlank() &&
+            !values["dle_password"].isNullOrBlank()
+    }
+
     fun fromStoredCookies(raw: List<String>): String {
         val challengeCookies = linkedMapOf<String, String>()
         raw.forEach { header ->
