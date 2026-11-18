@@ -13,6 +13,7 @@ internal object LiftMatchPolicy {
     private val yearPattern = Regex("""\b(?:18|19|20)\d{2}\b""")
     private val detailId = Regex("""(?:^|&)id=([0-9]{1,12})(?:&|$)""")
     private val punctuation = Regex("""[^\p{L}\p{N}]+""")
+    private val qualityPrefix = Regex("""^(?:(?:4K|UHD|FHD|HD|SD|TS|Все серии)\s+)+""", RegexOption.IGNORE_CASE)
 
     fun yearFromDetails(details: String): Int? =
         yearPattern.find(details)?.value?.toIntOrNull()
@@ -45,7 +46,9 @@ internal object LiftMatchPolicy {
                 }?.substringAfter("name=")?.let {
                     URLDecoder.decode(it, "UTF-8")
                 }.orEmpty()
-                val title = nameFromUrl.ifBlank { obj.optString("title") }.trim().take(150)
+                val title = nameFromUrl.ifBlank {
+                    qualityPrefix.replace(obj.optString("title").trim(), "")
+                }.trim().take(150)
                 if (title.isBlank()) continue
                 val year = obj.optString("year").toIntOrNull()
                     ?: uri.rawQuery.orEmpty().split('&').firstOrNull {
