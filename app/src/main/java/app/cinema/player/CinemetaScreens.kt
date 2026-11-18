@@ -220,7 +220,20 @@ private fun DetailsBody(
             }
             if (info.actors.isNotEmpty()) {
                 Text("В ролях", style = MaterialTheme.typography.titleMedium)
-                Text(info.actors.joinToString(", "))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                    info.actors.take(16).forEach { name ->
+                        Column(Modifier.width(94.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            ActorPortrait(
+                                person = FilmPerson(name, ""),
+                                source = "",
+                                modifier = Modifier.width(84.dp).height(108.dp)
+                            )
+                            Spacer(Modifier.height(5.dp))
+                            Text(name, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
             }
             if (info.episodes.isNotEmpty()) {
                 Text("Сезоны и серии", style = MaterialTheme.typography.titleMedium)
