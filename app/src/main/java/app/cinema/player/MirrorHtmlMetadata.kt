@@ -108,6 +108,43 @@ internal object MirrorHtmlMetadata {
             .take(25).forEach { person(it,"actor") }
         document.select(".b-post__directors a[href], [itemprop=director] a[href]")
             .take(12).forEach { person(it,"director") }
+        // The reference client's film parser reads the cast from
+        // div.persons-list-holder, not only from the information table.
+        // These sections are used by film pages where the table has no actor rows.
+        for (holder in document.select("div.persons-list-holder")) {
+            val heading = (
+                holder.selectFirst("span.inline h2, h2")?.text().orEmpty() +
+                    " " + holder.attr("data-role") + " " + holder.attr("data-id")
+                ).trim().lowercase()
+            val role = when {
+                "режисс" in heading || "director" in heading -> "director"
+                "в ролях" in heading || "актёр" in heading ||
+                    "актер" in heading || "actor" in heading -> "actor"
+                else -> continue
+            }
+            val items = holder.select("span.item").takeIf { it.isNotEmpty() }
+                ?: holder.select("span.person-name-item")
+            for (entry in items.take(35)) {
+                val label = entry.selectFirst("span.person-name-item") ?: entry
+                val name = label.text().trim().take(90)
+                if (name.length !in 2..90) continue
+                val photoAttribute = entry.attr("data-photo")
+                    .ifBlank { label.attr("data-photo") }
+                    .ifBlank { entry.selectFirst("[data-photo]")?.attr("data-photo").orEmpty() }
+                    .trim()
+                val photo = photoAttribute.takeUnless {
+                    it.isBlank() || it.equals("null", true) ||
+                        it.contains("nopersonphoto", ignoreCase = true)
+                }?.let(::absolute)?.takeIf(MirrorPoster::isPhoto).orEmpty()
+                val link = entry.selectFirst("a[href]")?.attr("href").orEmpty()
+                val url = absolute(link).takeIf {
+                    SourceRules.sameOrigin(filmUrl, it)
+                }.orEmpty()
+                val value = FilmPerson(name, photo, url)
+                if (role == "director") directors.putIfAbsent(name.lowercase(), value)
+                else actors.putIfAbsent(name.lowercase(), value)
+            }
+        }
         val imdbId = document.selectFirst(
             "span.imdb a[href], .imdb a[href], a[href*=imdb.com/title/]"
         )?.let { Regex("""tt\d{5,12}""", RegexOption.IGNORE_CASE)
