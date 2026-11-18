@@ -118,6 +118,23 @@ internal object MirrorCatalog {
         list
     }.getOrDefault(emptyList())
 
+    /**
+     * A mirror can serve cards on its HTTPS homepage while denying /series/
+     * or a ?filter= category. Root fallback must never place movies in a
+     * series-only grid or present a wrong genre as the requested category.
+     */
+    fun matchesKind(movieUrl: String, kind: String): Boolean {
+        val prefix = when (kind) {
+            "Фильмы" -> "/films/"
+            "Сериалы" -> "/series/"
+            "Мультфильмы" -> "/cartoons/"
+            "Аниме" -> "/animation/"
+            else -> return true
+        }
+        return runCatching { URI(movieUrl).path.orEmpty().startsWith(prefix) }
+            .getOrDefault(false)
+    }
+
     fun readPosters(item: JSONObject): List<String> = buildList {
         val raw = item.optJSONArray("posters")
         if (raw != null) for (index in 0 until minOf(raw.length(), 8)) {
@@ -200,10 +217,14 @@ internal fun CatalogGrid(
     var useUnfiltered by remember(source, section, kind, requestOverride, attempt) {
         mutableStateOf(false)
     }
-    val requestUrl = remember(source, section, kind, requestOverride, useUnfiltered) {
-        requestOverride ?: MirrorCatalog.requestUrl(
-            source, if (useUnfiltered) "Новинки" else section, kind
-        )
+    var useRootFallback by remember(source, section, kind, requestOverride, attempt) {
+        mutableStateOf(false)
+    }
+    val requestUrl = remember(source, section, kind, requestOverride, useUnfiltered, useRootFallback) {
+        requestOverride ?: if (useRootFallback) source.trimEnd('/') + "/"
+            else MirrorCatalog.requestUrl(
+                source, if (useUnfiltered) "Новинки" else section, kind
+            )
     }
     val cacheKey = requestUrl
     var movies by remember(requestUrl, attempt) {
@@ -224,9 +245,14 @@ internal fun CatalogGrid(
     }
     var pending by remember(requestUrl, attempt, nativeSearchChecked) { mutableStateOf(movies.isEmpty()) }
     var problem by remember(requestUrl, attempt) { mutableStateOf("") }
+    var challengeActive by remember(requestUrl, attempt) { mutableStateOf(false) }
     fun recoverEmptyCatalog(reason: String) {
         if (!useUnfiltered && requestOverride == null && section != "Новинки") {
             useUnfiltered = true
+        } else if (!useRootFallback && requestOverride == null) {
+            // Root already passed the mirror's HTTPS probe. It can carry public
+            // cards when the filtered catalog route is restricted by the site.
+            useRootFallback = true
         } else {
             pending = false
             problem = reason
@@ -234,11 +260,12 @@ internal fun CatalogGrid(
     }
     // Page callbacks are not guaranteed after a network stall or blocked navigation.
     // Bound each load, then try only the standard category once before showing an error.
-    LaunchedEffect(requestUrl, attempt, loadContent, nativeSearchChecked) {
+    LaunchedEffect(requestUrl, attempt, loadContent, nativeSearchChecked, challengeActive) {
         if (loadContent && nativeSearchChecked && pending) {
-            delay(12500)
+            delay(if (challengeActive) 28_000L else 12_500L)
             if (pending) recoverEmptyCatalog(
-                "Источник не завершил загрузку каталога. Проверьте доступность зеркала."
+                if (challengeActive) "Зеркало не завершило проверку браузера."
+                else "Источник не завершил загрузку каталога. Проверьте доступность зеркала."
             )
         }
     }
@@ -257,6 +284,17 @@ internal fun CatalogGrid(
             val handler = Handler(Looper.getMainLooper())
             webViewClient = object : WebViewClient() {
                 private var scanningUrl: String? = null
+                private var accessCheckPending = false
+
+                override fun onPageStarted(
+                    view: WebView, url: String, favicon: android.graphics.Bitmap?
+                ) {
+                    // A same-address challenge can reload after setting cookies;
+                    // a stale previous scan must not discard the new document.
+                    scanningUrl = null
+                    accessCheckPending = false
+                    challengeActive = false
+                }
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
@@ -266,13 +304,48 @@ internal fun CatalogGrid(
                 }
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                    if (request.isForMainFrame) recoverEmptyCatalog("Не удалось загрузить каталог. Проверьте соединение.")
+                    if (request.isForMainFrame) {
+                        MirrorTrace.add("webview", request.url.toString(), result = "io")
+                        recoverEmptyCatalog("Не удалось загрузить каталог. Проверьте соединение.")
+                    }
                 }
 
-                override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceResponse) {
-                    if (request.isForMainFrame && error.statusCode != 404) {
-                        recoverEmptyCatalog("Зеркало вернуло HTTP ${error.statusCode}.")
+                override fun onReceivedHttpError(
+                    view: WebView, request: WebResourceRequest,
+                    error: android.webkit.WebResourceResponse
+                ) {
+                    if (!request.isForMainFrame || error.statusCode == 404) return
+                    val failedUrl = request.url.toString()
+                    val status = error.statusCode
+                    MirrorTrace.add("webview", failedUrl, status,
+                        result = if (status in setOf(403, 429, 503)) "blocked" else "response")
+                    if (!CatalogAccessPolicy.needsBrowserInspection(status)) {
+                        recoverEmptyCatalog("Зеркало вернуло HTTP $status.")
+                        return
                     }
+                    // WebView can receive HTTP 403 for an interactive JS proof-of-work
+                    // page which later redirects to the original catalog. An immediate
+                    // fallback destroys the browser and prevents the challenge from
+                    // finishing. Inspect the loaded document before treating it as a
+                    // permanent denial. Never fabricate authentication or entitlement.
+                    accessCheckPending = true
+                    fun inspectChallenge(remaining: Int) {
+                        if (!pending || view.url != failedUrl) return
+                        view.evaluateJavascript(CatalogAccessPolicy.challengeJavascript) { value ->
+                            if (!pending || view.url != failedUrl) return@evaluateJavascript
+                            if (value == "true") {
+                                accessCheckPending = false
+                                challengeActive = true
+                                scanningUrl = null
+                            } else if (remaining > 0 && view.progress < 100) {
+                                handler.postDelayed({ inspectChallenge(remaining - 1) }, 500L)
+                            } else {
+                                accessCheckPending = false
+                                recoverEmptyCatalog("Зеркало ограничило каталог (HTTP $status).")
+                            }
+                        }
+                    }
+                    handler.postDelayed({ inspectChallenge(6) }, 950L)
                 }
 
                 private fun scan(view: WebView, url: String) {
@@ -283,12 +356,17 @@ internal fun CatalogGrid(
 
                     fun finish(cards: List<CatalogMovie>, failure: String = "") {
                         if (!active()) return
-                        if (cards.isEmpty()) {
-                            recoverEmptyCatalog(failure.ifBlank { "По названию ничего не найдено на этом зеркале." })
+                        val verified = if (useRootFallback && searchText.isBlank())
+                            cards.filter { MirrorCatalog.matchesKind(it.url, kind) }
+                            else cards
+                        if (verified.isEmpty()) {
+                            recoverEmptyCatalog(failure.ifBlank {
+                                "На доступной странице зеркала нет карточек этой категории."
+                            })
                             return
                         }
-                        movies = cards
-                        if (cards.any { it.poster.isNotEmpty() }) CatalogMemory.put(cacheKey, cards)
+                        movies = verified
+                        if (verified.any { it.poster.isNotEmpty() }) CatalogMemory.put(cacheKey, verified)
                         pending = false
                         problem = ""
                     }
@@ -335,7 +413,7 @@ internal fun CatalogGrid(
                         else listOf(120L, 650L, 1450L)
                     timings.forEachIndexed { index, delayMs ->
                         handler.postDelayed({
-                            if (!active()) return@postDelayed
+                            if (!active() || challengeActive || accessCheckPending) return@postDelayed
                             view.evaluateJavascript(MirrorCatalog.javascript) { raw ->
                                 if (!active()) return@evaluateJavascript
                                 val extracted = MirrorCatalog.parse(raw, source)
@@ -360,7 +438,7 @@ internal fun CatalogGrid(
                 override fun onPageFinished(view: WebView, url: String) = scan(view, url)
             }
             setTag(handler)
-            loadUrl(requestUrl)
+            MirrorGuestSession.loadPublicPage(this, requestUrl)
         }
     } else null
     DisposableEffect(browser) {
@@ -379,7 +457,7 @@ internal fun CatalogGrid(
             if (browser != null) AndroidView(factory = { browser }, modifier = Modifier.size(2.dp).alpha(0.01f))
             when {
                 visibleMovies.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
-                    Text((if (useUnfiltered) "Общий каталог • " else "") +
+                    Text((if (useRootFallback) "Главная зеркала • " else if (useUnfiltered) "Общий каталог • " else "") +
                         visibleMovies.size.toString() + " результатов", color = appMuted,
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
                     LazyVerticalGrid(
@@ -396,6 +474,10 @@ internal fun CatalogGrid(
                 }
                 (pending || !nativeSearchChecked) -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = appBlue, modifier = Modifier.size(34.dp))
+                    if (challengeActive) {
+                        Spacer(Modifier.height(12.dp))
+                        Text("Зеркало проверяет браузер…", color = appMuted)
+                    }
                     Spacer(Modifier.height(15.dp))
                     Text("Загружаем фильмы", color = appMuted)
                 }

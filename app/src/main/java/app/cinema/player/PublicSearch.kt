@@ -11,9 +11,13 @@ import org.jsoup.Jsoup
 /** The full public results contain artwork that autocomplete does not include. */
 internal object PublicSearch {
     private const val maxBytes = 1024L * 1024L
-    private val client = OkHttpClient.Builder()
+    // The search page must use the same source cookies, network headers and
+    // Android session as film metadata and player AJAX. A raw OkHttp client can
+    // receive HTTP 403 on the very mirror which opened in the app's WebView.
+    private val client = MirrorHttp.client.newBuilder()
         .followRedirects(false)
-        .callTimeout(5, TimeUnit.SECONDS)
+        .followSslRedirects(false)
+        .callTimeout(9, TimeUnit.SECONDS)
         .build()
 
     suspend fun read(source: String, query: String, userAgent: String): List<CatalogMovie> =
@@ -22,8 +26,16 @@ internal object PublicSearch {
             for (variant in variants) {
                 val cards = runCatching {
                     val url = MirrorCatalog.searchUrl(source, variant)
-                    val request = Request.Builder().url(url).header("User-Agent", userAgent)
-                        .header("Accept", "text/html").build()
+                    val origin = MirrorAccountGateway.origin(url) ?: return@runCatching emptyList()
+                    val request = Request.Builder().url(url)
+                        .header("Referer", "$origin/")
+                        .header("Accept", "text/html,application/xhtml+xml")
+                        .apply {
+                            MirrorSitePolicy.requestHeaders(url, userAgent).forEach { (key, value) ->
+                                header(key, value)
+                            }
+                        }
+                        .build()
                     client.newCall(request).execute().use { response ->
                         if (!response.isSuccessful) return@use emptyList()
                         val html = response.peekBody(maxBytes + 1)

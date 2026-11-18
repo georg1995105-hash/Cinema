@@ -16,10 +16,20 @@ internal object MirrorGuestSession {
     const val profileCookie = "hdmbbs=1; Path=/; Secure; SameSite=Lax"
 
     fun loadFilm(view: WebView, address: String) {
+        if (MirrorPostId.fromUrl(address) == null) {
+            view.loadUrl(address, MirrorSitePolicy.webViewHeaders(address))
+            return
+        }
+        loadPublicPage(view, address)
+    }
+
+    /**
+     * Catalog and search must start with the same site-issued guest profile
+     * as film pages. This is not a subscriber credential or a site restriction bypass.
+     */
+    fun loadPublicPage(view: WebView, address: String) {
         val origin = MirrorAccountGateway.origin(address)
-        // User-saved HTTPS mirrors need the same guest profile as built-ins.
-        // Only do this for a verified film-page shape, never arbitrary sites.
-        if (origin == null || MirrorPostId.fromUrl(address) == null) {
+        if (origin == null || !SourceRules.sameOrigin(origin, address)) {
             view.loadUrl(address, MirrorSitePolicy.webViewHeaders(address))
             return
         }

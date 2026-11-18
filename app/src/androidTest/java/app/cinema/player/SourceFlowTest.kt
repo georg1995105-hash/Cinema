@@ -79,6 +79,24 @@ class SourceFlowTest {
         error("No source response from fixture")
     }
 
+    @Test fun catalogChallengeDetectorRecognizesVisibleBrowserChallenge() = withPage(
+        """
+          <html><head><title>Just a moment...</title></head>
+          <body><div id="anubis_challenge"></div></body></html>
+        """.trimIndent()
+    ) { web ->
+        assertEquals("true", evaluate(web, CatalogAccessPolicy.challengeJavascript))
+    }
+
+    @Test fun catalogChallengeDetectorDoesNotMarkRealCatalogAsBlocked() = withPage(
+        """
+          <html><head><title>Сериалы</title></head>
+          <body><div class="b-content__inline_item">Сериал</div></body></html>
+        """.trimIndent()
+    ) { web ->
+        assertEquals("false", evaluate(web, CatalogAccessPolicy.challengeJavascript))
+    }
+
     @Test fun spokenTitleGetsTheRightFilmAndPosterInWebView() = withPage(
         """
         <script>
