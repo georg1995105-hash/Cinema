@@ -13,6 +13,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.ByteArrayInputStream
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -197,6 +199,133 @@ class SourceFlowTest {
             withContext(Dispatchers.Main) { mirrorAjax(web, film, mapOf("action" to "get_movie")) }
         }
         assertEquals(PlaybackFailure.BLOCKED, MirrorMediaParser.parseStreamInfo(requireNotNull(denied)).failure)
+    }
+
+    @Test fun nativeRezkaRequestSolvesAnubisStoresCookieAndRetriesFilm() {
+        val certificate = HeldCertificate.Builder()
+            .commonName("localhost").addSubjectAlternativeName("localhost").build()
+        val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()
+        val fixtureTrust = HandshakeCertificates.Builder()
+            .addTrustedCertificate(certificate.certificate).build()
+
+        MockWebServer().use { server ->
+            server.useHttps(serverTls.sslSocketFactory(), false)
+            server.start()
+            fun localUrl(path: String) =
+                server.url(path).newBuilder().host("localhost").build()
+            val filmPage = localUrl(
+                "/films/fiction/30651-mstiteli-final-2019.html"
+            ).toString()
+            val challengeData = "fixture-seed"
+            val passValid = java.util.concurrent.atomic.AtomicBoolean(false)
+            val retriedWithCookie = java.util.concurrent.atomic.AtomicBoolean(false)
+            val filmRequests = java.util.concurrent.atomic.AtomicInteger(0)
+            val passRequests = java.util.concurrent.atomic.AtomicInteger(0)
+
+            fun sha256(value: String): String =
+                MessageDigest.getInstance("SHA-256")
+                    .digest(value.toByteArray(StandardCharsets.UTF_8))
+                    .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+            val challengeHtml = """
+                <html><head>
+                <script id="anubis_base_prefix" type="application/json">""</script>
+                <script id="anubis_challenge" type="application/json">
+                {
+                  "challenge":{"id":"fixture-id","randomData":"$challengeData"},
+                  "rules":{"algorithm":"fast","difficulty":1}
+                }
+                </script>
+                </head><body>Making sure you're not a bot</body></html>
+            """.trimIndent()
+
+            val filmHtml = """
+                <html><body>
+                <div class="b-post__title"><h1>Мстители: Финал</h1></div>
+                <div class="b-post__description_text">Финальная битва команды.</div>
+                <script>sof.tv.initCDNMoviesEvents(30651, 56, 0, 0, 0);</script>
+                <ul id="translators-list">
+                  <li class="active" data-translator_id="56">Дубляж</li>
+                  <li data-translator_id="57">Оригинал</li>
+                </ul>
+                </body></html>
+            """.trimIndent()
+
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val address = requireNotNull(request.requestUrl)
+                    return when (address.encodedPath) {
+                        "/films/fiction/30651-mstiteli-final-2019.html" -> {
+                            filmRequests.incrementAndGet()
+                            if (request.getHeader("Cookie").orEmpty()
+                                    .contains("techaro.lol-anubis-auth=fixture")) {
+                                retriedWithCookie.set(true)
+                                MockResponse().setResponseCode(200)
+                                    .addHeader("Content-Type", "text/html; charset=UTF-8")
+                                    .setBody(filmHtml)
+                            } else {
+                                MockResponse().setResponseCode(200)
+                                    .addHeader("Content-Type", "text/html; charset=UTF-8")
+                                    .setBody(challengeHtml)
+                            }
+                        }
+                        "/.within.website/x/cmd/anubis/api/pass-challenge" -> {
+                            passRequests.incrementAndGet()
+                            val nonce = address.queryParameter("nonce")?.toLongOrNull()
+                            val response = address.queryParameter("response").orEmpty()
+                            val valid = nonce != null &&
+                                response == sha256(challengeData + nonce) &&
+                                response.startsWith("0") &&
+                                address.queryParameter("id") == "fixture-id" &&
+                                address.queryParameter("redir") == filmPage
+                            passValid.set(valid)
+                            if (!valid) {
+                                MockResponse().setResponseCode(400).setBody("bad pow")
+                            } else {
+                                MockResponse().setResponseCode(302)
+                                    .addHeader(
+                                        "Set-Cookie",
+                                        "techaro.lol-anubis-auth=fixture; Path=/; Secure; Max-Age=120"
+                                    )
+                                    .addHeader("Location", filmPage)
+                            }
+                        }
+                        else -> MockResponse().setResponseCode(404)
+                    }
+                }
+            }
+
+            MirrorHttp.clearStaleAnubisCookies(filmPage)
+            val client = MirrorHttp.client.newBuilder()
+                .sslSocketFactory(
+                    fixtureTrust.sslSocketFactory(),
+                    fixtureTrust.trustManager
+                )
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .build()
+            try {
+                val result = runBlocking {
+                    MirrorNetworkSource.film(
+                        filmPage,
+                        "Cinema-Android-Test",
+                        client = client
+                    )
+                }
+                assertEquals("", result.reason)
+                assertEquals("Мстители: Финал", result.metadata?.info?.title)
+                val player = requireNotNull(result.metadata?.player)
+                assertEquals("56", player.defaultVoice)
+                assertEquals(listOf("Дубляж", "Оригинал"), player.voices.map { it.name })
+                assertEquals(2, filmRequests.get())
+                assertEquals(1, passRequests.get())
+                assertTrue("PoW query is valid", passValid.get())
+                assertTrue("film is retried with Anubis cookie", retriedWithCookie.get())
+                assertTrue(MirrorHttp.hasAnubisCookie(filmPage))
+            } finally {
+                MirrorHttp.clearStaleAnubisCookies(filmPage)
+            }
+        }
     }
 
     @Test fun launcherShowsCinemaWithAnAdaptiveIcon() {
