@@ -25,11 +25,15 @@ internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         ScreenHeading("Настройки", "Только нужное")
         Spacer(Modifier.height(24.dp))
-        MenuItem("Аккаунт", "Вход, гостевой режим и выбранное зеркало",
-            Icons.Outlined.AccountCircle, onAccount)
-        MenuItem("Источники и зеркала", "Добавление и проверка адресов", Icons.Outlined.Link) {
-            open(Page.SOURCES)
-        }
+        // The independent catalogue needs neither a mirror nor a Rezka account.
+        // Legacy source data remains intact on disk for backward compatibility,
+        // but it must not be presented as a requirement for watching content.
+        Text(
+            "Каталог работает без зеркал и авторизации. Для просмотра показываются только подтверждённые видеоматериалы.",
+            color = appMuted,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(Modifier.height(16.dp))
         MenuItem("Плеер", "Перемотка и проверка воспроизведения", Icons.Outlined.PlayArrow) {
             open(Page.PLAYER)
         }
@@ -43,7 +47,7 @@ internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
             open(Page.ABOUT)
         }
         Spacer(Modifier.height(18.dp))
-        Text("Вход необязателен. Пароль не сохраняется приложением.",
+        Text("История, избранное и прежние настройки сохранены на устройстве.",
             color = appMuted, style = MaterialTheme.typography.bodySmall)
     }
 }
