@@ -43,6 +43,21 @@ internal object MirrorSitePolicy {
     fun webViewHeaders(url: String): Map<String, String> =
         requestHeaders(url, "").filterKeys { it != "User-Agent" && it != "Host" }
 
+    fun mergeCookieHeaders(headers: List<String>): String {
+        val values = linkedMapOf<String, String>()
+        // Later process lower-priority shared scopes first; the local scope wins duplicates.
+        headers.asReversed().forEach { header ->
+            header.split(';').map(String::trim).forEach { part ->
+                val split = part.indexOf('=')
+                if (split <= 0) return@forEach
+                val name = part.substring(0, split).trim()
+                val value = part.substring(split + 1).trim()
+                if (name.isNotBlank()) values[name] = value
+            }
+        }
+        return values.entries.joinToString("; ") { (name, value) -> "$name=$value" }
+    }
+
     fun cookieScopes(url: String): List<String> {
         if (!SourceRules.isValidHttpsUrl(url)) return emptyList()
         val host = runCatching { URI(url).host.orEmpty().lowercase().removePrefix("www.") }
