@@ -32,7 +32,7 @@ private val countryNames = Locale.getISOCountries().asSequence()
     .map { Locale("", it).getDisplayCountry(russian).replaceFirstChar { c -> c.titlecase(russian) } }
     .filter { it.isNotBlank() }.distinct().sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it })
     .toList()
-private val types = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы", "Аниме")
+private val types = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы")
 private val genres = listOf(
     "Вестерны", "Семейные", "Фэнтези", "Биографические", "Арт-хаус", "Боевики",
     "Военные", "Детективы", "Криминал", "Приключения", "Драмы", "Спортивные",
@@ -99,7 +99,7 @@ internal fun SearchScreen(
         val kindMatches = when (selectedType) {
             "Фильмы" -> "/meta/movie/" in movie.url || "/films/" in movie.url
             "Сериалы" -> "/meta/series/" in movie.url || "/series/" in movie.url
-            "Мультфильмы" -> "/cartoons/" in movie.url
+            "Мультфильмы" -> "/cartoons/" in movie.url || movie.details.contains("Мультфильм", true)
             "Аниме" -> "/animation/" in movie.url
             else -> true
         }
