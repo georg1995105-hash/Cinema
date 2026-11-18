@@ -34,8 +34,8 @@ internal object MirrorVoiceDiscovery {
         if (!voiceId) continue;
         var name = clean(attr(['data-title']) || row.textContent || attr(['title'])).slice(0,75);
         var requiresSubscription = /^(?:1|true|premium)$/i.test(attr(['data-premium','data-is-premium','data-access'])) ||
-          attrs.some(function(e) {return e.matches('.b-translator__premium, [data-premium="1"], [data-access="premium"]')}) ||
-          !!row.querySelector('.b-translator__premium, [data-premium="1"], [data-access="premium"]');
+          attrs.some(function(e) {return e.matches('.b-prem_translator, .b-translator__premium, [data-premium="1"], [data-access="premium"]')}) ||
+          !!row.querySelector('.b-prem_translator, .b-translator__premium, [data-premium="1"], [data-access="premium"]');
         function flag(names, index) {
           var explicit = attr(names);
           if (/^[01]$/.test(explicit)) return Number(explicit);

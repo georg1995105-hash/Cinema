@@ -87,4 +87,21 @@ class MirrorHtmlMetadataTest {
         assertEquals(1,player.defaultFlags!!.isDirector)
         assertEquals(52L * 60_000L,player.expectedDurationMs)
     }
+
+    @Test fun referencePremiumClassIsNotTreatedAsFreeVoice() {
+        val html = """
+          <div class="b-post">
+            <div class="b-post__title"><h1>Фильм</h1></div>
+            <div class="b-post__description_text">Описание.</div>
+            <ul id="translators-list">
+              <li class="b-translator__item active" data-translator_id="17">Обычная</li>
+              <li class="b-translator__item b-prem_translator" data-translator_id="44">Premium</li>
+            </ul>
+            <script>initCDNMoviesEvents(123,17,0,0,0);</script>
+          </div>
+        """
+        val voices = MirrorHtmlMetadata.parse(url, html).info!!.voices
+        assertFalse(voices.first { it.id == "17" }.requiresSubscription)
+        assertTrue(voices.first { it.id == "44" }.requiresSubscription)
+    }
 }

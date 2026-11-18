@@ -43,4 +43,18 @@ class MirrorFilmUrlTest {
         assertFalse(MirrorFilmUrl.isAllowedResolved(
             film, "https://hdrezka.club/films/23-other.html", saved))
     }
+
+    @Test fun acceptsRecognizedDynamicMirrorForSameFilmWithoutSavingItFirst() {
+        val film="https://rezka-ua.pub/films/22-film.html"
+        assertTrue(MirrorFilmUrl.isAllowedResolved(
+            film, "https://hdrezka8.net/films/22-film.html", emptyList()))
+        assertFalse(MirrorFilmUrl.isAllowedResolved(
+            film, "https://example.com/films/22-film.html", emptyList()))
+    }
+
+    @Test fun canonicalWwwAliasStillCountsAsTheSameResolvedFilm() {
+        val film="https://mirror.example/series/drama/8155-brigada-2002.html"
+        assertTrue(MirrorFilmUrl.isAllowedResolved(
+            film, "https://www.mirror.example/series/8155-brigada.html/", emptyList()))
+    }
 }
