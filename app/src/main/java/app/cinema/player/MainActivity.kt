@@ -78,7 +78,6 @@ private fun CinemaApp() {
     var playing by remember { mutableStateOf<String?>(null) }
     var playingMovieKey by remember { mutableStateOf<String?>(null) }
     var liftTitle by remember { mutableStateOf("") }
-    var homeLiftActive by remember { mutableStateOf(true) }
     var liftReturn by remember { mutableStateOf(Page.MOVIE) }
     var browsingSource by remember { mutableStateOf<String?>(null) }
     var playbackStorageUrl by remember { mutableStateOf<String?>(null) }
@@ -137,7 +136,7 @@ private fun CinemaApp() {
     Scaffold(
         containerColor = appBackground,
         bottomBar = {
-            if (!(page == Page.HOME && homeLiftActive) && page != Page.SITE && page != Page.MOVIE && page != Page.FILM_PLAYER && page != Page.PERSON && page != Page.LIFT) BoxWithConstraints(
+            if (page != Page.SITE && page != Page.MOVIE && page != Page.FILM_PLAYER && page != Page.PERSON && page != Page.LIFT) BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -174,7 +173,7 @@ private fun CinemaApp() {
         }
     ) { insets ->
         Box(
-            if (page == Page.FILM_PLAYER || page == Page.LIFT || (page == Page.HOME && homeLiftActive)) Modifier.fillMaxSize()
+            if (page == Page.FILM_PLAYER || page == Page.LIFT) Modifier.fillMaxSize()
             else Modifier.fillMaxSize().padding(insets)
                 .padding(horizontal = if (tablet) 30.dp else 16.dp, vertical = 12.dp)
         ) {
@@ -184,8 +183,7 @@ private fun CinemaApp() {
                     cardsPerRow = local.cardsPerRow(),
                     onOpenFilm = { local.rememberMovie(it); selectedFilm = it; movieBack = Page.HOME; page = Page.MOVIE },
                     onBrowse = { browsingSource = it; browseReturn = Page.HOME; page = Page.SITE },
-                    onAddSource = { page = Page.SOURCES },
-                    onLiftActive = { homeLiftActive = it }
+                    onAddSource = { page = Page.SOURCES }
                 )
                 Page.SEARCH -> SearchScreen(
                     local = local,
@@ -437,7 +435,7 @@ internal fun ScreenHeading(title: String, subtitle: String? = null, back: (() ->
     }
 }
 
-private val feeds = listOf("Lift", "Популярное", "Новинки", "Высокий рейтинг")
+private val feeds = listOf("Популярное", "Новинки", "Высокий рейтинг")
 private val contentKinds = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы")
 
 @Composable
@@ -469,8 +467,7 @@ private fun HomeScreen(
     cardsPerRow: Int,
     onOpenFilm: (CatalogMovie) -> Unit,
     onBrowse: (String) -> Unit,
-    onAddSource: () -> Unit,
-    onLiftActive: (Boolean) -> Unit = {}
+    onAddSource: () -> Unit
 ) {
     var kind by rememberSaveable { mutableStateOf(contentKinds.first()) }
     var options by remember { mutableStateOf(false) }
@@ -479,14 +476,12 @@ private fun HomeScreen(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(pager.currentPage) {
-        onLiftActive(pager.currentPage == 0)
-        if (pager.currentPage != 0 && tabList.layoutInfo.visibleItemsInfo.none { it.index == pager.currentPage }) {
+        if (tabList.layoutInfo.visibleItemsInfo.none { it.index == pager.currentPage }) {
             tabList.animateScrollToItem(pager.currentPage)
         }
     }
 
     Column(Modifier.fillMaxSize()) {
-        if (pager.currentPage != 0) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             LazyRow(
                 state = tabList,
@@ -585,25 +580,18 @@ private fun HomeScreen(
             }
         }
         HorizontalDivider(color = appMuted.copy(alpha = .13f))
-        }
         HorizontalPager(
             state = pager,
             modifier = Modifier.fillMaxWidth().weight(1f),
             key = { index -> feeds[index] }
         ) { index ->
-            if (feeds[index] == "Lift") {
-                LiftWebScreen(
-                    onClose = { scope.launch { pager.animateScrollToPage(1) } }
-                )
-            } else {
-                CinemetaGrid(
-                    tab = feeds[index],
-                    kind = kind,
-                    cardsPerRow = cardsPerRow,
-                    onOpen = onOpenFilm,
-                    loadContent = pager.currentPage == index
-                )
-            }
+            CinemetaGrid(
+                tab = feeds[index],
+                kind = kind,
+                cardsPerRow = cardsPerRow,
+                onOpen = onOpenFilm,
+                loadContent = pager.currentPage == index
+            )
         }
     }
 }
