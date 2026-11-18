@@ -17,17 +17,14 @@ import java.util.concurrent.TimeUnit
 /**
  * Conservative legal stream provider. Metadata is checked on the provider,
  * and a real byte-range GET must return playable MP4 bytes before the option is offered.
- * The single approved title is a verified Public Domain Mark 1.0 archive item;
- * general titles and episodes are NOT silently mapped to an unrelated video.
+ * Metadata API provides per-item license checks, and each MP4 candidate must
+ * pass a real byte-range test. A catalog item is NOT necessarily playable.
+ * Publisher-supplied public-domain claims can still be incorrect.
  */
 internal object InternetArchiveStreams {
     private const val archiveId = "NightOfTheLivingDead1968-Restored"
     private const val imdbId = "tt0063350"
-    private const val publicDomainMark = "creativecommons.org/publicdomain/mark/1.0/"
-    private val videoFiles = listOf(
-        "Notld1968Restoration-desktop.mp4" to "MP4 • высокое качество",
-        "Notld1968Restoration-desktop_512kb.mp4" to "MP4 • экономный вариант"
-    )
+    private val mp4 = Regex("(?i)\\.(mp4|m4v)$")
     private val client = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
@@ -36,9 +33,10 @@ internal object InternetArchiveStreams {
 
     data class Video(val title: String, val url: String)
 
-    private fun verifiedMetadata(): JSONObject {
+    private fun verifiedMetadata(id: String): JSONObject {
+        ArchivePublicCatalog.url(id) // validates the entire path component
         val request = Request.Builder()
-            .url("https://archive.org/metadata/$archiveId")
+            .url("https://archive.org/metadata/$id")
             .header("Accept", "application/json").build()
         val data = client.newCall(request).execute().use { response ->
             if (!response.isSuccessful ||
@@ -51,71 +49,94 @@ internal object InternetArchiveStreams {
         val info = data.optJSONObject("metadata")
             ?: throw IOException("Нет метаданных архивного фильма")
         val license = info.optString("licenseurl")
-        if (!license.startsWith("https://$publicDomainMark") &&
-            !license.startsWith("http://$publicDomainMark"))
-            throw IOException("Не подтверждена лицензия на свободный просмотр")
+        if (!ArchivePublicCatalog.isDeclaredFree(license))
+            throw IOException("Нет подтверждённой отметки Public Domain/CC0")
         return data
     }
 
-    /** A known archived title is stable catalogue data. Its actual licence
-     * and byte-range video availability are verified at detail/watch time.
-     * A temporarily unreachable video server must NOT hide the title. */
-    suspend fun catalog(context: Context, kind: String): List<CatalogMovie> {
-        if (kind == "Сериалы" || kind == "Мультфильмы") return emptyList()
-        return listOf(CatalogMovie(
-            CinemetaCatalog.movieUrl("movie", imdbId),
-            "Ночь живых мертвецов",
-            "https://archive.org/services/img/$archiveId",
-            "1968 · США · Ужасы"
-        ))
-    }
+    suspend fun catalog(context: Context, kind: String): List<CatalogMovie> =
+        ArchivePublicCatalog.home(kind)
 
-    suspend fun details(context: Context): CinemetaDetails = withContext(Dispatchers.IO) {
-        val data = verifiedMetadata()
+    fun canCheck(url: String): Boolean =
+        ArchivePublicCatalog.isArchiveUrl(url) ||
+            CinemetaCatalog.identity(url) == ("movie" to imdbId)
+
+    suspend fun details(context: Context, url: String): CinemetaDetails = withContext(Dispatchers.IO) {
+        val id = ArchivePublicCatalog.identifier(url)
+            ?: if (CinemetaCatalog.identity(url) == ("movie" to imdbId)) archiveId
+               else throw IOException("Этот фильм не относится к доступному архиву")
+        val data = verifiedMetadata(id)
         val info = data.getJSONObject("metadata")
+        val legacy = id == archiveId
+        val title = if (legacy) "Ночь живых мертвецов" else
+            Jsoup.parse(info.optString("title")).text().take(180).ifBlank { "Архивный фильм" }
+        val original = if (legacy) "Night of the Living Dead" else
+            Jsoup.parse(info.optString("title")).text().take(180)
+        val year = info.optString("year").takeIf {
+            it.matches(Regex("[0-9]{4}"))
+        } ?: info.optString("date").take(4).takeIf {
+            it.matches(Regex("[0-9]{4}"))
+        }.orEmpty()
+        val creator = info.opt("creator")
+        val director = when (creator) {
+            is org.json.JSONArray -> (0 until minOf(creator.length(), 12))
+                .map { creator.optString(it) }.filter(String::isNotBlank)
+            is String -> creator.take(200).takeIf(String::isNotBlank)?.let(::listOf).orEmpty()
+            else -> emptyList()
+        }
         val item = CatalogMovie(
-            CinemetaCatalog.movieUrl("movie", imdbId),
-            "Ночь живых мертвецов",
-            "https://archive.org/services/img/$archiveId",
-            "1968 · США · Ужасы · свободный просмотр"
+            if (legacy) CinemetaCatalog.movieUrl("movie", imdbId) else ArchivePublicCatalog.url(id),
+            title, "https://archive.org/services/img/$id",
+            listOf(year, "Архивный фильм").filter(String::isNotBlank).joinToString(" · ")
         )
         CinemetaDetails(
             item = item,
-            description = Jsoup.parse(info.optString("description")).text().take(5000),
-            originalTitle = "Night of the Living Dead",
+            description = Jsoup.parse(info.optString("description")).text().take(6000),
+            originalTitle = original,
             rating = "",
-            country = "США",
+            country = "",
             runtime = "",
-            genres = listOf("Ужасы"),
-            directors = emptyList(),
+            genres = emptyList(),
+            directors = director,
             actors = emptyList(),
             episodes = emptyList(),
-            source = "Internet Archive · Public Domain Mark 1.0",
-            sourceUrl = "https://archive.org/details/$archiveId"
+            source = "Internet Archive · Public Domain/CC0 (указано загрузившим)",
+            sourceUrl = "https://archive.org/details/$id"
         )
     }
 
+    // Preserve the previous single-film identity for existing bookmarks/history.
+    suspend fun details(context: Context): CinemetaDetails =
+        details(context, CinemetaCatalog.movieUrl("movie", imdbId))
+
     suspend fun available(context: Context, url: String): List<Video> = withContext(Dispatchers.IO) {
-        val identity = CinemetaCatalog.identity(url)
-        if (identity != ("movie" to imdbId)) return@withContext emptyList()
-        val data = verifiedMetadata()
+        val id = ArchivePublicCatalog.identifier(url)
+            ?: if (CinemetaCatalog.identity(url) == ("movie" to imdbId)) archiveId
+               else return@withContext emptyList()
+        val data = verifiedMetadata(id)
         val published = data.optJSONArray("files") ?: return@withContext emptyList()
-        val availableFiles = mutableSetOf<String>()
-        for (i in 0 until published.length()) {
-            val entry = published.optJSONObject(i) ?: continue
-            if (entry.optLong("size") > 10_000_000 &&
-                entry.optString("private").isBlank()) {
-                availableFiles.add(entry.optString("name"))
+        val availableFiles = buildList {
+            for (i in 0 until published.length()) {
+                val entry = published.optJSONObject(i) ?: continue
+                val name = entry.optString("name")
+                val size = entry.optLong("size", 0L)
+                if (!mp4.containsMatchIn(name) ||
+                    name.contains("preview", ignoreCase = true) ||
+                    name.contains("sample", ignoreCase = true) ||
+                    size !in 10_000_000L..5_000_000_000L ||
+                    entry.optString("private").isNotBlank()) continue
+                add(name to size)
             }
-        }
-        // Both verified MP4 variants are probed concurrently. A slow or
-        // unavailable variant must not block showing an already playable one.
+        }.distinctBy { it.first }
+            .sortedBy { it.second }
+            .take(4)
         coroutineScope {
-            videoFiles.filter { it.first in availableFiles }.map { (name, label) ->
+            availableFiles.map { (name, size) ->
                 async(Dispatchers.IO) {
                     val escaped = URLEncoder.encode(name, "UTF-8").replace("+", "%20")
-                    val streamUrl = "https://archive.org/download/$archiveId/$escaped"
-                    if (isPlayableMp4(streamUrl)) Video(label, streamUrl) else null
+                    val streamUrl = "https://archive.org/download/$id/$escaped"
+                    if (isPlayableMp4(streamUrl)) Video("MP4 · ${size / 1_000_000} МБ", streamUrl)
+                    else null
                 }
             }.awaitAll().filterNotNull()
         }
