@@ -521,7 +521,7 @@ internal fun FilmDetails(
                         )
                         resolvedFilmUrl = mapped
                         if (mapped != requested || crossOrigin) {
-                            view.loadUrl(mapped, MirrorSitePolicy.webViewHeaders(mapped))
+                            MirrorGuestSession.loadFilm(view, mapped)
                             return true
                         }
                         return false
@@ -641,9 +641,7 @@ internal fun FilmDetails(
                             browserChallengeActive = true
                             loadError = ""
                             view.postDelayed({
-                                if (!loadDone) view.loadUrl(
-                                    address, MirrorSitePolicy.webViewHeaders(address)
-                                )
+                                if (!loadDone) MirrorGuestSession.loadFilm(view, address)
                             }, 120)
                             return
                         }
@@ -660,7 +658,7 @@ internal fun FilmDetails(
                 }
             }
             setTag(handler)
-            loadUrl(resolvedFilmUrl, MirrorSitePolicy.webViewHeaders(resolvedFilmUrl))
+            MirrorGuestSession.loadFilm(this, resolvedFilmUrl)
         }
     } else null
     // Do not recreate the WebView during a same-origin Anubis/redirect flow.
@@ -672,7 +670,7 @@ internal fun FilmDetails(
         if (!browserChallengeActive &&
             !SourceRules.sameOrigin(view.url.orEmpty(), target) &&
             MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, target, sources)) {
-            view.loadUrl(target, MirrorSitePolicy.webViewHeaders(target))
+            MirrorGuestSession.loadFilm(view, target)
         }
     }
     DisposableEffect(webView) {
