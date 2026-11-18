@@ -9,6 +9,12 @@ on:
 permissions:
   contents: write
 
+# Cancel redundant runs on the same branch and event, while keeping the
+# push run that signs a QA APK separate from the PR review run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
