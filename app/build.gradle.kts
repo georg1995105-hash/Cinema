@@ -12,8 +12,8 @@ android {
         applicationId = "app.cinema.player"
         minSdk = 26
         targetSdk = 35
-        versionCode = 41
-        versionName = "0.4.35"
+        versionCode = 42
+        versionName = "0.4.36"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
