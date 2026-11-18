@@ -453,7 +453,7 @@ internal fun FilmDetails(
     onBrowse: (String) -> Unit,
     savedSelection: PlaybackSelection?,
     onWatch: (WatchRequest) -> Unit,
-    onLift: () -> Unit,
+    onLift: () -> Unit = {},
     onRelated: (CatalogMovie) -> Unit,
     onMetadata: (CatalogMovie) -> Unit,
     onPerson: (FilmPerson) -> Unit,
