@@ -404,10 +404,10 @@ internal fun FilmDetails(
         mutableStateOf(FilmInfoMemory.get(preferredFilmUrl))
     }
     var loadDone by remember(movie.url, preferredFilmUrl) { mutableStateOf(false) }
-    var loadError by remember(movie.url) { mutableStateOf("") }
-    var browserChallengeActive by remember(movie.url) { mutableStateOf(false) }
+    var loadError by remember(movie.url, preferredFilmUrl) { mutableStateOf("") }
+    var browserChallengeActive by remember(movie.url, preferredFilmUrl) { mutableStateOf(false) }
     var resolvedFilmUrl by remember(movie.url, preferredFilmUrl) { mutableStateOf(preferredFilmUrl) }
-    var resolvedPlayer by remember(movie.url) { mutableStateOf<MirrorMoviePage?>(null) }
+    var resolvedPlayer by remember(movie.url, preferredFilmUrl) { mutableStateOf<MirrorMoviePage?>(null) }
     // A real HTTP session can deliver metadata even when the hidden WebView stalls.
     // It is independent of the WebView parser, but shares Android's mirror cookies.
     LaunchedEffect(movie.url, preferredFilmUrl, sources) {
@@ -424,8 +424,8 @@ internal fun FilmDetails(
             FilmInfoMemory.put(preferredFilmUrl, merged)
             if (FilmInfoReadiness.canFinish(merged) && merged.portraitsResolved &&
                 resolvedPlayer != null) loadDone = true
-        } else if (info == null && result.reason.isNotBlank()) {
-            // Keep the actual HTTP failure, even while WebView retries in parallel.
+        } else if (resolvedPlayer == null && result.reason.isNotBlank()) {
+            // A cached description cannot turn a rejected film page into a working player.
             loadError = result.reason
         }
     }
@@ -447,10 +447,10 @@ internal fun FilmDetails(
             }
         }
     }
-    var showWatchMenu by remember(movie.url) { mutableStateOf(false) }
-    var chosenVoice by remember(movie.url) { mutableStateOf("") }
-    var chosenSeason by remember(movie.url) { mutableStateOf("") }
-    var chosenEpisode by remember(movie.url) { mutableStateOf("") }
+    var showWatchMenu by remember(movie.url, preferredFilmUrl) { mutableStateOf(false) }
+    var chosenVoice by remember(movie.url, preferredFilmUrl) { mutableStateOf("") }
+    var chosenSeason by remember(movie.url, preferredFilmUrl) { mutableStateOf("") }
+    var chosenEpisode by remember(movie.url, preferredFilmUrl) { mutableStateOf("") }
     val webView = if (!loadDone) remember(context, movie.url, preferredFilmUrl) {
         val handler = Handler(Looper.getMainLooper())
         WebView(context).apply {
@@ -608,14 +608,14 @@ internal fun FilmDetails(
                             }, 120)
                             return
                         }
-                        if (info == null)
+                        if (resolvedPlayer == null)
                             loadError = "Источник вернул HTTP ${response.statusCode}."
                     }
                 }
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                     if (request.isForMainFrame) {
-                        if (info == null)
+                        if (resolvedPlayer == null)
                             loadError = "Не удалось загрузить страницу фильма."
                     }
                 }
@@ -629,7 +629,7 @@ internal fun FilmDetails(
     // WebView only after it is no longer completing a browser challenge.
     LaunchedEffect(webView, resolvedFilmUrl, browserChallengeActive) {
         val view = webView ?: return@LaunchedEffect
-        if (!browserChallengeActive && view.url != null &&
+        if (!browserChallengeActive && resolvedFilmUrl != preferredFilmUrl &&
             !SourceRules.sameOrigin(view.url.orEmpty(), resolvedFilmUrl) &&
             MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, resolvedFilmUrl, sources)) {
             view.loadUrl(resolvedFilmUrl, MirrorSitePolicy.webViewHeaders(resolvedFilmUrl))
@@ -644,11 +644,12 @@ internal fun FilmDetails(
     }
 
     val current = info
+    // Only source-verified voices are selectable; cached film facts are not proof
+    // that an old translator still serves this film on the active mirror.
     val sourceDefaultVoice = resolvedPlayer?.defaultVoice.orEmpty()
-        .ifBlank { current?.defaultVoice.orEmpty() }
-    val effectiveVoices = remember(current?.voices, resolvedPlayer?.voices, sourceDefaultVoice) {
+    val effectiveVoices = remember(resolvedPlayer?.voices, sourceDefaultVoice) {
         val values = linkedMapOf<String, MirrorVoice>()
-        (resolvedPlayer?.voices.orEmpty() + current?.voices.orEmpty()).forEach {
+        resolvedPlayer?.voices.orEmpty().forEach {
             if (it.id.isNotBlank()) values.putIfAbsent(it.id, it)
         }
         if (sourceDefaultVoice.matches(Regex("[0-9]{1,12}")) &&
