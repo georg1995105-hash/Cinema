@@ -74,7 +74,10 @@ internal object MirrorHtmlMetadata {
             if (name.length !in 2..90) return
             val url = absolute(link?.attr("href").orEmpty())
                 .takeIf { SourceRules.sameOrigin(filmUrl, it) }.orEmpty()
-            val value = FilmPerson(name, poster(entry), url)
+            val idFromPage = entry.attr("data-pid").ifBlank {
+                entry.closest("[data-pid]")?.attr("data-pid").orEmpty()
+            }.takeIf { it.matches(Regex("[0-9]{1,12}")) }.orEmpty()
+            val value = FilmPerson(name, poster(entry), url, idFromPage)
             if (role == "director") directors.putIfAbsent(name.lowercase(), value)
             else actors.putIfAbsent(name.lowercase(), value)
         }
@@ -140,7 +143,10 @@ internal object MirrorHtmlMetadata {
                 val url = absolute(link).takeIf {
                     SourceRules.sameOrigin(filmUrl, it)
                 }.orEmpty()
-                val value = FilmPerson(name, photo, url)
+                val pid = entry.attr("data-pid").takeIf {
+                    it.matches(Regex("[0-9]{1,12}"))
+                }.orEmpty()
+                val value = FilmPerson(name, photo, url, pid)
                 if (role == "director") directors.putIfAbsent(name.lowercase(), value)
                 else actors.putIfAbsent(name.lowercase(), value)
             }
