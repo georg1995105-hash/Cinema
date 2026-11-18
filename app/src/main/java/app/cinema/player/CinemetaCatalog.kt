@@ -53,7 +53,7 @@ internal object CinemetaCatalog {
                     val item = data.optJSONObject(i) ?: continue
                     val url = item.optString("url")
                     val title = item.optString("title").trim().take(180)
-                    if ((!isMovieUrl(url) && !ArchivePublicCatalog.isArchiveUrl(url) && !MosfilmCatalog.isVideoUrl(url)) || title.isBlank()) continue
+                    if ((!isMovieUrl(url) && !ArchivePublicCatalog.isArchiveUrl(url)) || title.isBlank()) continue
                     val poster = item.optString("poster").takeIf(MirrorPoster::isPhoto).orEmpty()
                     add(CatalogMovie(url, title, poster, item.optString("details").take(180)))
                 }
@@ -306,8 +306,6 @@ internal object CinemetaCatalog {
     }
 
     suspend fun metadata(context: Context, url: String): CinemetaDetails = withContext(Dispatchers.IO) {
-        if (MosfilmCatalog.isVideoUrl(url))
-            return@withContext MosfilmCatalog.metadata(url)
         if (ArchivePublicCatalog.isArchiveUrl(url))
             return@withContext InternetArchiveStreams.details(context, url)
         val (type, id) = identity(url) ?: throw IOException("Неверный идентификатор фильма")
