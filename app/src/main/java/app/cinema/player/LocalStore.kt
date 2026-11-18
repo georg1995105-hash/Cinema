@@ -12,7 +12,10 @@ data class PlaybackSelection(
     val episode: String = "",
     val voice: String = "",
     val quality: String = "",
-    val positionMs: Long = 0L
+    val positionMs: Long = 0L,
+    val provider: String = "rezka",
+    val kinopoiskId: String = "",
+    val imdbId: String = ""
 )
 
 class LocalStore(context: Context) {
@@ -165,7 +168,10 @@ class LocalStore(context: Context) {
             episode = saved.optString("episode").take(6),
             voice = saved.optString("voice").take(15),
             quality = saved.optString("quality").take(30),
-            positionMs = saved.optLong("positionMs", 0L).coerceAtLeast(0L)
+            positionMs = saved.optLong("positionMs", 0L).coerceAtLeast(0L),
+            provider = saved.optString("provider", "rezka").take(20).ifBlank { "rezka" },
+            kinopoiskId = saved.optString("kinopoiskId").take(16),
+            imdbId = saved.optString("imdbId").take(20)
         )
     }.getOrNull()
 
@@ -179,7 +185,10 @@ class LocalStore(context: Context) {
             .put("episode", selection.episode)
             .put("voice", selection.voice)
             .put("quality", selection.quality)
-            .put("positionMs", selection.positionMs.coerceAtLeast(0L)))
+            .put("positionMs", selection.positionMs.coerceAtLeast(0L))
+            .put("provider", selection.provider)
+            .put("kinopoiskId", selection.kinopoiskId)
+            .put("imdbId", selection.imdbId))
         // Bound persisted data; this is an on-device preference, never sync to public accounts.
         if (objectRoot.length() > 100) {
             val keys = objectRoot.keys().asSequence().toList()

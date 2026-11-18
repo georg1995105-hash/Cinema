@@ -34,7 +34,9 @@ internal object FilmInfoMerger {
             defaultVoice = latest.defaultVoice.ifBlank { previous.defaultVoice },
             episodes = (latest.episodes + previous.episodes)
                 .distinctBy { it.season to it.id }.take(500),
-            posters = (latest.posters + previous.posters).distinct().take(10)
+            posters = (latest.posters + previous.posters).distinct().take(10),
+            kinopoiskId = latest.kinopoiskId.ifBlank { previous.kinopoiskId },
+            imdbId = latest.imdbId.ifBlank { previous.imdbId }
         )
     }
 }

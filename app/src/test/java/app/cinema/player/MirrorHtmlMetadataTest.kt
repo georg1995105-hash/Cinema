@@ -104,4 +104,19 @@ class MirrorHtmlMetadataTest {
         assertFalse(voices.first { it.id == "17" }.requiresSubscription)
         assertTrue(voices.first { it.id == "44" }.requiresSubscription)
     }
+
+    @Test fun extractsReferenceImdbAndKinopoiskIds() {
+        val html = """
+          <div class="b-post">
+            <div class="b-post__title"><h1>Мстители: Финал</h1></div>
+            <div class="b-post__description_text">Описание.</div>
+            <span class="imdb"><a href="https://www.imdb.com/title/tt4154796/">IMDb</a></span>
+            <span class="kp"><a href="https://www.kinopoisk.ru/film/843650/">КП</a></span>
+            <script>initCDNMoviesEvents(123,17,0,0,0);</script>
+          </div>
+        """
+        val info = MirrorHtmlMetadata.parse(url, html).info!!
+        assertEquals("tt4154796", info.imdbId)
+        assertEquals("843650", info.kinopoiskId)
+    }
 }

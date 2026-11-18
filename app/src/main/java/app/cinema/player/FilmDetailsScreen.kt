@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -50,7 +51,19 @@ internal data class FilmInfo(
     val posters: List<String> = emptyList(),
     val portraitsResolved: Boolean = true,
     val defaultVoice: String = "",
-    val episodes: List<MirrorEpisode> = emptyList()
+    val episodes: List<MirrorEpisode> = emptyList(),
+    val kinopoiskId: String = "",
+    val imdbId: String = ""
+)
+
+internal data class WatchRequest(
+    val provider: String,
+    val filmUrl: String,
+    val voice: String,
+    val season: String,
+    val episode: String,
+    val kinopoiskId: String = "",
+    val imdbId: String = ""
 )
 
 internal object FilmInfoMemory {
@@ -208,6 +221,14 @@ internal object FilmPageParser {
            similar.push({title:title,url:address,posters:posters});
          });
          var franchise=window.__kinoFranchiseParts || [];
+         function externalId(selector, pattern) {
+           var link=document.querySelector(selector);
+           var raw=(link?.getAttribute('href') || link?.textContent || '').trim();
+           var match=raw.match(pattern);
+           return match ? match[1] || match[0] : '';
+         }
+         var imdbId=externalId('span.imdb a[href], .imdb a[href], a[href*="imdb.com/title/"]', /(tt\d{5,12})/i);
+         var kinopoiskId=externalId('span.kp a[href], .kp a[href], a[href*="kinopoisk.ru/film/"]', /\/film\/(\d{1,12})/i);
          return JSON.stringify({
            browserCheck:/captcha|verify you are human|checking your browser|проверяем.{0,30}не бот/i.test(document.title || ''),
            originalTitle:txt('.b-post__origtitle, .b-post__subtitle, .b-post__title_original'),
@@ -223,7 +244,9 @@ internal object FilmPageParser {
            related:similar.slice(0,15),
            franchise:franchise.slice(0,50),
            franchiseDone:window.__kinoFranchiseDone === true,
-           portraitsDone:!window.__kinoPortraits || window.__kinoPortraits.done
+           portraitsDone:!window.__kinoPortraits || window.__kinoPortraits.done,
+           kinopoiskId:kinopoiskId,
+           imdbId:imdbId
          });
        })();
     """.trimIndent()
@@ -373,7 +396,12 @@ internal object FilmPageParser {
             episodes = MirrorMediaParser.parseEpisodes(data.optJSONArray("episodes")),
             title = CatalogTitleCleaner.clean(data.optString("title")),
             posters = MirrorCatalog.readPosters(data),
-            portraitsResolved = data.optBoolean("portraitsDone", true)
+            portraitsResolved = data.optBoolean("portraitsDone", true),
+            kinopoiskId = data.optString("kinopoiskId")
+                .takeIf { it.matches(Regex("[0-9]{1,12}")) }.orEmpty(),
+            imdbId = data.optString("imdbId")
+                .takeIf { it.matches(Regex("tt[0-9]{5,12}", RegexOption.IGNORE_CASE)) }
+                .orEmpty()
         )
     }.getOrNull()
 }
@@ -389,7 +417,7 @@ internal fun FilmDetails(
     onBack: () -> Unit,
     onBrowse: (String) -> Unit,
     savedSelection: PlaybackSelection?,
-    onWatch: (String, String, String, String) -> Unit,
+    onWatch: (WatchRequest) -> Unit,
     onRelated: (CatalogMovie) -> Unit,
     onMetadata: (CatalogMovie) -> Unit,
     onPerson: (FilmPerson) -> Unit
@@ -432,6 +460,9 @@ internal fun FilmDetails(
         }
     }
     var showWatchMenu by remember(movie.url) { mutableStateOf(false) }
+    var chosenProvider by remember(movie.url) {
+        mutableStateOf(savedSelection?.provider?.takeIf { it in setOf("rezka", "collapse") } ?: "rezka")
+    }
     var chosenVoice by remember(movie.url) { mutableStateOf("") }
     var chosenSeason by remember(movie.url) { mutableStateOf("") }
     var chosenEpisode by remember(movie.url) { mutableStateOf("") }
@@ -562,6 +593,41 @@ internal fun FilmDetails(
     }
 
     val current = info
+    var collapseResult by remember(movie.url) { mutableStateOf<CollapseResult?>(null) }
+    var collapseLoading by remember(movie.url) { mutableStateOf(false) }
+    var resolvedKinopoiskId by remember(movie.url) { mutableStateOf("") }
+    var resolvedImdbId by remember(movie.url) { mutableStateOf("") }
+
+    LaunchedEffect(
+        movie.url,
+        current?.kinopoiskId,
+        current?.imdbId,
+        current?.title,
+        current?.originalTitle,
+        movie.title,
+        movie.details
+    ) {
+        collapseLoading = true
+        var kp = current?.kinopoiskId.orEmpty()
+        var imdb = current?.imdbId.orEmpty()
+        if (imdb.isBlank()) {
+            imdb = ExternalFilmIdResolver.imdb(
+                title = current?.title.orEmpty().ifBlank { movie.title },
+                originalTitle = current?.originalTitle.orEmpty(),
+                details = movie.details,
+                userAgent = WebSettings.getDefaultUserAgent(context)
+            )
+        }
+        resolvedKinopoiskId = kp
+        resolvedImdbId = imdb
+        collapseResult = if (kp.isNotBlank() || imdb.isNotBlank()) {
+            CollapseSource.fetch(kp, imdb, WebSettings.getDefaultUserAgent(context))
+        } else {
+            CollapseResult(reason = "Не удалось определить IMDb/Кинопоиск ID.")
+        }
+        collapseLoading = false
+    }
+
     val sourceDefaultVoice = resolvedPlayer?.defaultVoice.orEmpty()
         .ifBlank { current?.defaultVoice.orEmpty() }
     val effectiveVoices = remember(current?.voices, resolvedPlayer?.voices, sourceDefaultVoice) {
@@ -578,6 +644,33 @@ internal fun FilmDetails(
         }
         values.values.toList()
     }
+    val collapseMedia = collapseResult?.media
+    val rezkaAvailable = effectiveVoices.any { !it.requiresSubscription }
+    val collapseAvailable = collapseMedia?.playable() == true
+
+    LaunchedEffect(showWatchMenu, rezkaAvailable, collapseAvailable, collapseMedia) {
+        if (!showWatchMenu) return@LaunchedEffect
+        val currentAvailable = when (chosenProvider) {
+            "collapse" -> collapseAvailable
+            else -> rezkaAvailable
+        }
+        if (!currentAvailable) {
+            chosenProvider = when {
+                rezkaAvailable -> "rezka"
+                collapseAvailable -> "collapse"
+                else -> chosenProvider
+            }
+        }
+        val providerVoices = if (chosenProvider == "collapse") {
+            collapseMedia?.voices(chosenSeason, chosenEpisode).orEmpty()
+        } else effectiveVoices
+        if (providerVoices.none { it.id == chosenVoice }) {
+            chosenVoice = sourceDefaultVoice.takeIf { id ->
+                chosenProvider == "rezka" && providerVoices.any { it.id == id }
+            } ?: providerVoices.firstOrNull()?.id.orEmpty()
+        }
+    }
+
     val pictures = (current?.posters.orEmpty() + movie.poster + movie.posterAlternatives)
         .filter(MirrorPoster::isPhoto).distinct()
     val visibleMovie = movie.copy(
@@ -638,15 +731,23 @@ internal fun FilmDetails(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Button(onClick = {
-                            chosenVoice = savedSelection?.voice?.takeIf { id ->
-                                effectiveVoices.any { it.id == id }
-                            } ?: sourceDefaultVoice.takeIf { id ->
-                                effectiveVoices.any { it.id == id }
-                            }.orEmpty().ifBlank {
-                                effectiveVoices.singleOrNull()?.id.orEmpty()
-                            }
                             chosenSeason = savedSelection?.season.orEmpty()
                             chosenEpisode = savedSelection?.episode.orEmpty()
+                            chosenProvider = when {
+                                savedSelection?.provider == "collapse" && collapseAvailable -> "collapse"
+                                savedSelection?.provider == "rezka" && rezkaAvailable -> "rezka"
+                                rezkaAvailable -> "rezka"
+                                collapseAvailable -> "collapse"
+                                else -> "rezka"
+                            }
+                            val initialVoices = if (chosenProvider == "collapse") {
+                                collapseMedia?.voices(chosenSeason, chosenEpisode).orEmpty()
+                            } else effectiveVoices
+                            chosenVoice = savedSelection?.voice?.takeIf { id ->
+                                initialVoices.any { it.id == id }
+                            } ?: sourceDefaultVoice.takeIf { id ->
+                                chosenProvider == "rezka" && initialVoices.any { it.id == id }
+                            } ?: initialVoices.firstOrNull()?.id.orEmpty()
                             showWatchMenu = true
                         },
                             modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) {
@@ -819,145 +920,217 @@ internal fun FilmDetails(
                 containerColor = appPanel,
                 shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
             ) {
-                val availableVoices = effectiveVoices
-                val voiceSelected = availableVoices.firstOrNull { it.id == chosenVoice }
-                val pageEpisodes = current?.episodes.orEmpty().ifEmpty {
-                    resolvedPlayer?.episodes.orEmpty()
+                val sourceAccent = Color(0xFF8B5CF6)
+                val pageEpisodes = if (chosenProvider == "collapse") {
+                    collapseMedia?.mirrorEpisodes().orEmpty()
+                } else {
+                    current?.episodes.orEmpty().ifEmpty { resolvedPlayer?.episodes.orEmpty() }
                 }
-                val showEpisodes = voiceSelected != null && pageEpisodes.isNotEmpty()
-                val seasons = if (showEpisodes) pageEpisodes.map { it.season }.distinct()
-                    else emptyList()
+                val seasons = pageEpisodes.map { it.season }.distinct()
                 val currentSeason = chosenSeason.takeIf { it in seasons }
                     ?: savedSelection?.season?.takeIf { it in seasons }
                     ?: seasons.firstOrNull().orEmpty()
-                val currentEpisodes = pageEpisodes.filter { showEpisodes && it.season == currentSeason }
+                val currentEpisodes = pageEpisodes.filter { it.season == currentSeason }
                 val currentEpisode = chosenEpisode.takeIf { id ->
                     currentEpisodes.any { it.id == id }
                 } ?: savedSelection?.episode?.takeIf { id ->
                     currentEpisodes.any { it.id == id }
                 } ?: currentEpisodes.firstOrNull()?.id.orEmpty()
-                val displayedAvailability = availableVoices.associate { candidate ->
-                    candidate.id to if (candidate.requiresSubscription)
-                        VoiceAvailability.SUBSCRIPTION else VoiceAvailability.AVAILABLE
-                }
-                val freeStreamAvailable = availableVoices.any { !it.requiresSubscription }
-                val sourceStatus = when {
-                    freeStreamAvailable -> "Доступен"
-                    availableVoices.isNotEmpty() -> "Требует подписку"
-                    !loadDone -> "Загрузка…"
-                    else -> "Нет озвучек"
-                }
+
+                val availableVoices = if (chosenProvider == "collapse") {
+                    collapseMedia?.voices(currentSeason, currentEpisode).orEmpty()
+                } else effectiveVoices
+                val voiceSelected = availableVoices.firstOrNull { it.id == chosenVoice }
+                val showEpisodes = pageEpisodes.isNotEmpty()
+                val sourceAvailable = if (chosenProvider == "collapse")
+                    collapseAvailable else rezkaAvailable
+
                 Column(
                     Modifier.fillMaxWidth().heightIn(max = 620.dp)
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 18.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("Источник", style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold)
-                    Surface(
-                        color = if (freeStreamAvailable) appBlue.copy(alpha = .18f) else appCard,
-                        shape = RoundedCornerShape(12.dp)
+                    Text(
+                        "Источник",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Row(
-                            Modifier.padding(horizontal = 13.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "Rezka",
-                                color = if (freeStreamAvailable) appBlue else appMuted,
-                                fontWeight = FontWeight.SemiBold
+                        FilterChip(
+                            selected = chosenProvider == "rezka",
+                            enabled = rezkaAvailable,
+                            onClick = {
+                                chosenProvider = "rezka"
+                                chosenVoice = savedSelection?.voice?.takeIf { id ->
+                                    effectiveVoices.any { it.id == id }
+                                } ?: sourceDefaultVoice.takeIf { id ->
+                                    effectiveVoices.any { it.id == id }
+                                }.orEmpty().ifBlank { effectiveVoices.firstOrNull()?.id.orEmpty() }
+                            },
+                            label = { Text("Rezka") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = sourceAccent,
+                                selectedLabelColor = Color.White
                             )
-                            Spacer(Modifier.width(9.dp))
+                        )
+                        FilterChip(
+                            selected = chosenProvider == "collapse",
+                            enabled = collapseAvailable,
+                            onClick = {
+                                chosenProvider = "collapse"
+                                val voices = collapseMedia?.voices(currentSeason, currentEpisode).orEmpty()
+                                chosenVoice = savedSelection?.voice?.takeIf { id ->
+                                    voices.any { it.id == id }
+                                } ?: voices.firstOrNull()?.id.orEmpty()
+                            },
+                            label = { Text("Collapse") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = sourceAccent,
+                                selectedLabelColor = Color.White
+                            )
+                        )
+                    }
+
+                    if (!rezkaAvailable || !collapseAvailable) {
+                        val status = buildList {
+                            if (!rezkaAvailable) add(
+                                if (!loadDone) "Rezka: проверяем"
+                                else "Rezka: нет свободного потока"
+                            )
+                            if (!collapseAvailable) add(
+                                if (collapseLoading) "Collapse: проверяем"
+                                else "Collapse: " + collapseResult?.reason.orEmpty()
+                                    .ifBlank { "нет потока" }
+                            )
+                        }.joinToString(" · ")
+                        if (status.isNotBlank()) {
                             Text(
-                                sourceStatus,
+                                status,
                                 color = appMuted,
-                                style = MaterialTheme.typography.labelSmall
+                                style = MaterialTheme.typography.bodySmall
                             )
                         }
                     }
-                    Text("Озвучка", style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold)
+
+                    Text(
+                        "Озвучка",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
                     if (availableVoices.isEmpty()) {
-                        Text(if (!loadDone) "Ищем озвучки…" else
-                            "Зеркало не предоставило список озвучек.",
-                            color = appMuted, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            if (!sourceAvailable) "У этого источника сейчас нет доступного потока."
+                            else "Источник не предоставил озвучки.",
+                            color = appMuted,
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     } else {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
                             availableVoices.forEach { candidate ->
+                                val selectable = chosenProvider == "collapse" ||
+                                    !candidate.requiresSubscription
                                 FilterChip(
                                     selected = chosenVoice == candidate.id,
-                                    onClick = {
-                                        if (chosenVoice != candidate.id) {
-                                            chosenVoice = candidate.id
-                                        }
-                                    },
+                                    enabled = selectable,
+                                    onClick = { chosenVoice = candidate.id },
                                     label = {
-                                        val status = displayedAvailability[candidate.id]
                                         Text(
-                                            candidate.name + when (status) {
-                                                VoiceAvailability.AVAILABLE -> " · доступна"
-                                                VoiceAvailability.SUBSCRIPTION -> " · подписка"
-                                                VoiceAvailability.PREVIEW -> " · ролик"
-                                                VoiceAvailability.UNAVAILABLE -> " · недоступна"
-                                                null -> ""
-                                            },
+                                            candidate.name +
+                                                if (candidate.requiresSubscription) " · подписка" else "",
                                             maxLines = 2
                                         )
                                     },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = if (
-                                            displayedAvailability[candidate.id] == VoiceAvailability.AVAILABLE
-                                        ) appBlue.copy(alpha = 0.26f) else appBlue.copy(alpha = 0.14f),
-                                        selectedLabelColor = appBlue
+                                        selectedContainerColor = sourceAccent,
+                                        selectedLabelColor = Color.White
                                     )
                                 )
                             }
                         }
                     }
+
                     if (showEpisodes) {
-                        Text("Сезон", style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Сезон",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             seasons.forEach { value ->
                                 FilterChip(
                                     selected = value == currentSeason,
-                                    onClick = { chosenSeason = value; chosenEpisode = "" },
+                                    onClick = {
+                                        chosenSeason = value
+                                        chosenEpisode = ""
+                                        if (chosenProvider == "collapse") {
+                                            val firstEpisode = pageEpisodes.firstOrNull { it.season == value }
+                                            val voices = collapseMedia?.voices(
+                                                value, firstEpisode?.id.orEmpty()
+                                            ).orEmpty()
+                                            chosenVoice = voices.firstOrNull()?.id.orEmpty()
+                                        }
+                                    },
                                     label = { Text("S" + value) }
                                 )
                             }
                         }
-                        Text("Серия", style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Серия",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             currentEpisodes.forEach { entry ->
                                 FilterChip(
                                     selected = entry.id == currentEpisode,
-                                    onClick = { chosenSeason = currentSeason; chosenEpisode = entry.id },
+                                    onClick = {
+                                        chosenSeason = currentSeason
+                                        chosenEpisode = entry.id
+                                        if (chosenProvider == "collapse") {
+                                            val voices = collapseMedia?.voices(
+                                                currentSeason, entry.id
+                                            ).orEmpty()
+                                            chosenVoice = voices.firstOrNull()?.id.orEmpty()
+                                        }
+                                    },
                                     label = { Text("E" + entry.id) }
                                 )
                             }
                         }
                     }
-                    if (voiceSelected?.requiresSubscription == true) {
-                        Text("Для этой озвучки источник может потребовать подписку.",
-                            color = appMuted, style = MaterialTheme.typography.bodySmall)
-                    }
+
                     HorizontalDivider()
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Button(
                             onClick = {
-                                if (voiceSelected != null) {
+                                val selected = availableVoices.firstOrNull { it.id == chosenVoice }
+                                if (selected != null && sourceAvailable) {
                                     showWatchMenu = false
-                                    onWatch(resolvedFilmUrl, voiceSelected.id,
-                                        if (showEpisodes) currentSeason else "",
-                                        if (showEpisodes) currentEpisode else "")
+                                    onWatch(
+                                        WatchRequest(
+                                            provider = chosenProvider,
+                                            filmUrl = resolvedFilmUrl,
+                                            voice = selected.id,
+                                            season = if (showEpisodes) currentSeason else "",
+                                            episode = if (showEpisodes) currentEpisode else "",
+                                            kinopoiskId = resolvedKinopoiskId,
+                                            imdbId = resolvedImdbId
+                                        )
+                                    )
                                 }
                             },
-                            enabled = WatchChoicePolicy.validChoice(availableVoices, chosenVoice) &&
-                                voiceSelected?.requiresSubscription != true,
+                            enabled = sourceAvailable && voiceSelected != null &&
+                                voiceSelected.requiresSubscription != true,
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         ) {
