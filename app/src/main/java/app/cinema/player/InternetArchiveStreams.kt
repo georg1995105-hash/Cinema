@@ -57,27 +57,16 @@ internal object InternetArchiveStreams {
         return data
     }
 
-    /** A short, verified playable-content tab; it must not pretend to be a
-     * general catalogue of commercial films, or offer a dead Watch button. */
-    suspend fun catalog(context: Context, kind: String): List<CatalogMovie> = withContext(Dispatchers.IO) {
-        if (kind == "Сериалы" || kind == "Мультфильмы") return@withContext emptyList()
-        val data = verifiedMetadata()
-        val files = data.optJSONArray("files") ?: return@withContext emptyList()
-        var hasPublishedMp4 = false
-        for (i in 0 until files.length()) {
-            val entry = files.optJSONObject(i) ?: continue
-            if (entry.optString("name") in videoFiles.map { it.first } &&
-                entry.optLong("size") > 10_000_000 && entry.optString("private").isBlank()) {
-                hasPublishedMp4 = true
-                break
-            }
-        }
-        if (!hasPublishedMp4) return@withContext emptyList()
-        listOf(CatalogMovie(
+    /** A known archived title is stable catalogue data. Its actual licence
+     * and byte-range video availability are verified at detail/watch time.
+     * A temporarily unreachable video server must NOT hide the title. */
+    suspend fun catalog(context: Context, kind: String): List<CatalogMovie> {
+        if (kind == "Сериалы" || kind == "Мультфильмы") return emptyList()
+        return listOf(CatalogMovie(
             CinemetaCatalog.movieUrl("movie", imdbId),
             "Ночь живых мертвецов",
             "https://archive.org/services/img/$archiveId",
-            "1968 · США · Ужасы · свободный просмотр"
+            "1968 · США · Ужасы"
         ))
     }
 
