@@ -46,7 +46,8 @@ internal object MirrorVoiceDiscovery {
             isCamrip:flag(['data-camrip','data-is-camrip','data-is_camrip'],4),
             isAds:flag(['data-ads','data-is-ads','data-is_ads'],5),
             isDirector:flag(['data-director','data-is-director','data-is_director'],6),
-            requiresSubscription:requiresSubscription});
+            requiresSubscription:requiresSubscription,
+            favs:attr(['data-favs', 'data-fav', 'data-favorites']).slice(0,256)});
         }
         if (attrs.some(function(e) {
           return e.matches('.active, .selected, :checked, [aria-selected="true"]');
