@@ -20,6 +20,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -202,8 +203,21 @@ private fun DetailsBody(
             OutlinedButton(onClick = retry) { Text("Повторить") }
         }
         if (info != null) {
-            if (info.rating.isNotBlank()) Text("IMDb: ${info.rating}", color = appBlue,
-                fontWeight = FontWeight.Medium)
+            if (info.source.isNotBlank()) {
+                val uriHandler = LocalUriHandler.current
+                Text(
+                    text = "Источник сведений: ${info.source}",
+                    color = appBlue,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.clickable {
+                        uriHandler.openUri(info.sourceUrl.ifBlank { TvMazeSeries.attributionUrl })
+                    }
+                )
+            }
+            if (info.rating.isNotBlank()) Text(
+                (if (info.source.startsWith("TVmaze")) "Рейтинг TVmaze: " else "IMDb: ") + info.rating,
+                color = appBlue, fontWeight = FontWeight.Medium
+            )
             if (info.description.isNotBlank()) {
                 Text("Описание", style = MaterialTheme.typography.titleMedium)
                 Text(info.description)
