@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Rule
@@ -16,6 +17,9 @@ class NavigationFlowTest {
         val store = LocalStore(compose.activity)
         store.saveSearch("Бригада")
         try {
+            compose.onNodeWithText("Lift · Смотреть").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Назад").performClick()
+            compose.waitForIdle()
             compose.onNodeWithText("Популярное").assertIsDisplayed()
             compose.onNode(hasText("Поиск") and hasClickAction()).performClick()
             compose.onNodeWithText("Недавние запросы").assertIsDisplayed()
