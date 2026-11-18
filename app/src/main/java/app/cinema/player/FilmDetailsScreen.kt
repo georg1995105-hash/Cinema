@@ -1251,6 +1251,15 @@ internal fun FilmDetails(
                             shape = RoundedCornerShape(12.dp)
                         ) { Text("На сайте") }
                     }
+                    if (!sourceAvailable || availableVoices.isEmpty()) {
+                        TextButton(onClick = {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as? android.content.ClipboardManager
+                            clipboard?.setPrimaryClip(android.content.ClipData.newPlainText(
+                                "Cinema diagnostics", MirrorTrace.report()
+                            ))
+                        }) { Text("Скопировать диагностику подключения") }
+                    }
                     Spacer(Modifier.height(10.dp))
                 }
             }
