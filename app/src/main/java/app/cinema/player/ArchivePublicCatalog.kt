@@ -53,7 +53,7 @@ internal object ArchivePublicCatalog {
 
     // A handful of inspected records remain visible while the discovery API
     // is unavailable. They are still checked for actual MP4 on the film page.
-    private fun baseline(): List<CatalogMovie> = listOf(
+    fun featured(): List<CatalogMovie> = listOf(
         CatalogMovie(
             CinemetaCatalog.movieUrl("movie", "tt0063350"),
             "Ночь живых мертвецов",
@@ -121,7 +121,7 @@ internal object ArchivePublicCatalog {
 
     suspend fun home(kind: String): List<CatalogMovie> = withContext(Dispatchers.IO) {
         if (kind == "Сериалы" || kind == "Мультфильмы") return@withContext emptyList()
-        val initial = baseline()
+        val initial = featured()
         val found = try { discover() } catch (e: Exception) { emptyList() }
         (initial + found).distinctBy { it.url }.take(50)
     }
