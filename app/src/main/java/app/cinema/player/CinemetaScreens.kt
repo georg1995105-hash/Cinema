@@ -51,7 +51,12 @@ internal fun CinemetaGrid(
             val items = if (searchText.isBlank())
                 CinemetaCatalog.home(context, tab, kind)
             else CinemetaCatalog.search(context, searchText, kind)
+            // Render confirmed cards immediately. Optional localized Russian
+            // titles are filled in later; the first screen is never delayed by
+            // Wikidata translation requests.
             movies = items
+            loading = false
+            movies = RussianMovieTitles.enrich(items)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
