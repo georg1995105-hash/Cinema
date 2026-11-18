@@ -77,13 +77,8 @@ internal object InternetArchiveStreams {
         } ?: info.optString("date").take(4).takeIf {
             it.matches(Regex("[0-9]{4}"))
         }.orEmpty()
-        val creator = info.opt("creator")
-        val director = when (creator) {
-            is org.json.JSONArray -> (0 until minOf(creator.length(), 12))
-                .map { creator.optString(it) }.filter(String::isNotBlank)
-            is String -> creator.take(200).takeIf(String::isNotBlank)?.let(::listOf).orEmpty()
-            else -> emptyList()
-        }
+        // Archive's generic "creator" field is not necessarily the film
+        // director. Do not invent director or cast credits from it.
         val item = CatalogMovie(
             if (legacy) CinemetaCatalog.movieUrl("movie", imdbId) else ArchivePublicCatalog.url(id),
             title, "https://archive.org/services/img/$id",
@@ -97,7 +92,7 @@ internal object InternetArchiveStreams {
             country = "",
             runtime = "",
             genres = emptyList(),
-            directors = director,
+            directors = emptyList(),
             actors = emptyList(),
             episodes = emptyList(),
             source = "Internet Archive · Public Domain/CC0 (указано загрузившим)",
