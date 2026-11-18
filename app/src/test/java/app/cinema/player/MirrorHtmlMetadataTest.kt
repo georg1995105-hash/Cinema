@@ -36,6 +36,54 @@ class MirrorHtmlMetadataTest {
         assertEquals("1",data.player!!.episodes.single().id)
     }
 
+    @Test fun referencePersonsListHolderRestoresActorsAndDirectors() {
+        val html = """
+          <article class="b-post">
+            <div class="b-post__title"><h1>История</h1></div>
+            <div class="b-post__description_text">Описание сюжета.</div>
+            <table class="b-post__info"><tr><td>Страна</td><td>Россия</td></tr></table>
+            <div class="persons-list-holder" data-id="cast">
+              <span class="inline"><h2>В ролях актеры</h2></span>
+              <span class="item" data-pid="31" data-photo="/images/actor.jpg">
+                <a href="/person/31/"><span class="person-name-item">Актёр Первый</span></a>
+              </span>
+              <span class="item" data-pid="32" data-photo="nopersonphoto">
+                <span class="person-name-item">Актриса Вторая</span>
+              </span>
+            </div>
+            <div class="persons-list-holder" data-id="director">
+              <span class="inline"><h2>Режиссёры</h2></span>
+              <span class="item" data-photo="/images/director.jpg">
+                <a href="/person/33/"><span class="person-name-item">Режиссёр Третий</span></a>
+              </span>
+            </div>
+          </article>
+        """
+        val parsed = requireNotNull(MirrorHtmlMetadata.parse(url, html).info)
+        assertEquals(listOf("Актёр Первый", "Актриса Вторая"), parsed.cast.map { it.name })
+        assertEquals("https://rezka.example/images/actor.jpg", parsed.cast[0].photo)
+        assertEquals("https://rezka.example/person/31/", parsed.cast[0].url)
+        assertEquals("", parsed.cast[1].photo)
+        assertEquals(listOf("Режиссёр Третий"), parsed.directors.map { it.name })
+        assertEquals("https://rezka.example/images/director.jpg", parsed.directors[0].photo)
+    }
+
+    @Test fun unknownPersonGroupsDoNotBecomeFakeActors() {
+        val html = """
+          <div class="b-post">
+            <h1 class="b-post__title">История</h1>
+            <div class="b-post__description_text">Описание.</div>
+            <div class="persons-list-holder">
+              <h2>Рекомендованные люди</h2>
+              <span class="item"><span class="person-name-item">Не актёр</span></span>
+            </div>
+          </div>
+        """
+        val parsed = requireNotNull(MirrorHtmlMetadata.parse(url, html).info)
+        assertTrue(parsed.cast.isEmpty())
+        assertTrue(parsed.directors.isEmpty())
+    }
+
     @Test fun premiumLandingPageIsNotMistakenForARealMovie() {
         val html="<html><title>HDRezka Premium</title><body>Premium подписка</body></html>"
         val result=MirrorHtmlMetadata.parse(url,html)
