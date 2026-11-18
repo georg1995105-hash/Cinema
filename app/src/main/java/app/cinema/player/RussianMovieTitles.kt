@@ -78,7 +78,7 @@ internal object RussianMovieTitles {
         }
         items.map { movie ->
             val id = CinemetaCatalog.identity(movie.url)?.second
-            val title = synchronized(cache) { cache[id] }
+            val title = id?.let { known -> synchronized(cache) { cache[known] } }
             if (title != null && title.isNotBlank()) movie.copy(title = title)
             else movie
         }
