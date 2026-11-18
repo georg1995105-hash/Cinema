@@ -29,4 +29,32 @@ class MirrorGuestCookiesTest {
     @Test fun guestProfileWorksWithoutAccountOrChallenge() {
         assertEquals("hdmbbs=1", MirrorGuestCookies.fromStoredCookies(emptyList()))
     }
+
+    @Test fun sourceAccountSessionIsNotSilentlyDowngradedToGuest() {
+        val film = "https://hdrzk.org/series/123-show.html"
+        val cookies = listOf(
+            "dle_user_id=123; dle_password=sourceSession; hdmbbs=1"
+        )
+        assertTrue(MirrorGuestCookies.hasAccountSession(cookies))
+        val header = MirrorGuestCookies.cookieHeaderFor(
+            "https://hdrzk.org/ajax/get_cdn_series/", film, cookies)
+        assertTrue(header.contains("dle_user_id=123"))
+        assertTrue(header.contains("dle_password=sourceSession"))
+        assertEquals("", MirrorGuestCookies.cookieHeaderFor(
+            "https://unrelated.example/ajax/get_cdn_series/", film, cookies))
+    }
+
+    @Test fun anonymousMirrorStillUsesGuestProfileAndChallenge() {
+        val film = "https://hdrzk.org/series/123-show.html"
+        val cookies = listOf("hdmbbs=0; techaro.lol-anubis-auth=ok")
+        assertFalse(MirrorGuestCookies.hasAccountSession(cookies))
+        assertEquals("hdmbbs=1; techaro.lol-anubis-auth=ok",
+            MirrorGuestCookies.cookieHeaderFor(
+                "https://hdrzk.org/ajax/get_cdn_series/", film, cookies))
+        assertFalse(MirrorGuestCookies.hasAccountSession(listOf(
+            "unrelated_dle_user_id=123; dle_password=sourceSession")))
+        assertFalse(MirrorGuestCookies.hasAccountSession(listOf(
+            "dle_user_id=; dle_password=sourceSession")))
+    }
+
 }
