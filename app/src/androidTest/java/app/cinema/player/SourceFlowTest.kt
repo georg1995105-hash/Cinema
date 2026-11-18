@@ -328,6 +328,54 @@ class SourceFlowTest {
         }
     }
 
+    @Test fun selectedMirrorWinsOverFastFallbackWhenItServesTheRealFilm() {
+        val cert = HeldCertificate.Builder().commonName("localhost")
+            .addSubjectAlternativeName("localhost").build()
+        val serverTls = HandshakeCertificates.Builder().heldCertificate(cert).build()
+        val trust = HandshakeCertificates.Builder()
+            .addTrustedCertificate(cert.certificate).build()
+        MockWebServer().use { selected ->
+            MockWebServer().use { fallback ->
+                selected.useHttps(serverTls.sslSocketFactory(), false)
+                fallback.useHttps(serverTls.sslSocketFactory(), false)
+                selected.start()
+                fallback.start()
+                val page = selected.url("/films/drama/12-brigada.html")
+                    .newBuilder().host("localhost").build().toString()
+                val fallbackOrigin = fallback.url("/")
+                    .newBuilder().host("localhost").build().toString()
+                val filmHtml = """
+                    <html><body>
+                    <div class="b-post__title"><h1>Бригада</h1></div>
+                    <div class="b-post__description_text">Страница выбранного зеркала.</div>
+                    <script>sof.tv.initCDNMoviesEvents(12, 7, 0, 0, 0);</script>
+                    <ul id="translators-list"><li class="active" data-translator_id="7">Дубляж</li></ul>
+                    </body></html>
+                """.trimIndent()
+                selected.enqueue(MockResponse().setResponseCode(200)
+                    .setBodyDelay(500, TimeUnit.MILLISECONDS)
+                    .addHeader("Content-Type", "text/html; charset=UTF-8")
+                    .setBody(filmHtml))
+                fallback.enqueue(MockResponse().setResponseCode(200).setBody(filmHtml))
+                val client = MirrorHttp.client.newBuilder()
+                    .sslSocketFactory(trust.sslSocketFactory(), trust.trustManager)
+                    .followRedirects(false).followSslRedirects(false).build()
+                val resolved = runBlocking {
+                    MirrorNetworkSource.resolveFilm(
+                        page, listOf(fallbackOrigin), "Cinema-Android-Test", client = client
+                    )
+                }
+                assertEquals(page, resolved.finalUrl)
+                assertEquals("", resolved.reason)
+                assertEquals("Бригада", resolved.metadata?.info?.title)
+                assertEquals("Дубляж", resolved.metadata?.player?.voices?.single()?.name)
+                assertEquals(1, selected.requestCount)
+                assertEquals("Fallback must not replace a valid selected mirror", 0,
+                    fallback.requestCount)
+            }
+        }
+    }
+
     @Test fun launcherShowsCinemaWithAnAdaptiveIcon() {
         val context = instrumentation.targetContext
         val activity = context.packageManager.getActivityInfo(
