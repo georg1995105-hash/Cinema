@@ -144,18 +144,20 @@ internal object FilmPageParser {
              });
            } catch(e) {}
          });
-         function addPerson(role, rawName, address, image) {
+         function addPerson(role, rawName, address, image, rawPid) {
            var name = norm(rawName);
            if (!name || name.length >= 95) return;
            var url = typeof address === 'string' && address ? absolute(address) : '';
            var photo = typeof image === 'string' && image ? absolute(image) : '';
+           var pid = /^\\d{1,12}$/.test(String(rawPid || '')) ? String(rawPid) : '';
            var previous = people.find(function(entry) { return entry.role === role &&
              entry.name.toLowerCase().replace(/ё/g,'е') === name.toLowerCase().replace(/ё/g,'е'); });
            photo = photo || window.__kinoPortraits?.images[url] || '';
            if (previous) {
              previous.url = previous.url || url;
              previous.photo = previous.photo || photo;
-           } else people.push({name:name,url:url,photo:photo,role:role});
+             previous.pid = previous.pid || pid;
+           } else people.push({name:name,url:url,photo:photo,role:role,pid:pid});
          }
          function person(node, role) {
            var entry = node.closest('.b-post__people_item, .b-post__actors_item, .b-post__person_item, .person-name-item, [itemprop~="actor"], [itemprop~="actors"], [itemprop~="director"]') || node;
@@ -164,7 +166,8 @@ internal object FilmPageParser {
              anchor?.querySelector('[itemprop~="name"]') || anchor || entry;
            var name = label.getAttribute('content') || label.textContent || entry.querySelector('img')?.getAttribute('alt');
            var photo = kinoPosters(entry,document.baseURI)[0] || '';
-           addPerson(role, name, anchor?.getAttribute('href'), photo);
+           var pid = entry.getAttribute('data-pid') || entry.closest('[data-pid]')?.getAttribute('data-pid') || '';
+           addPerson(role, name, anchor?.getAttribute('href'), photo, pid);
          }
          document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(row) {
            var cells = row.cells;
@@ -202,7 +205,8 @@ internal object FilmPageParser {
                label.getAttribute('data-photo') ||
                item.querySelector('[data-photo]')?.getAttribute('data-photo') || '';
              if (/^(?:null|undefined)$/i.test(photo) || /nopersonphoto/i.test(photo)) photo = '';
-             addPerson(role, name, link?.getAttribute('href'), photo);
+             addPerson(role, name, link?.getAttribute('href'), photo,
+               item.getAttribute('data-pid') || label.getAttribute('data-pid'));
            });
          });
          var profiles = people.slice().sort(function(a,b) {return (a.role !== "actor") - (b.role !== "actor")}).filter(function(p) {
