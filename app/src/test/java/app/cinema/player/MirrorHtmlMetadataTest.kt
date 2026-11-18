@@ -104,4 +104,23 @@ class MirrorHtmlMetadataTest {
         assertFalse(voices.first { it.id == "17" }.requiresSubscription)
         assertTrue(voices.first { it.id == "44" }.requiresSubscription)
     }
+    @Test fun nativeFilmMetadataPreservesServerIssuedRequestParameters() {
+        val html = """
+          <div class="b-post">
+            <h1 class="b-post__title">Бригада</h1>
+            <div class="b-post__description_text">Сериал.</div>
+            <input type="hidden" id="favs" value="abc_12"/>
+            <ul id="translators-list">
+              <li data-translator_id="17">Обычная</li>
+            </ul>
+            <script>initCDNSeriesEvents(123,17,0,0,0);</script>
+          </div>
+        """
+        val player = requireNotNull(MirrorHtmlMetadata.parse(url, html).player)
+        assertEquals("abc_12", player.favs)
+        val fields = MirrorPlaybackRequest.stream(player, "17", "1", "1")
+        assertEquals("abc_12", fields["favs"])
+        assertEquals("get_stream", fields["action"])
+    }
+
 }
