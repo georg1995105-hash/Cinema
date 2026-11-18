@@ -57,11 +57,13 @@ internal object MirrorHtmlMetadata {
         val descriptionNodes = document.select(
             ".b-post__description_text, .b-post__description [itemprop=description], .b-post__description > p"
         )
-        val description = descriptionNodes.firstNotNullOfOrNull { entry ->
-            val clean = entry.clone()
-            clean.select("script, style, noscript, [data-ad], .premium-promo").remove()
-            FilmTextSanitizer.description(clean.text()).takeIf(String::isNotBlank)
-        }.orEmpty()
+        val description = (descriptionNodes.toList() +
+            listOfNotNull(document.selectFirst(".b-post__description")))
+            .firstNotNullOfOrNull { entry ->
+                val clean = entry.clone()
+                clean.select("script, style, noscript, [data-ad], .premium-promo").remove()
+                FilmTextSanitizer.description(clean.text()).takeIf(String::isNotBlank)
+            }.orEmpty()
         val facts = mutableListOf<Pair<String, String>>()
         val actors = linkedMapOf<String, FilmPerson>()
         val directors = linkedMapOf<String, FilmPerson>()
@@ -114,10 +116,17 @@ internal object MirrorHtmlMetadata {
         val selectedId = init?.groupValues?.getOrNull(3).orEmpty()
         val voices = linkedMapOf<String, MirrorVoice>()
         for (entry in document.select("#translators-list li, .b-translator__item, [data-translator_id], [data-translator-id], [data-translation-id]")) {
+            val inner = entry.selectFirst(
+                "[data-translator_id], [data-translator-id], [data-translation-id], [data-id]")
             val id = listOf("data-translator_id","data-translator-id","data-translation-id","data-id")
-                .firstNotNullOfOrNull { entry.attr(it).takeIf(String::isNotBlank) }.orEmpty()
+                .firstNotNullOfOrNull { key ->
+                    entry.attr(key).takeIf(String::isNotBlank)
+                        ?: inner?.attr(key)?.takeIf(String::isNotBlank)
+                }.orEmpty()
             if (!id.matches(Regex("[0-9]{1,12}"))) continue
-            val name = entry.attr("data-title").ifBlank { entry.text() }.trim().take(75)
+            val name = entry.attr("data-title").ifBlank {
+                inner?.attr("data-title").orEmpty()
+            }.ifBlank { entry.text() }.trim().take(75)
             if (name.isBlank()) continue
             val requiresSubscription = entry.hasClass("b-translator__premium") ||
                 entry.attr("data-premium") == "1" || entry.attr("data-access") == "premium"
