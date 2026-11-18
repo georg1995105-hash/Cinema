@@ -221,45 +221,53 @@ internal object MirrorNetworkSource {
                     .filter(SourceRules::isValidHttpsUrl)
                     .mapNotNull { MirrorFilmUrl.changeOrigin(url, it) }
                     .forEach(::add)
-            }.distinct().take(10)
+            }.distinct().take(30)
 
-            val completed = Channel<FilmResult>(Channel.UNLIMITED)
-            val jobs = candidates.map { candidate ->
-                launch(Dispatchers.IO) {
-                    completed.send(film(candidate, userAgent, mirrors))
-                }
-            }
             var bestInfo: FilmResult? = null
             var bestFailure: FilmResult? = null
             var incompatiblePlayerSeen = false
-            try {
-                repeat(candidates.size) {
-                    val result = completed.receive()
-                    val player = result.metadata?.player
-                    if (player != null) {
-                        val compatible = requiredVoice.isBlank() ||
-                            MirrorVoiceSelection.supports(player, requiredVoice)
-                        if (compatible) {
-                            jobs.forEach { it.cancel() }
-                            return@supervisorScope result
-                        }
-                        incompatiblePlayerSeen = true
+
+            // The reference app has a much larger public mirror pool. Do not launch
+            // two dozen Anubis/HTML requests at once: try bounded waves and stop
+            // immediately when a mirror exposes a real player.
+            for (batch in candidates.chunked(6)) {
+                val completed = Channel<FilmResult>(Channel.UNLIMITED)
+                val jobs = batch.map { candidate ->
+                    launch(Dispatchers.IO) {
+                        completed.send(film(candidate, userAgent, mirrors))
                     }
-                    if (bestInfo == null && result.metadata?.info != null) bestInfo = result
-                    if (bestFailure == null && result.reason.isNotBlank()) bestFailure = result
                 }
-                if (requiredVoice.isNotBlank() && incompatiblePlayerSeen) {
-                    FilmResult(
-                        url,
-                        reason = "Выбранная озвучка недоступна на проверенных зеркалах."
-                    )
-                } else {
-                    bestInfo ?: bestFailure
-                        ?: FilmResult(url, reason = "Зеркала не предоставили страницу фильма.")
+                try {
+                    repeat(batch.size) {
+                        val result = completed.receive()
+                        val player = result.metadata?.player
+                        if (player != null) {
+                            val compatible = requiredVoice.isBlank() ||
+                                MirrorVoiceSelection.supports(player, requiredVoice)
+                            if (compatible) {
+                                jobs.forEach { it.cancel() }
+                                return@supervisorScope result
+                            }
+                            incompatiblePlayerSeen = true
+                        }
+                        if (bestInfo == null && result.metadata?.info != null) bestInfo = result
+                        if (bestFailure == null && result.reason.isNotBlank())
+                            bestFailure = result
+                    }
+                } finally {
+                    jobs.forEach { it.cancel() }
+                    completed.close()
                 }
-            } finally {
-                jobs.forEach { it.cancel() }
-                completed.close()
+            }
+
+            if (requiredVoice.isNotBlank() && incompatiblePlayerSeen) {
+                FilmResult(
+                    url,
+                    reason = "Выбранная озвучка недоступна на проверенных зеркалах."
+                )
+            } else {
+                bestInfo ?: bestFailure
+                    ?: FilmResult(url, reason = "Зеркала не предоставили страницу фильма.")
             }
         }
 
