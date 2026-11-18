@@ -1,0 +1,228 @@
+package app.cinema.player
+
+import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.Cache
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.io.IOException
+import java.net.URI
+import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
+
+/**
+ * Independent metadata provider. Cinemeta is not a stream provider.
+ * No HTML mirrors, WebView, cookies or third-party login are used here.
+ * Only the public Stremio/Cinemeta catalog and meta resources are requested.
+ */
+internal object CinemetaCatalog {
+    private const val origin = "https://v3-cinemeta.strem.io"
+    private val idPattern = Regex("tt[0-9]{5,12}")
+    private val cache = LinkedHashMap<String, Pair<Long, String>>()
+    private var client: OkHttpClient? = null
+
+    @Synchronized
+    private fun http(context: Context): OkHttpClient {
+        return client ?: OkHttpClient.Builder()
+            .cache(Cache(File(context.applicationContext.cacheDir, "cinema_metadata_http"), 32L * 1024 * 1024))
+            .connectTimeout(7, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .callTimeout(14, TimeUnit.SECONDS)
+            .followSslRedirects(false)
+            .build().also { client = it }
+    }
+
+    /** This path also serves as a durable, valid-HTTPS identity for local favourites/history. */
+    fun movieUrl(type: String, id: String): String =
+        "$origin/meta/${if (type == "series") "series" else "movie"}/$id.json"
+
+    fun isMovieUrl(value: String): Boolean = runCatching {
+        val uri = URI(value)
+        uri.scheme == "https" && uri.host == "v3-cinemeta.strem.io" &&
+            Regex("^/meta/(movie|series)/tt[0-9]{5,12}\\.json$").matches(uri.path)
+    }.getOrDefault(false)
+
+    fun identity(value: String): Pair<String, String>? {
+        if (!isMovieUrl(value)) return null
+        val parts = URI(value).path.split('/')
+        return parts[2] to parts[3].removeSuffix(".json")
+    }
+
+    private fun text(data: JSONObject, key: String) =
+        data.optString(key).takeIf { it != "null" }.orEmpty().trim()
+
+    private fun names(array: JSONArray?): List<String> = buildList {
+        if (array != null) for (i in 0 until minOf(array.length(), 24)) {
+            val name = array.optString(i).trim()
+            if (name.isNotBlank()) add(name)
+        }
+    }
+
+    private val localizedGenre = mapOf(
+        "Action" to "Боевик", "Adventure" to "Приключения", "Animation" to "Мультфильм",
+        "Biography" to "Биография", "Comedy" to "Комедия", "Crime" to "Криминал",
+        "Documentary" to "Документальный", "Drama" to "Драма", "Family" to "Семейный",
+        "Fantasy" to "Фэнтези", "History" to "История", "Horror" to "Ужасы",
+        "Mystery" to "Детектив", "Romance" to "Мелодрама", "Sci-Fi" to "Фантастика",
+        "Sport" to "Спорт", "Thriller" to "Триллер", "War" to "Военный",
+        "Western" to "Вестерн"
+    )
+    private fun detailsText(data: JSONObject): String {
+        val year = text(data, "year").ifBlank { text(data, "releaseInfo") }
+        val country = text(data, "country").replace("Russia", "Россия")
+            .replace("United States", "США").replace("United Kingdom", "Великобритания")
+        val genres = names(data.optJSONArray("genres") ?: data.optJSONArray("genre"))
+            .take(3).map { localizedGenre[it] ?: it }
+        return (listOf(year, country) + genres).filter { it.isNotBlank() }.joinToString(" · ").take(180)
+    }
+
+    fun parseMovie(data: JSONObject): CatalogMovie? {
+        val type = text(data, "type").takeIf { it in listOf("movie", "series") } ?: return null
+        val id = text(data, "id").ifBlank { text(data, "imdb_id") }
+        if (!idPattern.matches(id)) return null
+        val title = text(data, "name").ifBlank { text(data, "title") }.take(180)
+        if (title.isBlank()) return null
+        val poster = text(data, "poster").takeIf(MirrorPoster::isPhoto).orEmpty()
+        return CatalogMovie(movieUrl(type, id), title, poster, detailsText(data))
+    }
+
+    private fun read(context: Context, path: String): JSONObject {
+        require(path.startsWith("/catalog/") || path.startsWith("/meta/"))
+        val url = "$origin$path"
+        val now = System.currentTimeMillis()
+        synchronized(cache) {
+            cache[url]?.let { (at, payload) ->
+                if (now - at < 15 * 60_000L) return JSONObject(payload)
+            }
+        }
+        val request = Request.Builder().url(url).header("Accept", "application/json")
+            .header("User-Agent", "Cinema/0.4 (Android; catalog client)")
+            .get().build()
+        val response = http(context).newCall(request).execute()
+        response.use {
+            if (!it.isSuccessful) throw IOException("Каталог ответил HTTP ${it.code}")
+            if (it.request.url.host != "v3-cinemeta.strem.io" &&
+                it.request.url.host != "cinemeta-catalogs.strem.io") {
+                throw IOException("Неожиданный сервер каталога")
+            }
+            val body = it.body ?: throw IOException("Пустой ответ каталога")
+            val payload = body.string()
+            if (payload.length > 4_000_000) throw IOException("Слишком большой ответ каталога")
+            val json = try { JSONObject(payload) }
+                       catch (_: Exception) { throw IOException("Некорректные данные каталога") }
+            synchronized(cache) {
+                cache[url] = now to payload
+                while (cache.size > 32) cache.remove(cache.keys.first())
+            }
+            return json
+        }
+    }
+
+    fun parseList(json: JSONObject): List<CatalogMovie> {
+        val array = json.optJSONArray("metas") ?: throw IOException("Отсутствует список фильмов")
+        return buildList {
+            val seen = HashSet<String>()
+            for (index in 0 until minOf(array.length(), 75)) {
+                val item = array.optJSONObject(index)?.let(::parseMovie) ?: continue
+                if (seen.add(item.url)) add(item)
+            }
+        }
+    }
+
+    suspend fun home(context: Context, tab: String, kind: String): List<CatalogMovie> = withContext(Dispatchers.IO) {
+        val types = if (kind == "Фильмы") listOf("movie")
+                    else if (kind == "Сериалы") listOf("series")
+                    else listOf("movie", "series")
+        val result = mutableListOf<CatalogMovie>()
+        var failure: Throwable? = null
+        for (type in types) {
+            val catalogPath = when (tab) {
+                "Новинки" -> "/catalog/$type/year/genre=2026.json"
+                "Высокий рейтинг" -> "/catalog/$type/imdbRating.json"
+                else -> "/catalog/$type/top.json"
+            }
+            try {
+                result.addAll(parseList(read(context, catalogPath)))
+            } catch (e: Exception) { failure = e }
+        }
+        if (result.isEmpty() && failure != null) throw IOException(failure.message ?: "Каталог недоступен")
+        val filtered = if (kind == "Мультфильмы") result.filter {
+            it.details.contains("Мультфильм", ignoreCase = true)
+        } else result
+        filtered.distinctBy { it.url }
+    }
+
+    suspend fun search(context: Context, query: String, kind: String): List<CatalogMovie> = withContext(Dispatchers.IO) {
+        val q = query.trim().take(110)
+        if (q.isBlank()) return@withContext emptyList()
+        val encoded = URLEncoder.encode(q, "UTF-8").replace("+", "%20")
+        val types = when (kind) {
+            "Фильмы" -> listOf("movie")
+            "Сериалы" -> listOf("series")
+            else -> listOf("series", "movie")
+        }
+        val items = mutableListOf<CatalogMovie>()
+        var successes = 0
+        var failure: Throwable? = null
+        for (type in types) {
+            try {
+                items.addAll(parseList(read(context, "/catalog/$type/top/search=$encoded.json")))
+                successes++
+            } catch (e: Exception) { failure = e }
+        }
+        if (successes == 0) throw IOException(failure?.message ?: "Поиск недоступен")
+        items.distinctBy { it.url }.let { found ->
+            if (kind == "Мультфильмы")
+                found.filter { it.details.contains("Мультфильм", ignoreCase = true) }
+            else found
+        }
+    }
+
+    suspend fun metadata(context: Context, url: String): CinemetaDetails = withContext(Dispatchers.IO) {
+        val (type, id) = identity(url) ?: throw IOException("Неверный идентификатор фильма")
+        parseDetails(read(context, "/meta/$type/$id.json"), type, id)
+    }
+
+    fun parseDetails(json: JSONObject, type: String, id: String): CinemetaDetails {
+        val meta = json.optJSONObject("meta") ?: throw IOException("Карточка фильма отсутствует")
+        val item = parseMovie(meta) ?: throw IOException("Неверная карточка фильма")
+        if (identity(item.url) != type to id) {
+            throw IOException("Несоответствие данных фильма")
+        }
+        val episodes = buildList {
+            val array = meta.optJSONArray("videos")
+            if (array != null && type == "series") for (i in 0 until minOf(array.length(), 1200)) {
+                val video = array.optJSONObject(i) ?: continue
+                val season = video.optInt("season")
+                val episode = video.optInt("episode")
+                if (season > 0 && episode > 0) add(CinemetaEpisode(
+                    season, episode, text(video, "title").ifBlank { "Серия $episode" },
+                    text(video, "released")
+                ))
+            }
+        }.distinctBy { it.season to it.episode }
+        return CinemetaDetails(
+            item = item, description = text(meta, "description"),
+            originalTitle = text(meta, "name"),
+            rating = text(meta, "imdbRating"),
+            country = text(meta, "country"),
+            runtime = text(meta, "runtime"),
+            genres = names(meta.optJSONArray("genres") ?: meta.optJSONArray("genre")),
+            directors = names(meta.optJSONArray("director")),
+            actors = names(meta.optJSONArray("cast")),
+            episodes = episodes
+        )
+    }
+}
+
+internal data class CinemetaEpisode(val season: Int, val episode: Int, val title: String, val released: String)
+internal data class CinemetaDetails(
+    val item: CatalogMovie, val description: String, val originalTitle: String,
+    val rating: String, val country: String, val runtime: String,
+    val genres: List<String>, val directors: List<String>,
+    val actors: List<String>, val episodes: List<CinemetaEpisode>
+)
