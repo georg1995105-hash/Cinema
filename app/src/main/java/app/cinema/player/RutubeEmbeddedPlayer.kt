@@ -39,7 +39,7 @@ internal fun RutubeEmbeddedPlayer(embedUrl: String, onClose: () -> Unit) {
     var error by remember(embedUrl) { mutableStateOf("") }
     var loading by remember(embedUrl) { mutableStateOf(true) }
     var retry by remember(embedUrl) { mutableIntStateOf(0) }
-    var originalPage by remember(embedUrl) { mutableStateOf(false) }
+    var originalPage by remember(embedUrl) { mutableStateOf(true) }
     val videoPage = "https://rutube.ru/video/${embedUrl.substringAfterLast('/')}/"
     var webView by remember(embedUrl) { mutableStateOf<WebView?>(null) }
 
@@ -90,7 +90,7 @@ internal fun RutubeEmbeddedPlayer(embedUrl: String, onClose: () -> Unit) {
                             setBackgroundColor(AndroidColor.BLACK)
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
-                            settings.mediaPlaybackRequiresUserGesture = true
+                            settings.mediaPlaybackRequiresUserGesture = false
                             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                             settings.allowFileAccess = false
                             settings.allowContentAccess = false
