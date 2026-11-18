@@ -1148,7 +1148,6 @@ internal fun FilmDetails(
                 }
             }
         }
-}
         }
     }
 }
