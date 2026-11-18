@@ -45,7 +45,17 @@ class ManualWatchSheetTest {
                     onWatch = { _, voice, _, _ -> selected = voice },
                     onRelated = {},
                     onMetadata = {},
-                    onPerson = {}
+                    onPerson = {},
+                    verifiedPlayer = MirrorMoviePage(
+                        id = "123",
+                        isSeries = false,
+                        voices = listOf(
+                            MirrorVoice("11", "Стандартная"),
+                            MirrorVoice("27", "Дубляж")
+                        ),
+                        episodes = emptyList(),
+                        defaultVoice = "11"
+                    )
                 )
             }
         }

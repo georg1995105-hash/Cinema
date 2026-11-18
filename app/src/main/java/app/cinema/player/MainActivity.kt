@@ -204,7 +204,8 @@ private fun CinemaApp() {
                         local.rememberMovie(film)
                         selectedFilm = film
                         playbackStorageUrl = film.url
-                        browsingSource = film.url
+                        browsingSource = activeSource?.let { MirrorFilmUrl.changeOrigin(film.url, it) }
+                            ?: film.url
                         movieBack = Page.LIBRARY
                         page = Page.FILM_PLAYER
                     },
@@ -272,7 +273,7 @@ private fun CinemaApp() {
                 Page.MOVIE -> selectedFilm?.let { movie ->
                     FilmDetails(
                         movie = movie,
-                        source = MirrorAccountGateway.origin(movie.url) ?: activeSource.orEmpty(),
+                        source = activeSource ?: MirrorAccountGateway.origin(movie.url).orEmpty(),
                         sources = sources.toList(),
                         isFavourite = movie.url in favourites,
                         onToggleFavourite = { toggleFavourite(movie.url) },
