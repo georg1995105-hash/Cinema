@@ -2,7 +2,7 @@ name: Android checks and signed APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/cinema-session-and-source-details-20261118]
   pull_request:
   workflow_dispatch:
 
