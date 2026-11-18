@@ -120,21 +120,14 @@ private fun CinemaApp() {
             Page.SETTINGS else Page.HOME
     }
     playing?.let { url ->
-        if (MosfilmCatalog.isEmbedUrl(url)) {
-            RutubeEmbeddedPlayer(
-                embedUrl = url,
-                onClose = { playing = null; playingMovieKey = null }
-            )
-        } else {
-            PlayerPane(
-                url = url,
-                startPositionMs = history.firstOrNull { it.url == (playingMovieKey ?: url) }?.positionMs ?: 0,
-                seekSeconds = local.seekSeconds(),
-                onClose = { playing = null; playingMovieKey = null },
-                holdSpeed = local.holdSpeed(),
-                onSave = { saveProgress(playingMovieKey ?: url, it) }
-            )
-        }
+        PlayerPane(
+            url = url,
+            startPositionMs = history.firstOrNull { it.url == (playingMovieKey ?: url) }?.positionMs ?: 0,
+            seekSeconds = local.seekSeconds(),
+            onClose = { playing = null; playingMovieKey = null },
+            holdSpeed = local.holdSpeed(),
+            onSave = { saveProgress(playingMovieKey ?: url, it) }
+        )
         return
     }
     BackHandler(enabled = page != Page.HOME) { back() }
@@ -215,7 +208,7 @@ private fun CinemaApp() {
                         local.rememberMovie(film)
                         selectedFilm = film
                         movieBack = Page.LIBRARY
-                        if (CinemetaCatalog.isMovieUrl(film.url) || ArchivePublicCatalog.isArchiveUrl(film.url) || MosfilmCatalog.isVideoUrl(film.url)) {
+                        if (CinemetaCatalog.isMovieUrl(film.url) || ArchivePublicCatalog.isArchiveUrl(film.url)) {
                             // An IMDb metadata URL is never a playable video URL.
                             // Recheck the legal source in the details screen before play.
                             page = Page.MOVIE
@@ -320,7 +313,7 @@ private fun CinemaApp() {
                     }
                 }
                 Page.MOVIE -> selectedFilm?.let { movie ->
-                    if (CinemetaCatalog.isMovieUrl(movie.url) || ArchivePublicCatalog.isArchiveUrl(movie.url) || MosfilmCatalog.isVideoUrl(movie.url)) {
+                    if (CinemetaCatalog.isMovieUrl(movie.url) || ArchivePublicCatalog.isArchiveUrl(movie.url)) {
                         CinemetaFilmDetails(
                             movie = movie,
                             isFavourite = movie.url in favourites,
