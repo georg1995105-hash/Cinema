@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.net.URI
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The official Lift WEB SERVICE, embedded as a top-level browsing experience.
@@ -57,34 +58,26 @@ internal object LiftWebSource {
 
     fun safeTitle(title: String): String = title.trim().take(140)
 
-    /** Encoded with JSON quoting, not by interpolating untrusted text into JS. */
-    internal fun fillSearchScript(title: String): String {
-        val quoted = JSONObject.quote(safeTitle(title))
-        return """
-            (function(){
-              var field=document.querySelector('input[type="search"], input[placeholder*="Поиск"], input[placeholder*="поиск"], input[placeholder*="назван"], input:not([type="hidden"])');
-              if(!field) return false;
-              var descriptor=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value');
-              if(descriptor && descriptor.set) descriptor.set.call(field,$quoted);
-              else field.value=$quoted;
-              field.dispatchEvent(new Event('input',{bubbles:true}));
-              field.dispatchEvent(new Event('change',{bubbles:true}));
-              field.dispatchEvent(new KeyboardEvent('keyup',{key:'Enter',bubbles:true}));
-              return true;
-            })();
-        """.trimIndent()
-    }
+    /** Delegated to the first-party DOM matcher, never to a private API. */
+    internal fun fillSearchScript(title: String): String = LiftMatchPolicy.searchScript(title)
+
 }
 
 @Composable
 internal fun LiftWebScreen(
     onClose: () -> Unit,
-    title: String = ""
+    title: String = "",
+    expectedYear: Int? = null
 ) {
     val ctx = LocalContext.current
     var loading by remember(title) { mutableStateOf(true) }
     var failure by remember(title) { mutableStateOf("") }
     var refresh by remember(title) { mutableIntStateOf(0) }
+    var matching by remember(title) { mutableStateOf(title.isNotBlank()) }
+    var choices by remember(title) { mutableStateOf<List<LiftFilmMatch>>(emptyList()) }
+    var foundDetails by remember(title) { mutableStateOf(false) }
+    var lookupMessage by remember(title) { mutableStateOf("") }
+    val alive = remember(title) { AtomicBoolean(true) }
     var fullscreenView by remember { mutableStateOf<View?>(null) }
     var fullscreenCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
     val selectedTitle = remember(title) { LiftWebSource.safeTitle(title) }
@@ -120,6 +113,35 @@ internal fun LiftWebScreen(
                 }
             }
             webViewClient = object : WebViewClient() {
+                private fun pollMatches(view: WebView, attempt: Int) {
+                    if (!alive.get() || foundDetails ||
+                        view.url?.startsWith(LiftWebSource.SEARCH) != true) return
+                    view.evaluateJavascript(LiftMatchPolicy.inspectResultsScript) { raw ->
+                        if (!alive.get() || foundDetails ||
+                            view.url?.startsWith(LiftWebSource.SEARCH) != true) return@evaluateJavascript
+                        val matches = LiftMatchPolicy.parseBrowserResults(raw)
+                        if (matches.isNotEmpty()) choices = matches
+                        val exact = LiftMatchPolicy.singleExact(
+                            selectedTitle, expectedYear, matches
+                        )
+                        if (exact != null) {
+                            foundDetails = true
+                            matching = false
+                            choices = emptyList()
+                            view.loadUrl(exact.url)
+                            return@evaluateJavascript
+                        }
+                        if (attempt >= 13) {
+                            matching = false
+                            lookupMessage = if (choices.isEmpty())
+                                "Фильм не найден в Lift. Попробуйте поиск вручную."
+                            else "Выберите подходящий фильм. Автоматический выбор неоднозначен."
+                        } else {
+                            view.postDelayed({ pollMatches(view, attempt + 1) }, 650L)
+                        }
+                    }
+                }
+
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
                     return !LiftWebSource.allowedMainFrame(request.url.toString())
@@ -132,12 +154,26 @@ internal fun LiftWebScreen(
 
                 override fun onPageFinished(view: WebView, url: String) {
                     loading = false
-                    if (selectedTitle.isNotBlank() && url.startsWith(LiftWebSource.SEARCH)) {
-                        // Lift initializes its search input asynchronously on some pages.
+                    if (selectedTitle.isNotBlank() && !foundDetails &&
+                        url.startsWith(LiftWebSource.SEARCH)) {
+                        // Inspect only visible first-party results: no streams or credentials.
                         view.postDelayed({
-                            if (view.url?.startsWith(LiftWebSource.SEARCH) == true)
-                                view.evaluateJavascript(LiftWebSource.fillSearchScript(selectedTitle), null)
-                        }, 800)
+                            if (alive.get() && !foundDetails &&
+                                view.url?.startsWith(LiftWebSource.SEARCH) == true) {
+                                view.evaluateJavascript(
+                                    LiftMatchPolicy.searchScript(selectedTitle)
+                                ) { result ->
+                                    if (!alive.get()) return@evaluateJavascript
+                                    if (result == "true") pollMatches(view, 0)
+                                    else {
+                                        matching = false
+                                        lookupMessage = "Поле поиска Lift не открылось. Попробуйте вручную."
+                                    }
+                                }
+                            }
+                        }, 850L)
+                    } else if (!url.startsWith(LiftWebSource.SEARCH)) {
+                        matching = false
                     }
                 }
 
@@ -174,6 +210,7 @@ internal fun LiftWebScreen(
 
     DisposableEffect(browser) {
         onDispose {
+            alive.set(false)
             fullscreenCallback?.onCustomViewHidden()
             fullscreenCallback = null
             fullscreenView = null
