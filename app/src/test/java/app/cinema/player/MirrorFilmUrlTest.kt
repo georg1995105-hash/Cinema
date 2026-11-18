@@ -51,4 +51,10 @@ class MirrorFilmUrlTest {
         assertFalse(MirrorFilmUrl.isAllowedResolved(
             film, "https://example.com/films/22-film.html", emptyList()))
     }
+
+    @Test fun canonicalWwwAliasStillCountsAsTheSameResolvedFilm() {
+        val film="https://mirror.example/series/drama/8155-brigada-2002.html"
+        assertTrue(MirrorFilmUrl.isAllowedResolved(
+            film, "https://www.mirror.example/series/8155-brigada.html/", emptyList()))
+    }
 }
