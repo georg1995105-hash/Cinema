@@ -547,9 +547,10 @@ internal fun FilmDetails(
                                 if (index == timings.lastIndex) {
                                     val browserCheck = MirrorMediaParser.objectFromWebView(raw)
                                         ?.optBoolean("browserCheck") == true
-                                    if (info == null && browserCheck) {
-                                        // Do not destroy the WebView here. Anubis solves in-page and
-                                        // redirects back to the same film URL with an auth cookie.
+                                    if (browserCheck) {
+                                        // Do not destroy the WebView even when cached/HTTP metadata
+                                        // already exists: voices/player data still require the
+                                        // browser verification to complete.
                                         browserChallengeActive = true
                                         loadError = ""
                                         scanningUrl = null
