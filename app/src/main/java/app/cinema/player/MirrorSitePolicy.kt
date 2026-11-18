@@ -7,8 +7,33 @@ import java.net.URI
  * The built-in hosts and headers mirror the behavior of the user's reference client.
  */
 internal object MirrorSitePolicy {
+    /**
+     * Public mirror set from the reference APK (v2.2.5), plus its standby host.
+     * The user-selected mirror is still tried first by MirrorNetworkSource.
+     */
     val builtInOrigins = listOf(
+        "https://hdrezka.mn/",
+        "https://hdrzk.org/",
+        "https://hdrezka-home.tv/",
+        "https://hdrezka.website/",
+        "https://hdrezka.sh/",
+        "https://omnirezka.tv/",
         "https://rezka-ua.pub/",
+        "https://hdrezka.ag/",
+        "https://hdrezka.name/",
+        "https://hello-rezka.tv/",
+        "https://rezka.pub/",
+        "https://hdrezka.kim/",
+        "https://rezkery.com/",
+        "https://hdrezka-fly.net/",
+        "https://hdrezka-sonic.net/",
+        "https://rezka-kz.tv/",
+        "https://hdrezka.club/",
+        "https://hdrezka.hk/",
+        "https://rezka-ua.net/",
+        "https://rezka-ua.in/",
+        "https://rezka-ua.co/",
+        "https://rezka.ag/",
         "https://hdrezka.me/",
         "https://standby-rezka.tv/"
     )
@@ -20,7 +45,10 @@ internal object MirrorSitePolicy {
         if (!SourceRules.isValidHttpsUrl(url)) return false
         val host = runCatching { URI(url).host.orEmpty().lowercase().removePrefix("www.") }
             .getOrDefault("")
-        return host == "standby-rezka.tv" ||
+        val knownHosts = builtInOrigins.mapNotNull {
+            runCatching { URI(it).host?.lowercase()?.removePrefix("www.") }.getOrNull()
+        }.toSet()
+        return host in knownHosts ||
             dynamicHdRezka.matches(host) ||
             dynamicRezkaUa.matches(host)
     }
