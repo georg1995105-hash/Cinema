@@ -171,12 +171,27 @@ internal object CinemetaCatalog {
         }
         val items = mutableListOf<CatalogMovie>()
         var successes = 0
+        var seriesFound = false
         var failure: Throwable? = null
         for (type in types) {
             try {
-                items.addAll(parseList(read(context, "/catalog/$type/top/search=$encoded.json")))
+                val found = parseList(read(context, "/catalog/$type/top/search=$encoded.json"))
+                items.addAll(found)
+                if (type == "series" && found.isNotEmpty()) seriesFound = true
                 successes++
             } catch (e: Exception) { failure = e }
+        }
+        // Independent licensed fallback. Do not confuse an empty Cinemeta search
+        // with a network failure, and never use TVmaze as a video provider.
+        if ("series" in types && !seriesFound) {
+            try {
+                items.addAll(TvMazeSeries.search(q))
+                successes++
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failure = e
+            }
         }
         if (successes == 0) throw IOException(failure?.message ?: "Поиск недоступен")
         items.distinctBy { it.url }.let { found ->
@@ -188,7 +203,15 @@ internal object CinemetaCatalog {
 
     suspend fun metadata(context: Context, url: String): CinemetaDetails = withContext(Dispatchers.IO) {
         val (type, id) = identity(url) ?: throw IOException("Неверный идентификатор фильма")
-        parseDetails(read(context, "/meta/$type/$id.json"), type, id)
+        try {
+            parseDetails(read(context, "/meta/$type/$id.json"), type, id)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (type != "series") throw e
+            // Works without access to Stremio/Cinemeta, retaining stable IMDb URLs.
+            TvMazeSeries.metadata(id)
+        }
     }
 
     fun parseDetails(json: JSONObject, type: String, id: String): CinemetaDetails {
@@ -228,5 +251,6 @@ internal data class CinemetaDetails(
     val item: CatalogMovie, val description: String, val originalTitle: String,
     val rating: String, val country: String, val runtime: String,
     val genres: List<String>, val directors: List<String>,
-    val actors: List<String>, val episodes: List<CinemetaEpisode>
+    val actors: List<String>, val episodes: List<CinemetaEpisode>,
+    val source: String = "", val sourceUrl: String = ""
 )
