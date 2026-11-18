@@ -14,6 +14,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 import java.net.URI
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -28,6 +29,65 @@ internal object CinemetaCatalog {
     private val idPattern = Regex("tt[0-9]{5,12}")
     private val cache = LinkedHashMap<String, Pair<Long, String>>()
     private var client: OkHttpClient? = null
+
+    // Small app-private snapshots make the catalogue usable on cold start
+    // when public APIs are slow or temporarily unreachable. No credentials,
+    // site mirrors or cookies are ever persisted in these files.
+    private fun snapshotFile(context: Context, section: String, kind: String, query: String): File {
+        val key = "$section|$kind|$query"
+        val hex = MessageDigest.getInstance("SHA-256")
+            .digest(key.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return File(File(context.applicationContext.filesDir, "cinema_catalog_snapshots"), "$hex.json")
+    }
+
+    suspend fun cachedCards(
+        context: Context, section: String, kind: String, query: String
+    ): List<CatalogMovie> = withContext(Dispatchers.IO) {
+        runCatching {
+            val file = snapshotFile(context, section, kind, query)
+            if (!file.isFile || file.length() !in 2..250_000) return@runCatching emptyList()
+            val data = JSONArray(file.readText(Charsets.UTF_8))
+            buildList {
+                for (i in 0 until minOf(100, data.length())) {
+                    val item = data.optJSONObject(i) ?: continue
+                    val url = item.optString("url")
+                    val title = item.optString("title").trim().take(180)
+                    if (!isMovieUrl(url) || title.isBlank()) continue
+                    val poster = item.optString("poster").takeIf(MirrorPoster::isPhoto).orEmpty()
+                    add(CatalogMovie(url, title, poster, item.optString("details").take(180)))
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun saveCachedCards(
+        context: Context, section: String, kind: String, query: String,
+        movies: List<CatalogMovie>
+    ) = withContext(Dispatchers.IO) {
+        if (movies.isEmpty()) return@withContext
+        runCatching {
+            val file = snapshotFile(context, section, kind, query)
+            file.parentFile?.mkdirs()
+            val json = JSONArray()
+            movies.take(100).forEach { item ->
+                json.put(JSONObject().put("url", item.url).put("title", item.title)
+                    .put("poster", item.poster).put("details", item.details))
+            }
+            val text = json.toString()
+            if (text.length > 250_000) return@runCatching
+            val tmp = File(file.parentFile, file.name + ".tmp")
+            tmp.writeText(text, Charsets.UTF_8)
+            if (!tmp.renameTo(file)) {
+                file.writeText(text, Charsets.UTF_8)
+                tmp.delete()
+            }
+            // Keep the snapshot store bounded.
+            val files = file.parentFile?.listFiles()?.filter { it.extension == "json" }
+                ?.sortedByDescending(File::lastModified).orEmpty()
+            files.drop(40).forEach(File::delete)
+        }
+    }
 
     @Synchronized
     private fun http(context: Context): OkHttpClient {
