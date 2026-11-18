@@ -97,8 +97,8 @@ internal fun SearchScreen(
     val yearFilter = years.toList()
     val resultFilter: (CatalogMovie) -> Boolean = { movie ->
         val kindMatches = when (selectedType) {
-            "Фильмы" -> "/films/" in movie.url
-            "Сериалы" -> "/series/" in movie.url
+            "Фильмы" -> "/meta/movie/" in movie.url || "/films/" in movie.url
+            "Сериалы" -> "/meta/series/" in movie.url || "/series/" in movie.url
             "Мультфильмы" -> "/cartoons/" in movie.url
             "Аниме" -> "/animation/" in movie.url
             else -> true
@@ -265,18 +265,11 @@ internal fun SearchScreen(
                 }
             }
         } else {
-            val url = remember(source, submittedQuery) {
-                source?.let { MirrorCatalog.searchUrl(it, submittedQuery) }
-            }
-            CatalogGrid(
-                source = source,
-                section = "Поиск",
-                kind = "Все",
+            CinemetaGrid(
+                tab = "Поиск",
+                kind = type,
                 cardsPerRow = cardsPerRow,
                 onOpen = { movie -> recent = local.saveSearch(submittedQuery); onOpen(movie) },
-                onBrowse = onBrowse,
-                onAddSource = onAddSource,
-                requestOverride = url,
                 searchText = submittedQuery,
                 movieFilter = resultFilter
             )
