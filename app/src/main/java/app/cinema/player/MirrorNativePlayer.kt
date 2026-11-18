@@ -189,6 +189,7 @@ internal fun MirrorNativePlayer(
     var movie by remember(filmUrl){mutableStateOf<MirrorMoviePage?>(null)}
     var message by remember(filmUrl){mutableStateOf("Получаем данные фильма")}
     var error by remember(filmUrl){mutableStateOf("")}
+    var browserChallengeActive by remember(filmUrl) { mutableStateOf(false) }
     var rejectedNavigation by remember(filmUrl) { mutableStateOf("") }
     var voice by remember(filmUrl){mutableStateOf("")}
     var episodes by remember(filmUrl){mutableStateOf<List<MirrorEpisode>>(emptyList())}
@@ -256,6 +257,14 @@ internal fun MirrorNativePlayer(
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
                     val requested = request.url.toString()
+                    val from = view.url ?: transportUrl
+                    if (MirrorAnubis.isChallengeUrl(from, requested)) {
+                        browserChallengeActive = true
+                        rejectedNavigation = ""
+                        error = ""
+                        message = "Проверяем доступ к источнику"
+                        return false
+                    }
                     val mapped = MirrorRedirect.resolveFilmUrl(
                         originalFilmUrl = filmUrl,
                         fromUrl = view.url ?: transportUrl,
@@ -279,6 +288,14 @@ internal fun MirrorNativePlayer(
                 }
 
                 private fun scan(view: WebView, url: String) {
+                    if (MirrorAnubis.isChallengeUrl(transportUrl, url)) {
+                        browserChallengeActive = true
+                        rejectedNavigation = ""
+                        error = ""
+                        message = "Проверяем доступ к источнику"
+                        scanningUrl = null
+                        return
+                    }
                     if (failed || scanningUrl == url ||
                         !MirrorFilmUrl.isAllowedResolved(filmUrl, url, mirrors)) return
                     scanningUrl = url
@@ -312,12 +329,45 @@ internal fun MirrorNativePlayer(
                                     episode = chosen?.id.orEmpty()
                                     metadataHandler.removeCallbacksAndMessages(null)
                                 } else if (index == timings.lastIndex) {
-                                    fail(rejectedNavigation.ifBlank {
-                                         MirrorMediaParser.pageFailureReason(result)
-                                     })
+                                    val state = MirrorMediaParser.objectFromWebView(result)
+                                        ?.optString("pageState").orEmpty()
+                                    if (state == "protected") {
+                                        // The site is still solving its own Anubis page. Keep
+                                        // WebView alive; after pass-challenge it returns to the
+                                        // same film URL and onPageStarted resets the scanner.
+                                        browserChallengeActive = true
+                                        rejectedNavigation = ""
+                                        error = ""
+                                        message = "Проверяем доступ к источнику"
+                                        scanningUrl = null
+                                    } else {
+                                        fail(rejectedNavigation.ifBlank {
+                                             MirrorMediaParser.pageFailureReason(result)
+                                        })
+                                    }
                                 }
                             }
                         }, wait)
+                    }
+                }
+
+                override fun onPageStarted(
+                    view: WebView,
+                    url: String,
+                    favicon: android.graphics.Bitmap?
+                ) {
+                    if (MirrorAnubis.isChallengeUrl(transportUrl, url)) {
+                        browserChallengeActive = true
+                        rejectedNavigation = ""
+                        error = ""
+                        message = "Проверяем доступ к источнику"
+                    } else if (browserChallengeActive &&
+                        MirrorFilmUrl.isAllowedResolved(filmUrl, url, mirrors)) {
+                        browserChallengeActive = false
+                        scanningUrl = null
+                        rejectedNavigation = ""
+                        error = ""
+                        message = "Определяем доступный плеер"
                     }
                 }
 
@@ -326,6 +376,14 @@ internal fun MirrorNativePlayer(
 
                 override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: android.webkit.WebResourceResponse) {
                     if (request.isForMainFrame) {
+                        val address = request.url.toString()
+                        if (MirrorAnubis.isChallengeUrl(transportUrl, address)) {
+                            browserChallengeActive = true
+                            rejectedNavigation = ""
+                            error = ""
+                            message = "Проверяем доступ к источнику"
+                            return
+                        }
                         val failure = MirrorMediaParser.responseFailure(
                             JSONObject().put("__kinoStatus", response.statusCode)
                         )
@@ -379,11 +437,13 @@ internal fun MirrorNativePlayer(
             rejectedNavigation = fetched.reason
         }
     }
-    LaunchedEffect(filmUrl) {
-        delay(10000)
+    LaunchedEffect(filmUrl, browserChallengeActive) {
+        delay(if (browserChallengeActive) 32_000 else 10_000)
         if (movie == null && error.isBlank()) {
             message = ""
-            error = rejectedNavigation.ifBlank {
+            error = if (browserChallengeActive) {
+                "Источник не завершил проверку браузера."
+            } else rejectedNavigation.ifBlank {
                 "Источник не загрузил сведения плеера. Проверьте доступность выбранного зеркала."
             }
         }
