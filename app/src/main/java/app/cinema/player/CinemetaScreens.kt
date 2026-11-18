@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,6 +30,7 @@ import kotlinx.coroutines.CancellationException
  * Public metadata UI; it does not assume that a catalog hit means a playable stream.
  * All states distinguish offline/source errors from a genuine empty result.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun CinemetaGrid(
     tab: String, kind: String, cardsPerRow: Int,
@@ -41,96 +43,141 @@ internal fun CinemetaGrid(
     var refresh by remember(tab, kind, searchText) { mutableIntStateOf(0) }
     var movies by remember(tab, kind, searchText) { mutableStateOf<List<CatalogMovie>>(emptyList()) }
     var loading by remember(tab, kind, searchText) { mutableStateOf(true) }
+    var refreshing by remember(tab, kind, searchText) { mutableStateOf(false) }
     var error by remember(tab, kind, searchText) { mutableStateOf("") }
+
+    fun relevant(items: List<CatalogMovie>): List<CatalogMovie> =
+        if (searchText.isBlank()) items else SearchRelevance.find(items, searchText)
 
     LaunchedEffect(tab, kind, searchText, refresh, loadContent) {
         if (!loadContent) return@LaunchedEffect
         loading = true
         error = ""
         try {
-            val cached = CinemetaCatalog.cachedCards(context, tab, kind, searchText)
-                .filterNot { it.url.startsWith("https://rutube.ru/") }
-            if (cached.isNotEmpty()) {
-                movies = cached
+            if (refresh == 0) {
+                // Never display unrelated cached cards for a title query.
+                val cached = CinemetaCatalog.cachedCards(context, tab, kind, searchText)
+                    .filterNot { it.url.startsWith("https://rutube.ru/") }
+                if (cached.isNotEmpty()) {
+                    movies = relevant(cached)
+                    loading = false
+                }
+            }
+            val items = if (searchText.isBlank()) {
+                CinemetaCatalog.home(context, tab, kind, forceRefresh = refresh > 0)
+            } else {
+                CinemetaCatalog.search(context, searchText, kind, forceRefresh = refresh > 0)
+            }
+            val direct = relevant(items)
+            if (direct.isNotEmpty()) {
+                movies = direct
                 loading = false
             }
-            val items = if (searchText.isBlank())
-                CinemetaCatalog.home(context, tab, kind)
-            else CinemetaCatalog.search(context, searchText, kind)
-            movies = items
-            loading = false
-            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, items)
+            // Cinemeta's fuzzy matches are filtered only AFTER the
+            // optional Russian title lookup, so unrelated movies disappear.
             val localized = RussianMovieTitles.enrich(items)
-            movies = localized
-            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, localized)
+            var ranked = relevant(localized)
+            movies = ranked
+            loading = false
+
+            // First Dates artwork was incorrectly attributed to this series.
+            // Trust a TVmaze image only when its IMDb identifier matches.
+            if (ranked.any {
+                CinemetaCatalog.identity(it.url) == ("series" to "tt0337898")
+            }) {
+                val trusted = try {
+                    TvMazeSeries.verifiedPoster("tt0337898")
+                } catch (_: Exception) { "" }
+                if (trusted.isNotBlank()) {
+                    ranked = ranked.map {
+                        if (CinemetaCatalog.identity(it.url) == ("series" to "tt0337898"))
+                            it.copy(poster = trusted)
+                        else it
+                    }
+                    movies = ranked
+                }
+            }
+            CinemetaCatalog.saveCachedCards(context, tab, kind, searchText, ranked)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             error = "Нет связи с каталогом: ${e.message ?: "ошибка сети"}"
-        } finally { loading = false }
+        } finally {
+            loading = false
+            refreshing = false
+        }
     }
 
-    val visible = remember(movies, movieFilter) { movies.filter(movieFilter) }
+    val visible = movies.filter(movieFilter)
     val columns = if (LocalConfiguration.current.screenWidthDp >= 600)
         cardsPerRow.coerceIn(2, 8) else cardsPerRow.coerceIn(2, 3)
-    Box(Modifier.fillMaxSize()) {
-        when {
-            visible.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        when {
-                            error.isNotBlank() -> "Сохранённые результаты · нет связи"
-                            loading -> "${visible.size} результатов · обновляем"
-                            else -> "${visible.size} результатов"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (error.isNotBlank()) MaterialTheme.colorScheme.error else appMuted,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (loading) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
-                    TextButton(onClick = { refresh++ }) { Text("Обновить") }
-                }
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(columns),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 20.dp, top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(17.dp)
-                ) {
-                    items(visible, key = { it.url }) { movie ->
-                        CinemetaFilmPoster(movie) { onOpen(movie) }
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = {
+            if (!refreshing && !loading && loadContent) {
+                refreshing = true
+                refresh++
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            when {
+                visible.isNotEmpty() -> Column(Modifier.fillMaxSize()) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            when {
+                                error.isNotBlank() -> "Сохранённые результаты · нет связи"
+                                loading || refreshing -> "${visible.size} результатов · обновляем"
+                                else -> "${visible.size} результатов"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (error.isNotBlank()) MaterialTheme.colorScheme.error else appMuted,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(columns),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 20.dp, top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(17.dp)
+                    ) {
+                        items(visible, key = { it.url }) { movie ->
+                            CinemetaFilmPoster(movie) { onOpen(movie) }
+                        }
                     }
                 }
-            }
-            loading && loadContent -> Column(
-                Modifier.align(Alignment.Center),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                CircularProgressIndicator(Modifier.size(32.dp), color = appBlue)
-                Spacer(Modifier.height(12.dp))
-                Text("Загружаем каталог", color = appMuted)
-            }
-            error.isNotBlank() -> Column(
-                Modifier.align(Alignment.Center).padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(Icons.Outlined.CloudOff, contentDescription = null, tint = appMuted,
-                    modifier = Modifier.size(40.dp))
-                Spacer(Modifier.height(10.dp))
-                Text("Каталог временно недоступен", fontWeight = FontWeight.SemiBold)
-                Text(error, color = appMuted)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = { refresh++ }) { Text("Повторить") }
-            }
-            !loadContent -> Unit
-            else -> Column(
-                Modifier.align(Alignment.Center).padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(if (searchText.isBlank()) "Нет материалов в этой категории"
-                    else "По запросу ничего не найдено", color = appMuted)
-                Spacer(Modifier.height(10.dp))
-                TextButton(onClick = { refresh++ }) { Text("Обновить") }
+                loading && loadContent -> Column(
+                    Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(Modifier.size(32.dp), color = appBlue)
+                    Spacer(Modifier.height(12.dp))
+                    Text("Загружаем каталог", color = appMuted)
+                }
+                error.isNotBlank() -> Column(
+                    Modifier.align(Alignment.Center).padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(Icons.Outlined.CloudOff, contentDescription = null, tint = appMuted,
+                        modifier = Modifier.size(40.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Text("Каталог временно недоступен", fontWeight = FontWeight.SemiBold)
+                    Text(error, color = appMuted)
+                    Spacer(Modifier.height(12.dp))
+                    Text("Потяните вниз, чтобы повторить", color = appMuted)
+                }
+                !loadContent -> Unit
+                else -> Column(
+                    Modifier.align(Alignment.Center).padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(if (searchText.isBlank()) "Нет материалов в этой категории"
+                        else "По запросу ничего не найдено", color = appMuted)
+                    Spacer(Modifier.height(10.dp))
+                    Text("Потяните вниз, чтобы повторить", color = appMuted)
+                }
             }
         }
     }
