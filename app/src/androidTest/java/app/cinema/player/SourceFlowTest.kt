@@ -269,6 +269,7 @@ class SourceFlowTest {
             val challengeData = "fixture-seed"
             val passValid = java.util.concurrent.atomic.AtomicBoolean(false)
             val sentReferenceCookie = java.util.concurrent.atomic.AtomicBoolean(false)
+            val passSentVerificationCookie = java.util.concurrent.atomic.AtomicBoolean(false)
             val retriedWithCookie = java.util.concurrent.atomic.AtomicBoolean(false)
             val filmRequests = java.util.concurrent.atomic.AtomicInteger(0)
             val passRequests = java.util.concurrent.atomic.AtomicInteger(0)
@@ -323,11 +324,19 @@ class SourceFlowTest {
                             } else {
                                 MockResponse().setResponseCode(200)
                                     .addHeader("Content-Type", "text/html; charset=UTF-8")
+                                    .addHeader("Set-Cookie",
+                                        "techaro.lol-anubis-cookie-verification=fixture-id; Path=/; Secure; Max-Age=120")
                                     .setBody(challengeHtml)
                             }
                         }
                         "/.within.website/x/cmd/anubis/api/pass-challenge" -> {
                             passRequests.incrementAndGet()
+                            val validationCookie = request.getHeader("Cookie").orEmpty()
+                                .split(';').map(String::trim)
+                                .contains("techaro.lol-anubis-cookie-verification=fixture-id")
+                            passSentVerificationCookie.set(validationCookie)
+                            if (!validationCookie) return MockResponse()
+                                .setResponseCode(500).setBody("Anubis: verification cookie missing")
                             val nonce = address.queryParameter("nonce")?.toLongOrNull()
                             val response = address.queryParameter("response").orEmpty()
                             val valid = nonce != null &&
@@ -386,12 +395,15 @@ class SourceFlowTest {
                 assertEquals(1, passRequests.get())
                 assertTrue("reference hdmbbs cookie is sent", sentReferenceCookie.get())
                 assertTrue("PoW query is valid", passValid.get())
+                assertTrue("Anubis server received its verification cookie", passSentVerificationCookie.get())
                 assertTrue("film is retried with Anubis cookie", retriedWithCookie.get())
                 assertTrue(MirrorHttp.hasAnubisCookie(filmPage))
             } finally {
                 MirrorHttp.clearStaleAnubisCookies(filmPage)
                 android.webkit.CookieManager.getInstance().apply {
                     setCookie(filmPage, "hdmbbs=; Path=/; Secure; Max-Age=0")
+                    setCookie(filmPage,
+                        "techaro.lol-anubis-cookie-verification=; Path=/; Secure; Max-Age=0")
                     flush()
                 }
             }
