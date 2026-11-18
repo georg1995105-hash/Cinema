@@ -77,12 +77,28 @@ internal object MirrorHtmlMetadata {
             val idFromPage = entry.attr("data-pid").ifBlank {
                 entry.closest("[data-pid]")?.attr("data-pid").orEmpty()
             }.takeIf { it.matches(Regex("[0-9]{1,12}")) }.orEmpty()
-            val value = FilmPerson(name, poster(entry), url, idFromPage)
+            val rawPortrait = listOf("data-photo", "data-image", "data-src")
+                .firstNotNullOfOrNull { key ->
+                    entry.attr(key).takeIf(String::isNotBlank)
+                        ?: entry.selectFirst("[$key]")?.attr(key)?.takeIf(String::isNotBlank)
+                }.orEmpty()
+            val picture = absolute(rawPortrait).takeIf(MirrorPoster::isPhoto)
+                .orEmpty().ifBlank { poster(entry) }
+            val value = FilmPerson(name, picture, url, idFromPage)
             if (role == "director") directors.putIfAbsent(name.lowercase(), value)
             else actors.putIfAbsent(name.lowercase(), value)
         }
-        for (row in document.select(".b-post__infotable tr, .b-post__info tr")) {
-            val cells = row.children().filter { it.tagName() in listOf("th", "td") }
+        // The reference page also publishes metadata in two DIV columns, not
+        // necessarily a TABLE. Parse both structures without guessing values.
+        val factRows = document.select(
+            ".b-post__infotable tr, .b-post__info tr, " +
+            ".b-post__infotable_left > div, .b-post__infotable_right_inner > div"
+        )
+        for (row in factRows) {
+            val tableCells = row.children().filter { it.tagName() in listOf("th", "td") }
+            val cells = if (tableCells.size >= 2) tableCells else
+                row.children().takeIf { it.size >= 2 }
+                    ?.let { listOf(it.first(), it.last()) }.orEmpty()
             if (cells.size < 2) continue
             val label = cells[0].text().trim().trimEnd(':')
             val body = cells[1]
