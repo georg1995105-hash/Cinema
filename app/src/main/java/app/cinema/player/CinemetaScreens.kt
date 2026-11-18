@@ -153,7 +153,7 @@ internal fun CinemetaFilmDetails(
     var checking by remember(movie.url) { mutableStateOf(false) }
     var checkFailure by remember(movie.url) { mutableStateOf("") }
     var retry by remember(movie.url) { mutableIntStateOf(0) }
-    val couldHaveArchive = CinemetaCatalog.identity(movie.url) == ("movie" to "tt0063350")
+    val couldHaveArchive = InternetArchiveStreams.canCheck(movie.url)
     LaunchedEffect(movie.url, retry) {
         loading = true
         error = ""
