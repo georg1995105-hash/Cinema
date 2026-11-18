@@ -113,6 +113,22 @@ internal fun LiftWebScreen(
                 }
             }
             webViewClient = object : WebViewClient() {
+                private fun startSearch(view: WebView, attempt: Int) {
+                    if (!alive.get() || foundDetails ||
+                        view.url?.startsWith(LiftWebSource.SEARCH) != true) return
+                    view.evaluateJavascript(LiftMatchPolicy.searchScript(selectedTitle)) { result ->
+                        if (!alive.get() || foundDetails) return@evaluateJavascript
+                        if (result == "true") {
+                            pollMatches(view, 0)
+                        } else if (attempt >= 8) {
+                            matching = false
+                            lookupMessage = "Поиск Lift не загрузился. Повторите или введите название вручную."
+                        } else {
+                            view.postDelayed({ startSearch(view, attempt + 1) }, 400L)
+                        }
+                    }
+                }
+
                 private fun pollMatches(view: WebView, attempt: Int) {
                     if (!alive.get() || foundDetails ||
                         view.url?.startsWith(LiftWebSource.SEARCH) != true) return
@@ -124,14 +140,15 @@ internal fun LiftWebScreen(
                         val exact = LiftMatchPolicy.singleExact(
                             selectedTitle, expectedYear, matches
                         )
-                        if (exact != null) {
+                        // Avoid choosing a partial first render of the result grid.
+                        if (exact != null && attempt >= 2) {
                             foundDetails = true
                             matching = false
                             choices = emptyList()
                             view.loadUrl(exact.url)
                             return@evaluateJavascript
                         }
-                        if (attempt >= 13) {
+                        if (attempt >= 18) {
                             matching = false
                             lookupMessage = if (choices.isEmpty())
                                 "Фильм не найден в Lift. Попробуйте поиск вручную."
@@ -157,21 +174,7 @@ internal fun LiftWebScreen(
                     if (selectedTitle.isNotBlank() && !foundDetails &&
                         url.startsWith(LiftWebSource.SEARCH)) {
                         // Inspect only visible first-party results: no streams or credentials.
-                        view.postDelayed({
-                            if (alive.get() && !foundDetails &&
-                                view.url?.startsWith(LiftWebSource.SEARCH) == true) {
-                                view.evaluateJavascript(
-                                    LiftMatchPolicy.searchScript(selectedTitle)
-                                ) { result ->
-                                    if (!alive.get()) return@evaluateJavascript
-                                    if (result == "true") pollMatches(view, 0)
-                                    else {
-                                        matching = false
-                                        lookupMessage = "Поле поиска Lift не открылось. Попробуйте вручную."
-                                    }
-                                }
-                            }
-                        }, 850L)
+                        view.postDelayed({ startSearch(view, 0) }, 650L)
                     } else if (!url.startsWith(LiftWebSource.SEARCH)) {
                         matching = false
                     }
@@ -199,7 +202,14 @@ internal fun LiftWebScreen(
         if (refresh > 0) {
             failure = ""
             loading = true
-            browser.reload()
+            matching = selectedTitle.isNotBlank()
+            choices = emptyList()
+            lookupMessage = ""
+            foundDetails = false
+            // A failed film selection should retry first-party search, not
+            // repeatedly reload a dead player or unrelated nested page.
+            if (selectedTitle.isNotBlank()) browser.loadUrl(start)
+            else browser.reload()
         }
         delay(22_000)
         if (loading && failure.isEmpty()) {
