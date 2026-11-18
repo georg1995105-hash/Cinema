@@ -169,6 +169,7 @@ class SourceFlowTest {
         val info = requireNotNull(FilmPageParser.parse(evaluate(web, FilmPageParser.javascript), origin))
         assertEquals(listOf("Актёр Первый"), info.cast.map { it.name })
         assertEquals("$origin/photos/20.jpg", info.cast.single().photo)
+        assertEquals("20", info.cast.single().pid)
         assertEquals(listOf("Режиссёр Второй"), info.directors.map { it.name })
         assertEquals("$origin/photos/21.jpg", info.directors.single().photo)
     }

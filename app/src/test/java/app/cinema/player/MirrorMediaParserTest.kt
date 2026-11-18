@@ -55,6 +55,14 @@ class MirrorMediaParserTest {
         }
     }
 
+    @Test fun nonEmptyStreamsFieldWinsOverBlankOrUnplayableUrl() {
+        val withBlankUrl = """{"success":1,"url":"","streams":"[720p]https://media.example/full.mp4"}"""
+        assertEquals("https://media.example/full.mp4",
+            MirrorMediaParser.parseStreamInfo(withBlankUrl).qualities.single().url)
+        val withInvalidUrl = """{"success":1,"url":"not-a-video","streams":"[480p]https://media.example/backup.m3u8"}"""
+        assertEquals("480p", MirrorMediaParser.parseStreamInfo(withInvalidUrl).qualities.single().label)
+    }
+
     @Test fun directPremiumAndPromoLinksAreRejected() {
         assertTrue(MirrorMediaParser.parseQualityList("https://cdn.example/promo/demo.mp4").isEmpty())
         assertTrue(MirrorMediaParser.parseQualityList("https://cdn.example/premium/full.mp4").isEmpty())

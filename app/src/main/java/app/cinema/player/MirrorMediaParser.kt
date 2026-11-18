@@ -182,11 +182,22 @@ internal object MirrorMediaParser {
             (success.isNotEmpty() && success !in setOf("true", "1", "null"))) {
             return MirrorStreamInfo(emptyList(), failure = PlaybackFailure.UNAVAILABLE)
         }
-        val streamText = when (val url = json.opt("url")) {
-            is String -> url
-            is JSONObject -> url.optString("url")
-            else -> json.optString("streams")
+        // Some supported mirror versions return an empty `url` alongside
+        // the populated `streams` field. A present-but-empty url must not
+        // shadow the real site-issued stream list.
+        fun mediaText(value: Any?): String = when (value) {
+            is String -> value
+            is JSONObject -> value.optString("url").ifBlank {
+                value.optString("streams")
+            }
+            else -> ""
         }
+        val issuedLists = listOf(
+            mediaText(json.opt("url")),
+            mediaText(json.opt("streams"))
+        ).filter(String::isNotBlank)
+        val streamText = issuedLists.firstOrNull { parseQualityList(it).isNotEmpty() }
+            ?: issuedLists.firstOrNull().orEmpty()
         val qualities = parseQualityList(streamText)
         if (qualities.isEmpty()) {
             val failure = when {

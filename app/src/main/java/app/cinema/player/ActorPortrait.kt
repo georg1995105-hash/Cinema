@@ -113,34 +113,52 @@ internal object ActorPhotoLibrary {
 internal fun ActorPortrait(
     person: FilmPerson,
     source: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    filmUrl: String = ""
 ) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val imageLoader = remember(context) { posterImageLoader(context) }
     var mirrorFailed by remember(person.photo) { mutableStateOf(false) }
+    var sourceFailed by remember(person.pid, filmUrl) { mutableStateOf(false) }
     var externalFailed by remember(person.name) { mutableStateOf(false) }
+    // The reference film's person data-pid can resolve a real photo via the
+    // mirror's ordinary person-info API even when the HTML has no data-photo.
+    val sourcePortrait by produceState(
+        initialValue = Pair(false, ""),
+        person.pid, filmUrl, person.photo, mirrorFailed
+    ) {
+        val photo = if (person.pid.isNotBlank() && filmUrl.isNotBlank() &&
+            (person.photo.isBlank() || mirrorFailed)) {
+            MirrorPersonSource.portrait(
+                filmUrl, person, WebSettings.getDefaultUserAgent(context)
+            ).orEmpty()
+        } else ""
+        value = true to photo
+    }
     val wikimedia by produceState<OpenPortrait?>(
         initialValue = null,
-        person.name,
-        person.photo,
-        mirrorFailed
+        person.name, person.photo, mirrorFailed, sourcePortrait, sourceFailed
     ) {
-        if (person.photo.isBlank() || mirrorFailed) {
-            delay(1100) // Let the source's own image load before making a public fallback request.
+        if ((person.photo.isBlank() || mirrorFailed) &&
+            sourcePortrait.first && (sourcePortrait.second.isBlank() || sourceFailed)) {
+            delay(1100)
             value = ActorPhotoLibrary.exactPortrait(person.name)
         }
     }
     val actual = person.photo.takeIf { it.isNotBlank() && !mirrorFailed }
-    val displayed = actual ?: wikimedia?.image?.takeUnless { externalFailed }
+    val site = sourcePortrait.second.takeIf { it.isNotBlank() && !sourceFailed }
+    val displayed = actual ?: site ?: wikimedia?.image?.takeUnless { externalFailed }
     Box(modifier, contentAlignment = Alignment.Center) {
         if (!displayed.isNullOrBlank()) {
             val request = remember(displayed, source) {
                 ImageRequest.Builder(context).data(displayed)
                     .addHeader("User-Agent", WebSettings.getDefaultUserAgent(context))
                     .apply {
-                        if (actual != null && SourceRules.sameOrigin(source, displayed)) {
-                            addHeader("Referer", person.url.takeIf { SourceRules.sameOrigin(source, it) }
+                        if ((actual != null || site != null) &&
+                            SourceRules.sameOrigin(source, displayed)) {
+                            addHeader("Referer", filmUrl.takeIf { SourceRules.sameOrigin(source, it) }
+                                ?: person.url.takeIf { SourceRules.sameOrigin(source, it) }
                                 ?: source.trimEnd('/') + "/")
                         }
                     }
@@ -155,6 +173,7 @@ internal fun ActorPortrait(
                 modifier = Modifier.fillMaxSize(),
                 onError = {
                     if (actual != null) mirrorFailed = true
+                    else if (site != null) sourceFailed = true
                     else externalFailed = true
                 }
             )

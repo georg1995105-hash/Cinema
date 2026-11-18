@@ -11,7 +11,8 @@ internal object FilmInfoMerger {
                 val existing = merged[key]
                 merged[key] = entry.copy(
                     photo = entry.photo.ifBlank { existing?.photo.orEmpty() },
-                    url = entry.url.ifBlank { existing?.url.orEmpty() }
+                    url = entry.url.ifBlank { existing?.url.orEmpty() },
+                    pid = entry.pid.ifBlank { existing?.pid.orEmpty() }
                 )
             }
             return merged.values.take(30)
