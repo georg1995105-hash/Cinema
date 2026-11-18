@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.ImageLoader
 import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -123,6 +124,7 @@ internal fun ActorPortrait(
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val imageLoader = remember(context) { posterImageLoader(context) }
+    val publicImageLoader = remember(context) { ImageLoader.Builder(context.applicationContext).build() }
     var mirrorFailed by remember(person.photo) { mutableStateOf(false) }
     var sourceFailed by remember(person.pid, filmUrl) { mutableStateOf(false) }
     var externalFailed by remember(person.name) { mutableStateOf(false) }
@@ -171,7 +173,7 @@ internal fun ActorPortrait(
             }
             AsyncImage(
                 model = request,
-                imageLoader = imageLoader,
+                imageLoader = if (actual == null && site == null) publicImageLoader else imageLoader,
                 contentDescription = person.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
