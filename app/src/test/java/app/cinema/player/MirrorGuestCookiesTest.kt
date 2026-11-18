@@ -57,4 +57,18 @@ class MirrorGuestCookiesTest {
             "dle_user_id=; dle_password=sourceSession")))
     }
 
+
+    @Test fun loginKeepsMirrorSessionCookiesWithoutGuestDowngrade() {
+        val source = "https://hdrzk.org/"
+        val login = "https://hdrzk.org/ajax/login/"
+        val cookies = listOf("PHPSESSID=csrf_session; hdmbbs=0")
+        assertFalse(MirrorGuestCookies.isGuestFilmRequest(login, source))
+        val header = MirrorGuestCookies.cookieHeaderFor(login, source, cookies)
+        assertTrue(header.contains("PHPSESSID=csrf_session"))
+        assertTrue(header.contains("hdmbbs=0"))
+        assertFalse(header.contains("dle_password"))
+        assertEquals("", MirrorGuestCookies.cookieHeaderFor(
+            "https://different.example/ajax/login/", source, cookies))
+    }
+
 }
