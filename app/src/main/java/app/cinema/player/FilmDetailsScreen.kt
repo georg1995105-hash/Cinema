@@ -396,9 +396,9 @@ internal fun FilmDetails(
 ) {
     val context = LocalContext.current
     var info by remember(movie.url) { mutableStateOf(FilmInfoMemory.get(movie.url)) }
-    var loadDone by remember(movie.url) {
-        mutableStateOf(info?.let { FilmInfoReadiness.canFinish(it) && it.portraitsResolved } == true)
-    }
+    // Cached film text/posters may be shown immediately, but voice/player
+    // availability must be refreshed on every open.
+    var loadDone by remember(movie.url) { mutableStateOf(false) }
     var loadError by remember(movie.url) { mutableStateOf("") }
     var browserChallengeActive by remember(movie.url) { mutableStateOf(false) }
     var networkFinished by remember(movie.url) { mutableStateOf(false) }
@@ -545,6 +545,7 @@ internal fun FilmDetails(
                                     }
                                     if (FilmInfoReadiness.canFinish(merged) &&
                                         merged.portraitsResolved &&
+                                        resolvedPlayer != null &&
                                         (merged.cast.isNotEmpty() || merged.directors.isNotEmpty() ||
                                             index >= 4)) {
                                         loadDone = true
@@ -560,8 +561,13 @@ internal fun FilmDetails(
                                         browserChallengeActive = true
                                         loadError = ""
                                         scanningUrl = null
-                                    } else {
+                                    } else if (resolvedPlayer != null || networkFinished) {
                                         loadDone = true
+                                    } else {
+                                        // Native mirror resolution is still running. Keep the
+                                        // browser alive and permit another scan instead of
+                                        // declaring a cached description "finished".
+                                        scanningUrl = null
                                     }
                                 }
                             }
