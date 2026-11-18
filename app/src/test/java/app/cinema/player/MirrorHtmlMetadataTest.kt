@@ -66,4 +66,25 @@ class MirrorHtmlMetadataTest {
         assertEquals("33",result.info!!.voices.single().id)
         assertEquals("Стандартная",result.info!!.voices.single().name)
     }
+
+    @Test fun initOnlyTranslatorRemainsPlayableAndKeepsRuntimeFlags() {
+        val html = """
+          <div class="b-post">
+            <div class="b-post__title"><h1>Бригада</h1></div>
+            <div class="b-post__description_text">Описание.</div>
+            <table class="b-post__infotable">
+              <tr><th>Время</th><td>52 мин.</td></tr>
+            </table>
+            <script>initCDNSeriesEvents(123,77,1,0,1);</script>
+          </div>
+        """
+        val result=MirrorHtmlMetadata.parse(url,html)
+        val player=result.player!!
+        assertEquals("77",player.defaultVoice)
+        assertEquals("77",player.voices.single().id)
+        assertEquals("По умолчанию",player.voices.single().name)
+        assertEquals(1,player.defaultFlags!!.isCamrip)
+        assertEquals(1,player.defaultFlags!!.isDirector)
+        assertEquals(52L * 60_000L,player.expectedDurationMs)
+    }
 }
