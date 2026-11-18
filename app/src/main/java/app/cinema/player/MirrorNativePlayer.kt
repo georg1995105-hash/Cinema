@@ -263,8 +263,11 @@ internal fun MirrorNativePlayer(
                         savedMirrors = mirrors
                     )
                     if (mapped != null) {
+                        val crossOrigin = !SourceRules.sameOrigin(
+                            view.url ?: transportUrl, mapped
+                        )
                         transportUrl = mapped
-                        if (mapped != requested) {
+                        if (mapped != requested || crossOrigin) {
                             view.loadUrl(mapped, MirrorSitePolicy.webViewHeaders(mapped))
                             return true
                         }
