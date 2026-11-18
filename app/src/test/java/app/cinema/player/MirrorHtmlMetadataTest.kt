@@ -109,7 +109,7 @@ class MirrorHtmlMetadataTest {
           <div class="b-post">
             <h1 class="b-post__title">Бригада</h1>
             <div class="b-post__description_text">Сериал.</div>
-            <input type="hidden" id="favs" value="abc_12"/>
+            <input type="hidden" id="ctrl_favs" value="abc_12"/>
             <ul id="translators-list">
               <li data-translator_id="17">Обычная</li>
             </ul>
