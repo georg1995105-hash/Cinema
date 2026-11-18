@@ -210,14 +210,15 @@ internal object MirrorNetworkSource {
         url: String,
         mirrors: List<String>,
         userAgent: String,
-        requiredVoice: String = ""
+        requiredVoice: String = "",
+        client: OkHttpClient = http
     ): FilmResult = supervisorScope {
             if (!SourceRules.isValidHttpsUrl(url) || MirrorPostId.fromUrl(url) == null)
                 return@supervisorScope FilmResult(url, reason = "Неверный адрес фильма.")
 
             // The selected site's film page is authoritative. A faster response
             // from an unrelated built-in mirror must never silently replace it.
-            val preferred = film(url, userAgent, mirrors)
+            val preferred = film(url, userAgent, mirrors, client)
             val preferredPlayer = preferred.metadata?.player
             val preferredCompatible = preferredPlayer != null &&
                 (requiredVoice.isBlank() ||
@@ -235,7 +236,7 @@ internal object MirrorNetworkSource {
             val completed = Channel<FilmResult>(Channel.UNLIMITED)
             val jobs = candidates.map { candidate ->
                 launch(Dispatchers.IO) {
-                    completed.send(film(candidate, userAgent, mirrors))
+                    completed.send(film(candidate, userAgent, mirrors, client))
                 }
             }
             var bestInfo: FilmResult? = preferred.takeIf { it.metadata?.info != null }
