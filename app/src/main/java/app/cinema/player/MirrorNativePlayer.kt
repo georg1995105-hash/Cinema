@@ -272,8 +272,8 @@ internal fun MirrorNativePlayer(
         }
     }
 
-    val metadataHandler = remember(context,filmUrl,transportUrl) { Handler(Looper.getMainLooper()) }
-    val web=remember(context,filmUrl,transportUrl) {
+    val metadataHandler = remember(context,filmUrl) { Handler(Looper.getMainLooper()) }
+    val web=remember(context,filmUrl) {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
             settings.javaScriptEnabled=true
@@ -473,7 +473,14 @@ internal fun MirrorNativePlayer(
         val acceptedUrl = fetched.finalUrl.takeIf {
             MirrorFilmUrl.isAllowedResolved(filmUrl, it, mirrors)
         } ?: filmUrl
-        if (acceptedUrl != transportUrl) transportUrl = acceptedUrl
+        if (acceptedUrl != transportUrl) {
+            transportUrl = acceptedUrl
+            // Keep one session WebView alive through native-origin failover.
+            // A recreated WebView loses its pending challenge and AJAX state.
+            if (!SourceRules.sameOrigin(web.url ?: filmUrl, acceptedUrl)) {
+                MirrorGuestSession.loadFilm(web, acceptedUrl)
+            }
+        }
 
         val player = fetched.metadata?.player
         if (movie == null && player != null) {
