@@ -41,7 +41,7 @@ internal val appBlue = Color(0xFF80C5E7)
 internal val appMuted = Color(0xFFADB8C0)
 private val appWhite = Color(0xFFF4F7F8)
 
-internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE, MOVIE, FILM_PLAYER, PERSON, ACCOUNT }
+internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE, MOVIE, FILM_PLAYER, PERSON, ACCOUNT, LIFT }
 private data class Destination(val page: Page, val label: String, val icon: ImageVector)
 private val destinations = listOf(
     Destination(Page.HOME, "Главная", Icons.Outlined.Home),
@@ -77,6 +77,8 @@ private fun CinemaApp() {
     var page by remember { mutableStateOf(Page.HOME) }
     var playing by remember { mutableStateOf<String?>(null) }
     var playingMovieKey by remember { mutableStateOf<String?>(null) }
+    var liftTitle by remember { mutableStateOf("") }
+    var liftReturn by remember { mutableStateOf(Page.MOVIE) }
     var browsingSource by remember { mutableStateOf<String?>(null) }
     var playbackStorageUrl by remember { mutableStateOf<String?>(null) }
     var selectedFilm by remember { mutableStateOf<CatalogMovie?>(null) }
@@ -106,6 +108,7 @@ private fun CinemaApp() {
     }
     fun back() {
         if (page == Page.SITE) { page = browseReturn; return }
+        if (page == Page.LIFT) { page = liftReturn; return }
         if (page == Page.MOVIE) { page = movieBack; return }
         if (page == Page.PERSON) { selectedFilm = previousFilm; page = Page.MOVIE; return }
         if (page == Page.FILM_PLAYER) {
@@ -140,7 +143,7 @@ private fun CinemaApp() {
     Scaffold(
         containerColor = appBackground,
         bottomBar = {
-            if (page != Page.SITE && page != Page.MOVIE && page != Page.FILM_PLAYER && page != Page.PERSON) BoxWithConstraints(
+            if (page != Page.SITE && page != Page.MOVIE && page != Page.FILM_PLAYER && page != Page.PERSON && page != Page.LIFT) BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -177,7 +180,7 @@ private fun CinemaApp() {
         }
     ) { insets ->
         Box(
-            if (page == Page.FILM_PLAYER) Modifier.fillMaxSize()
+            if (page == Page.FILM_PLAYER || page == Page.LIFT) Modifier.fillMaxSize()
             else Modifier.fillMaxSize().padding(insets)
                 .padding(horizontal = if (tablet) 30.dp else 16.dp, vertical = 12.dp)
         ) {
@@ -255,6 +258,7 @@ private fun CinemaApp() {
                 Page.PLAYER -> PlayerSettingsScreen(local, ::back) { page = Page.TEST }
                 Page.APPEARANCE -> AppearanceScreen(local, ::back)
                 Page.UPDATES -> UpdatesScreen()
+                Page.LIFT -> LiftWebScreen(onClose = { page = liftReturn }, title = liftTitle)
                 Page.SITE -> BrowserScreen(
                     browsingSource ?: activeSource.orEmpty(),
                     onBack = { page = browseReturn },
@@ -325,6 +329,11 @@ private fun CinemaApp() {
                             onPlay = { verifiedStreamUrl ->
                                 playingMovieKey = movie.url
                                 playing = verifiedStreamUrl
+                            },
+                            onLift = {
+                                liftTitle = movie.title
+                                liftReturn = Page.MOVIE
+                                page = Page.LIFT
                             }
                         )
                     } else FilmDetails(
@@ -422,7 +431,7 @@ internal fun ScreenHeading(title: String, subtitle: String? = null, back: (() ->
     }
 }
 
-private val feeds = listOf("Смотреть", "Мосфильм", "Архив")
+private val feeds = listOf("Lift", "Популярное", "Новинки", "Высокий рейтинг")
 private val contentKinds = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы")
 
 @Composable
@@ -572,13 +581,19 @@ private fun HomeScreen(
             modifier = Modifier.fillMaxWidth().weight(1f),
             key = { index -> feeds[index] }
         ) { index ->
-            CinemetaGrid(
-                tab = feeds[index],
-                kind = kind,
-                cardsPerRow = cardsPerRow,
-                onOpen = onOpenFilm,
-                loadContent = pager.currentPage == index
-            )
+            if (feeds[index] == "Lift") {
+                LiftWebScreen(
+                    onClose = { scope.launch { pager.animateScrollToPage(1) } }
+                )
+            } else {
+                CinemetaGrid(
+                    tab = feeds[index],
+                    kind = kind,
+                    cardsPerRow = cardsPerRow,
+                    onOpen = onOpenFilm,
+                    loadContent = pager.currentPage == index
+                )
+            }
         }
     }
 }
