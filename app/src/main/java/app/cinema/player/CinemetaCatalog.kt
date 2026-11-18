@@ -137,24 +137,28 @@ internal object CinemetaCatalog {
     )
     internal fun localizeGenre(genre: String): String = localizedGenre[genre] ?: genre
 
-    internal fun localizeCountry(country: String): String = when (country.trim()) {
-        "Russia", "Russian Federation" -> "Россия"
-        "United States", "USA" -> "США"
-        "United Kingdom", "UK" -> "Великобритания"
-        "Canada" -> "Канада"
-        "Germany" -> "Германия"
-        "France" -> "Франция"
-        "Japan" -> "Япония"
-        "South Korea" -> "Южная Корея"
-        "Spain" -> "Испания"
-        "Italy" -> "Италия"
-        else -> country
-    }
+    internal fun localizeCountry(country: String): String =
+        country.split(',').joinToString(", ") { item ->
+            when (item.trim()) {
+                "Russia", "Russian Federation" -> "Россия"
+                "United States", "USA" -> "США"
+                "United Kingdom", "UK" -> "Великобритания"
+                "Canada" -> "Канада"
+                "New Zealand" -> "Новая Зеландия"
+                "Iceland" -> "Исландия"
+                "Germany" -> "Германия"
+                "France" -> "Франция"
+                "Japan" -> "Япония"
+                "South Korea" -> "Южная Корея"
+                "Spain" -> "Испания"
+                "Italy" -> "Италия"
+                else -> item.trim()
+            }
+        }
 
     private fun detailsText(data: JSONObject): String {
         val year = text(data, "year").ifBlank { text(data, "releaseInfo") }
-        val country = text(data, "country").replace("Russia", "Россия")
-            .replace("United States", "США").replace("United Kingdom", "Великобритания")
+        val country = localizeCountry(text(data, "country"))
         val genres = names(data.optJSONArray("genres") ?: data.optJSONArray("genre"))
             .take(3).map { localizedGenre[it] ?: it }
         return (listOf(year, country) + genres).filter { it.isNotBlank() }.joinToString(" · ").take(180)
@@ -336,7 +340,7 @@ internal object CinemetaCatalog {
             originalTitle = text(meta, "name"),
             rating = text(meta, "imdbRating"),
             country = localizeCountry(text(meta, "country")),
-            runtime = text(meta, "runtime"),
+            runtime = text(meta, "runtime").replace("min", "мин").replace("minutes", "мин"),
             genres = names(meta.optJSONArray("genres") ?: meta.optJSONArray("genre")).map(::localizeGenre),
             directors = names(meta.optJSONArray("director")),
             actors = names(meta.optJSONArray("cast")),
