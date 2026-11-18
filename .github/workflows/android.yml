@@ -133,18 +133,18 @@ jobs:
           CERTIFICATE="$(awk -F': ' '/certificate SHA-256 digest: /{print $NF}' <<< "$SIGNER" | sort -u)"
           test "$CERTIFICATE" = '1db504f66fa39cf51feefab727f5b8b229baef08a5ae2de80da05191514f93cb'
           sha256sum "$APK"
-      - name: Verify signed Android update from 0.4.25
+      - name: Verify signed Android update from 0.4.26
         if: steps.signing.outputs.available == 'true'
         shell: bash
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           curl --fail --silent --show-error --location --retry 2 \
-            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.25/Cinema-0.4.25.apk" \
-            --output "$RUNNER_TEMP/Cinema-0.4.25.apk"
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.4.26/Cinema-0.4.26.apk" \
+            --output "$RUNNER_TEMP/Cinema-0.4.26.apk"
           if adb shell pm path app.cinema.player | grep -q "^package:"; then
             adb uninstall app.cinema.player
           fi
-          adb install "$RUNNER_TEMP/Cinema-0.4.25.apk"
+          adb install "$RUNNER_TEMP/Cinema-0.4.26.apk"
           adb shell am start -W -n app.cinema.player/.MainActivity | grep -F "Status: ok"
           ORIGINAL_INSTALL="$(adb shell dumpsys package app.cinema.player | awk -F= '/firstInstallTime=/{print $2; exit}')"
           test -n "$ORIGINAL_INSTALL"
@@ -184,4 +184,4 @@ jobs:
           gh release create "$TAG" "$RUNNER_TEMP/Cinema-$VERSION.apk" \
             --target "$GITHUB_SHA" \
             --title "Cinema $VERSION" \
-            --notes "Cinema 0.4.26: Anubis перенесён с ожидания скрытого WebView на нативную схему из референсной APK. Клиент парсит anubis_challenge и anubis_base_prefix из HTML, считает source-provided PoW, вызывает pass-challenge, сохраняет techaro.lol-anubis-auth и повторяет исходный запрос фильма уже с cookie. Добавлен полный Android-тест: challenge → PoW → Set-Cookie → повтор фильма → реальные озвучки из HTML. Старая Anubis-cookie по-прежнему очищается после 403. Проверено CI: unit, Android WebView/Media3, сквозной Anubis flow, подпись и обновление поверх 0.4.25."
+            --notes "Cinema 0.4.27: сетевой профиль зеркал приведён к референсной APK. Добавлены все 22 публичных Rezka-зеркала из её mirror pool (плюс hdrezka.me/standby), поиск больше не обрезается первой десяткой и идёт ограниченными волнами. Для same-origin Rezka-запросов отправляется системная cookie hdmbbs=1, как в эталоне. Карточка и плеер больше не объявляют ошибку раньше завершения mirror resolver; кэшированное описание/постер не считаются завершённой карточкой без свежих данных плеера/озвучек. Android-тест проверяет hdmbbs → Anubis → auth cookie → повтор фильма → озвучки. Проверено CI: unit, Android instrumentation, подпись и обновление поверх 0.4.26."
