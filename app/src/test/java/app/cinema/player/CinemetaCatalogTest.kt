@@ -15,7 +15,8 @@ class CinemetaCatalogTest {
             .put("poster", "https://images.metahub.space/poster/small/tt0337898/img")
         val film = CinemetaCatalog.parseMovie(item)
         assertNotNull(film)
-        assertTrue(CinemetaCatalog.isMovieUrl(film!!.url))
+        assertEquals("Бригада", film!!.title)
+        assertTrue(CinemetaCatalog.isMovieUrl(film.url))
         assertEquals("series" to "tt0337898", CinemetaCatalog.identity(film.url))
         assertTrue(film.details.contains("2002"))
     }
