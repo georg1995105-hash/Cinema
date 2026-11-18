@@ -24,7 +24,7 @@ class MosfilmNavigationTest {
         // visible before pressing it; the studio label may be below the fold.
         compose.onNode(hasText("Смотреть") and hasClickAction())
             .performScrollTo().performClick()
-        compose.onNodeWithText("Мосфильм · RUTUBE").assertIsDisplayed()
+        compose.onNodeWithText("Видеоплеер").assertIsDisplayed()
         compose.onNodeWithText("Назад").performClick()
         compose.onNodeWithText("О фильме").assertIsDisplayed()
     }
