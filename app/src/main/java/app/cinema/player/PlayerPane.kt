@@ -17,6 +17,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -36,6 +38,7 @@ fun PlayerPane(
     onSave: (Long) -> Unit
 ) {
     val context = LocalContext.current
+    PlayerImmersiveLifecycle(url)
     val player = remember(url) {
         ExoPlayer.Builder(
             context,
@@ -52,10 +55,25 @@ fun PlayerPane(
     var duration by remember { mutableLongStateOf(0L) }
     var isPlaying by remember { mutableStateOf(true) }
     var quickSpeed by remember { mutableStateOf(false) }
+    var buffering by remember(url) { mutableStateOf(true) }
+    var errorMessage by remember(url) { mutableStateOf("") }
+    var speed by remember(url) { mutableFloatStateOf(1f) }
+    var speedMenu by remember { mutableStateOf(false) }
 
     DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                buffering = state == Player.STATE_BUFFERING
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                errorMessage = "Ошибка видеопотока (${error.errorCodeName}). Проверьте источник или подключение."
+                buffering = false
+            }
+        }
+        player.addListener(listener)
         onDispose {
             onSave(player.currentPosition.coerceAtLeast(0))
+            player.removeListener(listener)
             player.release()
         }
     }
@@ -77,6 +95,18 @@ fun PlayerPane(
                 Text("Назад")
             }
             Spacer(Modifier.weight(1f))
+            Box {
+                TextButton(onClick = { speedMenu = true }) { Text("${speed}×") }
+                DropdownMenu(expanded = speedMenu, onDismissRequest = { speedMenu = false }) {
+                    listOf(0.75f, 1f, 1.25f, 1.5f, 2f).forEach { value ->
+                        DropdownMenuItem(text = { Text("${value}×") }, onClick = {
+                            speed = value
+                            player.setPlaybackSpeed(value)
+                            speedMenu = false
+                        })
+                    }
+                }
+            }
             if (quickSpeed) {
                 Surface(color = appBlue.copy(alpha = .2f),
                     shape = RoundedCornerShape(12.dp)) {
@@ -134,7 +164,22 @@ fun PlayerPane(
                     )
                 }
             )
-            if (controlsVisible) {
+            if (buffering && errorMessage.isBlank()) {
+                CircularProgressIndicator(modifier = Modifier.size(35.dp), color = appBlue)
+            }
+            if (errorMessage.isNotBlank()) {
+                Column(Modifier.align(Alignment.Center).padding(18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(errorMessage, color = Color.White)
+                    Spacer(Modifier.height(9.dp))
+                    OutlinedButton(onClick = {
+                        errorMessage = ""
+                        player.prepare()
+                        player.play()
+                    }) { Text("Повторить") }
+                }
+            }
+            if (controlsVisible && errorMessage.isBlank()) {
                 FilledIconButton(onClick = {
                     if (player.isPlaying) player.pause() else player.play()
                 }, modifier = Modifier.size(57.dp),
