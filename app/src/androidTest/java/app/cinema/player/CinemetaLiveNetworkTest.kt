@@ -14,13 +14,18 @@ import org.junit.Test
 class CinemetaLiveNetworkTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    @Test fun actualCyrillicSearchFindsBrigada() = runBlocking {
+    @Test fun metadataForBrigadaDoesNotBecomeFalseWatchableSearchResult() = runBlocking {
         withTimeout(40_000) {
-            val movies = CinemetaCatalog.search(context, "Бригада", "Сериалы")
-            assertTrue("Real Russian query must return Brigada", movies.any {
-                CinemetaCatalog.identity(it.url) == ("series" to "tt0337898") &&
-                    it.title == "Бригада" && it.poster.startsWith("https://")
-            })
+            // Cinemeta still supplies real descriptive metadata for this show.
+            val film = CinemetaCatalog.metadata(
+                context, CinemetaCatalog.movieUrl("series", "tt0337898"))
+            assertEquals("Бригада", film.item.title)
+            assertTrue(film.item.poster.startsWith("https://"))
+            // No verified full-video integration exists for this ID. It must
+            // not be advertised in the source-backed watch catalogue.
+            val watch = CinemetaCatalog.search(context, "Бригада", "Сериалы")
+            assertFalse(watch.any { CinemetaCatalog.identity(it.url) ==
+                ("series" to "tt0337898") })
         }
     }
 
