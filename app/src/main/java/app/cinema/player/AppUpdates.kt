@@ -212,7 +212,9 @@ internal fun UpdatesScreen() {
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Text("Тестовые обновления", modifier = Modifier.weight(1f))
-            Switch(checked = previewUpdates, onCheckedChange = {
+            Switch(checked = previewUpdates,
+                enabled = !AppUpdates.downloading && !AppUpdates.checking,
+                onCheckedChange = {
                 previewUpdates = it
                 AppUpdates.setIncludeTestBuilds(context, it)
             })
