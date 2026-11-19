@@ -238,7 +238,7 @@ private fun CinemaApp() {
             when (page) {
                 Page.HOME -> HomeScreen(
                     activeSource = activeSource,
-                    cardsPerRow = local.cardsPerRow(),
+                    cardsPerRow = local.cardsPerRow(device, screenConfiguration.screenWidthDp),
                     onOpenFilm = { local.rememberMovie(it); selectedFilm = it; movieBack = Page.HOME; page = Page.MOVIE },
                     onBrowse = { browsingSource = it; browseReturn = Page.HOME; page = Page.SITE },
                     onAddSource = { page = Page.SOURCES }
@@ -246,7 +246,7 @@ private fun CinemaApp() {
                 Page.SEARCH -> SearchScreen(
                     local = local,
                     source = activeSource,
-                    cardsPerRow = local.cardsPerRow(),
+                    cardsPerRow = local.cardsPerRow(device, screenConfiguration.screenWidthDp),
                     onOpen = { local.rememberMovie(it); selectedFilm = it; movieBack = Page.SEARCH; page = Page.MOVIE },
                     onAddSource = { page = Page.SOURCES },
                     onBrowse = { browsingSource = it; browseReturn = Page.SEARCH; page = Page.SITE }
@@ -255,7 +255,7 @@ private fun CinemaApp() {
                     local = local,
                     history = history,
                     favourites = favourites,
-                    cardsPerRow = local.cardsPerRow(),
+                    cardsPerRow = local.cardsPerRow(device, screenConfiguration.screenWidthDp),
                     onOpen = { film ->
                         local.rememberMovie(film)
                         selectedFilm = film
@@ -475,7 +475,7 @@ private fun CinemaApp() {
                     PersonScreen(
                         person = person,
                         source = activeSource,
-                        cardsPerRow = local.cardsPerRow(),
+                        cardsPerRow = local.cardsPerRow(device, screenConfiguration.screenWidthDp),
                         onBack = { selectedFilm = previousFilm; page = Page.MOVIE },
                         onOpen = { film ->
                             local.rememberMovie(film)
