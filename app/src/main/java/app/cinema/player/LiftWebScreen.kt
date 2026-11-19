@@ -187,7 +187,7 @@ internal fun LiftWebScreen(
 
                 override fun onPageFinished(view: WebView, url: String) {
                     loading = false
-                    if (LiftMatchPolicy.safeDetailsUrl(url) && url == chosenDetailsUrl) {
+                    if (failure.isEmpty() && LiftMatchPolicy.safeDetailsUrl(url) && url == chosenDetailsUrl) {
                         onFilmPageVisited(url)
                     }
                     if (selectedTitle.isNotBlank() && !foundDetails &&
