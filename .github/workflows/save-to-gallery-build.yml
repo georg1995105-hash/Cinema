@@ -17,6 +17,10 @@ jobs:
           cat .build-save-gallery/b64-{1,2,3,4,5,6}.txt | base64 --decode > /tmp/stg-code.tar.xz
           echo '80219b69dd51ea4410462de6441316afe8a5b9d6586b6a0d34db16dca6a15a4a  /tmp/stg-code.tar.xz' | sha256sum -c -
           tar -xJf /tmp/stg-code.tar.xz -C /tmp/stg-code
+          mkdir -p /tmp/stg-code/app/src/main/res/drawable
+          cat .build-save-gallery/icon-b64-{1,2,3}.txt | base64 --decode > /tmp/stg-code/app/src/main/res/drawable/ic.png
+          echo 'af3d36ab4b124714e2e83d991f92820ca18bc036d1a63df7da21905ff5494d9f  /tmp/stg-code/app/src/main/res/drawable/ic.png' | sha256sum -c -
+          sed -i 's|@android:drawable/ic_menu_save|@drawable/ic|' /tmp/stg-code/app/src/main/AndroidManifest.xml
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
