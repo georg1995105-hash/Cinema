@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -191,7 +192,7 @@ internal fun CinemetaFilmDetails(
     onToggleFavourite: () -> Unit,
     onBack: () -> Unit,
     onPlay: (String) -> Unit,
-    onLift: () -> Unit
+    onLift: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     var details by remember(movie.url) { mutableStateOf<CinemetaDetails?>(null) }
@@ -202,6 +203,9 @@ internal fun CinemetaFilmDetails(
     var checkFailure by remember(movie.url) { mutableStateOf("") }
     var retry by remember(movie.url) { mutableIntStateOf(0) }
     val couldHaveArchive = InternetArchiveStreams.canCheck(movie.url)
+    val resumeAvailable = remember(movie.url) {
+        LocalStore(context.applicationContext).liftVisitedUrl(movie.url) != null
+    }
     LaunchedEffect(movie.url, retry) {
         loading = true
         error = ""
@@ -241,14 +245,14 @@ internal fun CinemetaFilmDetails(
                 PublicMoviePoster(movie, Modifier.width(190.dp).aspectRatio(.70f)
                     .border(1.dp, appPanel, RoundedCornerShape(14.dp)))
                 DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
-                    couldHaveArchive, onPlay, onLift, { retry++ }, Modifier.weight(1f))
+                    couldHaveArchive, onPlay, onLift, resumeAvailable, { retry++ }, Modifier.weight(1f))
             }
         } else {
             PublicMoviePoster(movie, Modifier.width(148.dp).aspectRatio(.70f)
                 .align(Alignment.CenterHorizontally))
             Spacer(Modifier.height(12.dp))
             DetailsBody(movie, details, loading, error, streams, checking, checkFailure,
-                couldHaveArchive, onPlay, onLift, { retry++ }, Modifier.fillMaxWidth())
+                couldHaveArchive, onPlay, onLift, resumeAvailable, { retry++ }, Modifier.fillMaxWidth())
         }
         Spacer(Modifier.height(28.dp))
     }
@@ -260,18 +264,22 @@ private fun DetailsBody(
     movie: CatalogMovie, info: CinemetaDetails?, loading: Boolean, error: String,
     streams: List<InternetArchiveStreams.Video>, checking: Boolean, checkFailure: String,
     couldHaveArchive: Boolean,
-    onPlay: (String) -> Unit, onLift: () -> Unit, retry: () -> Unit,
+    onPlay: (String) -> Unit, onLift: (Boolean) -> Unit,
+    resumeAvailable: Boolean, retry: () -> Unit,
     modifier: Modifier
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(movie.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         if (movie.details.isNotBlank()) Text(movie.details, color = appMuted)
-        Button(onClick = onLift, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = { onLift(false) }, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Outlined.PlayArrow, contentDescription = null)
             Spacer(Modifier.width(8.dp))
             Text("Смотреть в Lift")
         }
-        Text("Откроется поиск фильма в Lift. Доступность видео зависит от сервиса и региона.",
+        if (resumeAvailable) OutlinedButton(
+            onClick = { onLift(true) }, modifier = Modifier.fillMaxWidth()
+        ) { Text("Продолжить в Lift") }
+        Text("Lift открывает выбранную карточку фильма. Доступность видео зависит от сервиса и региона.",
             color = appMuted, style = MaterialTheme.typography.bodySmall)
         // Watch must be directly visible under the film title, not buried
         // below synopsis, credits and a long list of metadata.
