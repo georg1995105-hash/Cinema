@@ -11,9 +11,19 @@ class CinemaDevicesTest {
         assertEquals(CinemaDevice.TV, CinemaDevices.classify(true, 360))
     }
 
+    @Test fun tabletDefaultsGrowWithDisplayWidth() {
+        assertEquals(5, CinemaDevices.defaultColumns(CinemaDevice.TABLET, 600))
+        assertEquals(6, CinemaDevices.defaultColumns(CinemaDevice.TABLET, 800))
+        assertEquals(7, CinemaDevices.defaultColumns(CinemaDevice.TABLET, 1024))
+        assertEquals(3, CinemaDevices.defaultColumns(CinemaDevice.PHONE, 360))
+    }
+
     @Test fun gridIsReadableOnEachScreenClass() {
         assertEquals(2, CinemaDevices.columns(CinemaDevice.PHONE, 5, 360))
-        assertEquals(4, CinemaDevices.columns(CinemaDevice.TABLET, 5, 600))
+        assertEquals(5, CinemaDevices.columns(CinemaDevice.TABLET, 5, 600))
+        assertEquals(6, CinemaDevices.columns(CinemaDevice.TABLET, 6, 800))
+        assertEquals(7, CinemaDevices.columns(CinemaDevice.TABLET, 7, 1200))
+        assertEquals(5, CinemaDevices.columns(CinemaDevice.TABLET, 3, 600))
         assertEquals(5, CinemaDevices.columns(CinemaDevice.TV, 3, 960))
         assertEquals(6, CinemaDevices.columns(CinemaDevice.TV, 7, 960))
         assertEquals(7, CinemaDevices.columns(CinemaDevice.TV, 7, 1400))
