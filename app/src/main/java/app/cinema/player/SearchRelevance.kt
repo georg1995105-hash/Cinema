@@ -7,8 +7,8 @@ import java.util.Locale
 /** Reject generic page cards when a mirror ignores the submitted search query. */
 internal object SearchRelevance {
     private val separators = Regex("[^\\p{L}\\p{N}]+")
-    private val yearSuffix = Regex("""(?:^|\\s)((?:18|19|20)\\d{2})\\s*$""")
-    private val yearInDetails = Regex("""\\b(?:18|19|20)\\d{2}\\b""")
+    private val yearSuffix = Regex("""(?:^|\s)((?:18|19|20)\d{2})\s*$""")
+    private val yearInDetails = Regex("""\b(?:18|19|20)\d{2}\b""")
     fun queryWithoutYear(raw: String): String =
         raw.trim().replace(yearSuffix, "").trim().ifEmpty { raw.trim() }
     fun normalized(raw: String): String =
