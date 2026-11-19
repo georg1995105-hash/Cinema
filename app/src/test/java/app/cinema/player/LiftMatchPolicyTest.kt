@@ -60,8 +60,9 @@ class LiftMatchPolicyTest {
 
     @Test fun originalSiteSearchSupportsIngaWithoutExternalMetadataFilters() {
         assertEquals(LiftWebSource.SEARCH, LiftWebSource.startUrl("Инга"))
-        val script = LiftMatchPolicy.searchScript("Инга")
+        val script = LiftMatchPolicy.searchScript("Инга", liveOnly = true)
         assertTrue(script.contains("descriptor.set.call(field,"))
+        assertFalse(script.contains("new KeyboardEvent"))
         assertTrue(script.contains("new Event('input'"))
         assertTrue(script.contains("Инга"))
         // Only the duplicate site's own tab navigation is hidden; the
