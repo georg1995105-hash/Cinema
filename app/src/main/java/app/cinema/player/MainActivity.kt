@@ -84,6 +84,11 @@ private fun TvNavigation(current: Page, open: (Page) -> Unit) {
 }
 
 class MainActivity : ComponentActivity() {
+    override fun onResume() {
+        super.onResume()
+        AppUpdates.check(this)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = android.graphics.Color.rgb(19, 24, 28)
