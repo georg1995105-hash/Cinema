@@ -60,4 +60,16 @@ class CinemetaCatalogTest {
         assertTrue(CinemetaCatalog.parseList(JSONObject().put("metas", JSONArray())).isEmpty())
         assertFalse(CinemetaCatalog.isMovieUrl("https://example.com/meta/movie/tt0063350.json"))
     }
+
+    @Test fun originalFilmTitleBecomesSearchAlias() {
+        val movie = CinemetaCatalog.parseMovie(JSONObject()
+            .put("id", "tt0111161")
+            .put("type", "movie")
+            .put("name", "Побег из Шоушенка")
+            .put("originalTitle", "The Shawshank Redemption")
+            .put("year", "1994"))!!
+        assertEquals(listOf("The Shawshank Redemption"), movie.aliases)
+        assertEquals(movie, SearchRelevance.find(listOf(movie), "The Shawshank Redemption").single())
+    }
+
 }
