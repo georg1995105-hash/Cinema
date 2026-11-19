@@ -87,7 +87,9 @@ internal object LiftMatchPolicy {
         val quoted = org.json.JSONObject.quote(title.trim().take(140))
         return """
             (function(){
-              const field = document.querySelector('input#q, input[type="search"]');
+              const field = document.querySelector(
+                'input#q, input[type="search"], input[name="q"], input[placeholder*="Поиск"], input[placeholder*="поиск"]'
+              );
               if (!field) return false;
               const descriptor = Object.getOwnPropertyDescriptor(
                 window.HTMLInputElement.prototype, 'value');
