@@ -39,8 +39,8 @@ internal object SearchRelevance {
                 val match = forms.mapIndexedNotNull { index, form ->
                     val relevance = when {
                         title == form -> 0
-                        title.startsWith("$"+"form ") -> 2
-                        title.contains(" $"+"form ") || title.endsWith(" $"+"form") -> 4
+                        title.startsWith(form + " ") -> 2
+                        title.contains(" " + form + " ") || title.endsWith(" " + form) -> 4
                         title.startsWith(form) && form.length >= 3 && form == q -> 6
                         else -> return@mapIndexedNotNull null
                     }
