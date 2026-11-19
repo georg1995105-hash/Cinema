@@ -46,6 +46,11 @@ internal fun CinemetaGrid(
     var loading by remember(tab, kind, searchText) { mutableStateOf(true) }
     var refreshing by remember(tab, kind, searchText) { mutableStateOf(false) }
     var error by remember(tab, kind, searchText) { mutableStateOf("") }
+    var nextPage by remember(tab, kind, searchText) { mutableIntStateOf(0) }
+    var retryPage by remember(tab, kind, searchText) { mutableIntStateOf(0) }
+    var loadingMore by remember(tab, kind, searchText) { mutableStateOf(false) }
+    var pageError by remember(tab, kind, searchText) { mutableStateOf("") }
+    var hasMore by remember(tab, kind, searchText) { mutableStateOf(true) }
 
     fun relevant(items: List<CatalogMovie>): List<CatalogMovie> =
         if (searchText.isBlank()) items else SearchRelevance.find(items, searchText)
@@ -110,6 +115,28 @@ internal fun CinemetaGrid(
         }
     }
 
+    // Explicit pagination avoids extra requests while browsing or swiping tabs.
+    // Failed pages can be retried without skipping results.
+    LaunchedEffect(tab, kind, searchText, nextPage, retryPage, loadContent) {
+        if (!loadContent || searchText.isNotBlank() || nextPage == 0) return@LaunchedEffect
+        loadingMore = true
+        pageError = ""
+        try {
+            val batch = CinemetaCatalog.home(context, tab, kind, page = nextPage)
+            val localized = RussianMovieTitles.enrich(batch)
+            val existingUrls = movies.mapTo(HashSet()) { it.url }
+            val additional = localized.filter { existingUrls.add(it.url) }
+            if (additional.isNotEmpty()) movies = movies + additional
+            hasMore = additional.isNotEmpty() && nextPage < 10
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            pageError = "Не удалось загрузить следующую страницу"
+        } finally {
+            loadingMore = false
+        }
+    }
+
     val visible = movies.filter(movieFilter)
     val columns = if (LocalConfiguration.current.screenWidthDp >= 600)
         cardsPerRow.coerceIn(2, 8) else cardsPerRow.coerceIn(2, 3)
@@ -118,6 +145,10 @@ internal fun CinemetaGrid(
         onRefresh = {
             if (!refreshing && !loading && loadContent) {
                 refreshing = true
+                nextPage = 0
+                retryPage = 0
+                pageError = ""
+                hasMore = true
                 refresh++
             }
         },
@@ -147,6 +178,32 @@ internal fun CinemetaGrid(
                     ) {
                         items(visible, key = { it.url }) { movie ->
                             CinemetaFilmPoster(movie) { onOpen(movie) }
+                        }
+                        if (searchText.isBlank() && loadContent && (hasMore || pageError.isNotBlank())) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    if (pageError.isNotBlank()) {
+                                        Text(pageError, color = appMuted)
+                                        Spacer(Modifier.height(8.dp))
+                                    }
+                                    OutlinedButton(
+                                        enabled = !loadingMore && !loading,
+                                        onClick = {
+                                            if (pageError.isNotBlank()) retryPage++
+                                            else nextPage++
+                                        }
+                                    ) {
+                                        if (loadingMore) {
+                                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(if (loadingMore) "Загружаем…" else if (pageError.isNotBlank()) "Повторить" else "Показать ещё")
+                                    }
+                                }
+                            }
                         }
                     }
                 }
