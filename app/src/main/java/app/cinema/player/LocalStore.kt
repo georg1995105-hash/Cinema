@@ -109,6 +109,36 @@ class LocalStore(context: Context) {
         if (value in listOf(10, 15, 30)) prefs.edit().putInt("seek_seconds", value).apply()
     }
 
+    /** Last explicitly selected first-party Lift film page; not a video timestamp. */
+    internal fun liftVisitedUrl(movieUrl: String): String? = runCatching {
+        if (!SourceRules.isValidHttpsUrl(movieUrl)) return@runCatching null
+        val saved = JSONObject(prefs.getString("lift_pages_v1", "{}") ?: "{}")
+            .optString(movieUrl)
+        saved.takeIf(LiftMatchPolicy::safeDetailsUrl)
+    }.getOrNull()
+
+    internal fun saveLiftVisit(movieUrl: String, detailsUrl: String) {
+        if (!SourceRules.isValidHttpsUrl(movieUrl) ||
+            !LiftMatchPolicy.safeDetailsUrl(detailsUrl)) return
+        val data = runCatching {
+            JSONObject(prefs.getString("lift_pages_v1", "{}") ?: "{}")
+        }.getOrDefault(JSONObject())
+        // Remove existing key first so new entries remain at the end of the bounded map.
+        data.remove(movieUrl)
+        data.put(movieUrl, detailsUrl)
+        val keys = data.keys().asSequence().toList()
+        keys.take((keys.size - 80).coerceAtLeast(0)).forEach(data::remove)
+        prefs.edit().putString("lift_pages_v1", data.toString()).apply()
+    }
+
+    internal fun removeLiftVisit(movieUrl: String) {
+        val data = runCatching {
+            JSONObject(prefs.getString("lift_pages_v1", "{}") ?: "{}")
+        }.getOrDefault(JSONObject())
+        if (data.remove(movieUrl) != null)
+            prefs.edit().putString("lift_pages_v1", data.toString()).apply()
+    }
+
     fun history(): List<WatchedVideo> = runCatching {
         val data = JSONArray(prefs.getString("watch_history", "[]") ?: "[]")
         (0 until data.length()).map {
