@@ -58,6 +58,18 @@ class LiftMatchPolicyTest {
         assertEquals(url, LiftMatchPolicy.singleExact("Красная палатка", 1969, listOf(match))?.url)
     }
 
+    @Test fun originalSiteSearchSupportsIngaWithoutExternalMetadataFilters() {
+        assertEquals(LiftWebSource.SEARCH, LiftWebSource.startUrl("Инга"))
+        val script = LiftMatchPolicy.searchScript("Инга")
+        assertTrue(script.contains("descriptor.set.call(field,"))
+        assertTrue(script.contains("new Event('input'"))
+        assertTrue(script.contains("Инга"))
+        // Only the duplicate site's own tab navigation is hidden; the
+        // first-party film result links remain visible and clickable.
+        assertTrue(LiftMatchPolicy.hideDuplicateNavigationScript.contains("profile.html"))
+        assertFalse(LiftMatchPolicy.hideDuplicateNavigationScript.contains("document.body.style.display"))
+    }
+
     @Test fun browserJavascriptQuotesUntrustedUserTitle() {
         val script = LiftMatchPolicy.searchScript("\"; alert(1); //")
         assertTrue(script.contains("input#q"))
