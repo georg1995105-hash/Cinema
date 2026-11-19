@@ -32,13 +32,13 @@ internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
     ) {
         ScreenHeading("Настройки")
         Spacer(Modifier.height(16.dp))
-        MenuItem("Обновления", "Новая версия и ход загрузки", Icons.Outlined.SystemUpdate) {
+        MenuItem("Обновления", Icons.Outlined.SystemUpdate) {
             open(Page.UPDATES)
         }
-        MenuItem("Внешний вид", "Оформление и число карточек", Icons.Outlined.Palette) {
+        MenuItem("Внешний вид", Icons.Outlined.Palette) {
             open(Page.APPEARANCE)
         }
-        MenuItem("О приложении", "Версия и сведения", Icons.Outlined.Info) {
+        MenuItem("О приложении", Icons.Outlined.Info) {
             open(Page.ABOUT)
         }
 
@@ -46,7 +46,7 @@ internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
 }
 
 @Composable
-private fun MenuItem(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
+private fun MenuItem(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
     click: () -> Unit) {
     Surface(onClick = click, color = appPanel, shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
@@ -54,11 +54,7 @@ private fun MenuItem(title: String, subtitle: String, icon: androidx.compose.ui.
             verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, tint = appBlue)
             Spacer(Modifier.width(17.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(4.dp))
-                Text(subtitle, color = appMuted, style = MaterialTheme.typography.bodySmall)
-            }
+            Text(title, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
             Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = appMuted)
         }
     }
@@ -248,7 +244,7 @@ internal fun AppearanceScreen(local: LocalStore, back: () -> Unit) {
         mutableIntStateOf(local.cardsPerRow().coerceIn(minCards, maxCards))
     }
     Column {
-        ScreenHeading("Внешний вид", "Оформление", back)
+        ScreenHeading("Внешний вид", back = back)
         Spacer(Modifier.height(24.dp))
         Text("Карточек в ряду: $count", fontWeight = FontWeight.SemiBold)
         Slider(
@@ -260,17 +256,7 @@ internal fun AppearanceScreen(local: LocalStore, back: () -> Unit) {
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(Modifier.height(20.dp))
-        Surface(color = appPanel, shape = RoundedCornerShape(15.dp)) {
-            Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Palette, contentDescription = null, tint = appBlue)
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text("Тёмная тема", fontWeight = FontWeight.Medium)
 
-                }
-            }
-        }
     }
 }
 
