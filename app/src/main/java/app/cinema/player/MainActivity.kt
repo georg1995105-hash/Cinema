@@ -22,6 +22,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -49,6 +51,37 @@ private val destinations = listOf(
     Destination(Page.LIBRARY, "Моё", Icons.Outlined.Bookmarks),
     Destination(Page.SETTINGS, "Настройки", Icons.Outlined.Settings)
 )
+
+/** Large, remote-focusable navigation replaces the phone bottom bar on Android TV. */
+@Composable
+private fun TvNavigation(current: Page, open: (Page) -> Unit) {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) { first.requestFocus() }
+    Row(
+        modifier = Modifier.fillMaxWidth().background(appPanel)
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 36.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(18.dp)
+    ) {
+        destinations.forEachIndexed { index, destination ->
+            val active = current == destination.page ||
+                (destination.page == Page.SETTINGS && current in listOf(
+                    Page.APPEARANCE, Page.ABOUT, Page.UPDATES
+                ))
+            FilterChip(
+                modifier = if (index == 0) Modifier.focusRequester(first) else Modifier,
+                selected = active,
+                onClick = { open(destination.page) },
+                label = {
+                    Text(destination.label, style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+                },
+                leadingIcon = { Icon(destination.icon, contentDescription = null) }
+            )
+        }
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,7 +121,15 @@ private fun CinemaApp() {
     var selectedPerson by remember { mutableStateOf<FilmPerson?>(null) }
     var previousFilm by remember { mutableStateOf<CatalogMovie?>(null) }
     var browseReturn by remember { mutableStateOf(Page.HOME) }
-    val tablet = LocalConfiguration.current.screenWidthDp >= 600
+    val screenConfiguration = LocalConfiguration.current
+    val device = remember(context, screenConfiguration.smallestScreenWidthDp, screenConfiguration.uiMode) {
+        CinemaDevices.detect(context, screenConfiguration)
+    }
+    val isTv = CinemaDevices.isTv(device)
+    val tablet = device != CinemaDevice.PHONE
+    val showNavigation = page !in listOf(
+        Page.SITE, Page.MOVIE, Page.FILM_PLAYER, Page.PERSON, Page.LIFT
+    )
 
     fun saveProgress(url: String, position: Long) {
         history.removeAll { it.url == url }
@@ -133,12 +174,21 @@ private fun CinemaApp() {
         return
     }
     BackHandler(enabled = page != Page.HOME) { back() }
-    LaunchedEffect(Unit) { AppUpdates.check(context) }
+    // Check on launch and periodically while Cinema stays in the foreground.
+    LaunchedEffect(context) {
+        while (true) {
+            AppUpdates.check(context)
+            kotlinx.coroutines.delay(60L * 60L * 1000L)
+        }
+    }
 
     Scaffold(
         containerColor = appBackground,
+        topBar = {
+            if (isTv && showNavigation) TvNavigation(page) { page = it }
+        },
         bottomBar = {
-            if (page != Page.SITE && page != Page.MOVIE && page != Page.FILM_PLAYER && page != Page.PERSON && page != Page.LIFT) BoxWithConstraints(
+            if (!isTv && showNavigation) BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -177,7 +227,8 @@ private fun CinemaApp() {
         Box(
             if (page == Page.FILM_PLAYER || page == Page.LIFT) Modifier.fillMaxSize()
             else Modifier.fillMaxSize().padding(insets)
-                .padding(horizontal = if (tablet) 30.dp else 16.dp, vertical = 12.dp)
+                .padding(horizontal = if (isTv) 40.dp else if (tablet) 26.dp else 16.dp,
+                    vertical = if (isTv) 18.dp else 12.dp)
         ) {
             when (page) {
                 Page.HOME -> HomeScreen(
@@ -436,7 +487,7 @@ private fun CinemaApp() {
             }
         }
     }
-    UpdateNotice()
+    UpdateNotice(show = page != Page.LIFT && page != Page.FILM_PLAYER && playing == null)
 }
 
 @Composable
