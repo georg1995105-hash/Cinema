@@ -35,7 +35,7 @@ internal object CinemetaCatalog {
     // when public APIs are slow or temporarily unreachable. No credentials,
     // site mirrors or cookies are ever persisted in these files.
     private fun snapshotFile(context: Context, section: String, kind: String, query: String): File {
-        val key = "$section|$kind|$query"
+        val key = "$section|$kind|$query|" + if (section == "Новинки") CatalogPages.currentYear() else ""
         val hex = MessageDigest.getInstance("SHA-256")
             .digest(key.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
