@@ -72,7 +72,10 @@ internal fun LiftWebScreen(
     title: String = "",
     expectedYear: Int? = null,
     resumeUrl: String = "",
-    onFilmPageVisited: (String) -> Unit = {}
+    onFilmPageVisited: (String) -> Unit = {},
+    showAllResults: Boolean = false,
+    compact: Boolean = false,
+    onResultSelected: ((String) -> Unit)? = null
 ) {
     val ctx = LocalContext.current
     val device = CinemaDevices.detect(ctx, androidx.compose.ui.platform.LocalConfiguration.current)
@@ -80,7 +83,11 @@ internal fun LiftWebScreen(
     var loading by remember(title) { mutableStateOf(true) }
     var failure by remember(title) { mutableStateOf("") }
     var refresh by remember(title) { mutableIntStateOf(0) }
-    var matching by remember(title, resumeUrl) { mutableStateOf(title.isNotBlank() && !LiftMatchPolicy.safeDetailsUrl(resumeUrl)) }
+    var matching by remember(title, resumeUrl, showAllResults) {
+        mutableStateOf(!showAllResults && title.isNotBlank() && !LiftMatchPolicy.safeDetailsUrl(resumeUrl))
+    }
+    var resultOpened by remember(title, showAllResults) { mutableStateOf(false) }
+    var hasWebHistory by remember(title) { mutableStateOf(false) }
     var choices by remember(title) { mutableStateOf<List<LiftFilmMatch>>(emptyList()) }
     var foundDetails by remember(title, resumeUrl) { mutableStateOf(LiftMatchPolicy.safeDetailsUrl(resumeUrl)) }
     var chosenDetailsUrl by remember(title, resumeUrl) {
@@ -140,7 +147,10 @@ internal fun LiftWebScreen(
                     view.evaluateJavascript(LiftMatchPolicy.searchScript(selectedTitle)) { result ->
                         if (!alive.get() || foundDetails) return@evaluateJavascript
                         if (result == "true") {
-                            pollMatches(view, 0)
+                            // Search tab keeps the complete first-party result grid.
+                            // No exact-title selection or 35-result DOM cap applies here.
+                            if (showAllResults) matching = false
+                            else pollMatches(view, 0)
                         } else if (attempt >= 8) {
                             matching = false
                             lookupMessage = "Поиск Lift не загрузился. Повторите или введите название вручную."
@@ -183,10 +193,29 @@ internal fun LiftWebScreen(
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
-                    return !LiftWebSource.allowedMainFrame(request.url.toString())
+                    val url = request.url.toString()
+                    if (!LiftWebSource.allowedMainFrame(url)) return true
+                    if (showAllResults && LiftMatchPolicy.safeDetailsUrl(url) &&
+                        onResultSelected != null) {
+                        if (!resultOpened) {
+                            resultOpened = true
+                            onResultSelected(url)
+                        }
+                        return true
+                    }
+                    return false
                 }
 
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                    if (showAllResults && LiftMatchPolicy.safeDetailsUrl(url) &&
+                        onResultSelected != null) {
+                        if (!resultOpened) {
+                            resultOpened = true
+                            onResultSelected(url)
+                        }
+                        view.stopLoading()
+                        return
+                    }
                     loadCycle++
                     loading = true
                     failure = ""
@@ -194,6 +223,7 @@ internal fun LiftWebScreen(
 
                 override fun onPageFinished(view: WebView, url: String) {
                     loading = false
+                    hasWebHistory = view.canGoBack()
                     if (failure.isEmpty() && LiftMatchPolicy.safeDetailsUrl(url) && url == chosenDetailsUrl) {
                         onFilmPageVisited(url)
                     }
@@ -281,7 +311,7 @@ internal fun LiftWebScreen(
         }
     }
 
-    BackHandler {
+    BackHandler(enabled = !compact || fullscreenView != null || expanded || hasWebHistory) {
         if (fullscreenView != null) {
             browser.webChromeClient?.onHideCustomView()
         } else if (expanded) {
@@ -297,7 +327,7 @@ internal fun LiftWebScreen(
 
     Box(Modifier.fillMaxSize().background(appBackground)) {
         Column(Modifier.fillMaxSize()) {
-            if (!expanded && fullscreenView == null) Row(
+            if (!compact && !expanded && fullscreenView == null) Row(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
