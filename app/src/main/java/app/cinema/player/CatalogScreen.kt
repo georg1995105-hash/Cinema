@@ -55,7 +55,8 @@ internal data class CatalogMovie(
     val title: String,
     val poster: String,
     val details: String,
-    val posterAlternatives: List<String> = emptyList()
+    val posterAlternatives: List<String> = emptyList(),
+    val aliases: List<String> = emptyList()
 )
 
 /** A bounded in-memory catalogue cache; no user credentials or cookies are persisted. */
