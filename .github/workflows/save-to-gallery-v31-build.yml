@@ -1,0 +1,53 @@
+name: SaveToGallery 3.1 automatic file save
+on:
+  push:
+    branches:
+      - build/save-to-gallery-v31-20261119
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recover source and icon (checksum verified)
+        shell: bash
+        run: |
+          mkdir -p /tmp/save-to-gallery31/app/src/main/res/drawable
+          cat .build-save-gallery/v31-b64-{1,2,3,4,5}.txt | base64 --decode > /tmp/save-to-gallery31.tar.xz
+          echo '777269dcbb113b900aac9ed5887d10880e48b4b77f8431262b46bce6c3830196  /tmp/save-to-gallery31.tar.xz' | sha256sum -c -
+          tar -xJf /tmp/save-to-gallery31.tar.xz -C /tmp/save-to-gallery31
+          cat .build-save-gallery/icon-b64-{1,2,3}.txt | base64 --decode > /tmp/save-to-gallery31/app/src/main/res/drawable/ic.png
+          echo 'af3d36ab4b124714e2e83d991f92820ca18bc036d1a63df7da21905ff5494d9f  /tmp/save-to-gallery31/app/src/main/res/drawable/ic.png' | sha256sum -c -
+          ! grep -RinE 'WhatsApp|ватсап' /tmp/save-to-gallery31/app/src/main
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14'
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -x "$SDKMANAGER"
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Check file naming and compile signed APK
+        working-directory: /tmp/save-to-gallery31
+        shell: bash
+        run: |
+          mkdir -p /tmp/save-to-gallery31/smoketest
+          javac -d /tmp/save-to-gallery31/smoketest app/src/main/java/com/local/stg/SaveUtils.java tests/SaveUtilsTest.java
+          java -cp /tmp/save-to-gallery31/smoketest SaveUtilsTest
+          gradle --no-daemon --stacktrace :app:assembleDebug
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -15
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SaveToGallery-v3.1-apk
+          path: /tmp/save-to-gallery31/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
