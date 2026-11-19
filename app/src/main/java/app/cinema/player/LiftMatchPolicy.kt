@@ -83,8 +83,12 @@ internal object LiftMatchPolicy {
     }
 
     /** Never interpolate query text directly in source code. */
-    fun searchScript(title: String): String {
+    fun searchScript(title: String, liveOnly: Boolean = false): String {
         val quoted = org.json.JSONObject.quote(title.trim().take(140))
+        val complete = if (liveOnly) "" else """
+              field.dispatchEvent(new Event('change', {bubbles:true}));
+              field.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter',bubbles:true}));
+        """.trimIndent()
         return """
             (function(){
               const field = document.querySelector(
@@ -95,8 +99,7 @@ internal object LiftMatchPolicy {
                 window.HTMLInputElement.prototype, 'value');
               descriptor.set.call(field, $quoted);
               field.dispatchEvent(new Event('input', {bubbles:true}));
-              field.dispatchEvent(new Event('change', {bubbles:true}));
-              field.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter',bubbles:true}));
+              $complete
               return true;
             })();
         """.trimIndent()
