@@ -7,6 +7,10 @@ import java.util.Locale
 /** Reject generic page cards when a mirror ignores the submitted search query. */
 internal object SearchRelevance {
     private val separators = Regex("[^\\p{L}\\p{N}]+")
+    private val yearSuffix = Regex("""(?:^|\\s)((?:18|19|20)\\d{2})\\s*$""")
+    private val yearInDetails = Regex("""\\b(?:18|19|20)\\d{2}\\b""")
+    fun queryWithoutYear(raw: String): String =
+        raw.trim().replace(yearSuffix, "").trim().ifEmpty { raw.trim() }
     fun normalized(raw: String): String =
         Normalizer.normalize(raw, Normalizer.Form.NFKC).lowercase(Locale.ROOT)
             .replace('ё', 'е').replace(separators, " ").trim()
@@ -20,20 +24,29 @@ internal object SearchRelevance {
     }
 
     fun find(movies: List<CatalogMovie>, query: String): List<CatalogMovie> {
-        val q = normalized(query)
+        val requestedYear = yearSuffix.find(query.trim())?.groupValues?.get(1)?.toIntOrNull()
+        val q = normalized(queryWithoutYear(query))
         if (q.isBlank()) return movies
         val forms = listOf(q) + alternateQuery(q).map(::normalized)
         val ranked = movies.mapNotNull { movie ->
-            val title = normalized(CatalogTitleCleaner.clean(movie.title, movie.details))
-            val score = forms.mapIndexedNotNull { index, form ->
-                val match = when {
-                    title == form -> 0
-                    title.startsWith("$form ") -> 2
-                    title.contains(" $form ") || title.endsWith(" $form") -> 4
-                    title.startsWith(form) && form.length >= 3 && form == q -> 6
-                    else -> return@mapIndexedNotNull null
-                }
-                match + index
+            if (requestedYear != null) {
+                val titleYear = yearInDetails.find(movie.title)?.value?.toIntOrNull()
+                val metadataYear = yearInDetails.find(movie.details)?.value?.toIntOrNull()
+                if ((metadataYear ?: titleYear) != requestedYear) return@mapNotNull null
+            }
+            val score = (listOf(movie.title) + movie.aliases).mapIndexedNotNull { aliasIndex, candidate ->
+                val title = normalized(CatalogTitleCleaner.clean(candidate, movie.details))
+                val match = forms.mapIndexedNotNull { index, form ->
+                    val relevance = when {
+                        title == form -> 0
+                        title.startsWith("$"+"form ") -> 2
+                        title.contains(" $"+"form ") || title.endsWith(" $"+"form") -> 4
+                        title.startsWith(form) && form.length >= 3 && form == q -> 6
+                        else -> return@mapIndexedNotNull null
+                    }
+                    relevance + index
+                }.minOrNull() ?: return@mapIndexedNotNull null
+                match + if (aliasIndex == 0) 0 else 1
             }.minOrNull() ?: return@mapNotNull null
             score to movie
         }
