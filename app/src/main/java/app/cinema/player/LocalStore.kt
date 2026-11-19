@@ -91,7 +91,7 @@ class LocalStore(context: Context) {
      * A tablet gets its own density preference so an old phone-style grid
      * cannot silently limit the number of posters on a larger screen.
      */
-    fun cardsPerRow(device: CinemaDevice, screenWidthDp: Int): Int {
+    internal fun cardsPerRow(device: CinemaDevice, screenWidthDp: Int): Int {
         val wanted = if (device == CinemaDevice.TABLET) {
             prefs.getInt("tablet_cards_per_row_v2",
                 CinemaDevices.defaultColumns(device, screenWidthDp))
@@ -99,7 +99,7 @@ class LocalStore(context: Context) {
         return wanted.coerceIn(CinemaDevices.minColumns(device), CinemaDevices.maxColumns(device))
     }
 
-    fun saveCardsPerRow(value: Int, device: CinemaDevice) {
+    internal fun saveCardsPerRow(value: Int, device: CinemaDevice) {
         val key = if (device == CinemaDevice.TABLET) "tablet_cards_per_row_v2" else "cards_per_row"
         val count = value.coerceIn(CinemaDevices.minColumns(device), CinemaDevices.maxColumns(device))
         prefs.edit().putInt(key, count).apply()
