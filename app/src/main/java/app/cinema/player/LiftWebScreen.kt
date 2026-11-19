@@ -70,15 +70,20 @@ internal object LiftWebSource {
 internal fun LiftWebScreen(
     onClose: () -> Unit,
     title: String = "",
-    expectedYear: Int? = null
+    expectedYear: Int? = null,
+    resumeUrl: String = "",
+    onFilmPageVisited: (String) -> Unit = {}
 ) {
     val ctx = LocalContext.current
     var loading by remember(title) { mutableStateOf(true) }
     var failure by remember(title) { mutableStateOf("") }
     var refresh by remember(title) { mutableIntStateOf(0) }
-    var matching by remember(title) { mutableStateOf(title.isNotBlank()) }
+    var matching by remember(title, resumeUrl) { mutableStateOf(title.isNotBlank() && !LiftMatchPolicy.safeDetailsUrl(resumeUrl)) }
     var choices by remember(title) { mutableStateOf<List<LiftFilmMatch>>(emptyList()) }
-    var foundDetails by remember(title) { mutableStateOf(false) }
+    var foundDetails by remember(title, resumeUrl) { mutableStateOf(LiftMatchPolicy.safeDetailsUrl(resumeUrl)) }
+    var chosenDetailsUrl by remember(title, resumeUrl) {
+        mutableStateOf(resumeUrl.takeIf(LiftMatchPolicy::safeDetailsUrl).orEmpty())
+    }
     var lookupMessage by remember(title) { mutableStateOf("") }
     var browserGeneration by remember(title) { mutableIntStateOf(0) }
     var loadCycle by remember(title) { mutableIntStateOf(0) }
@@ -87,7 +92,9 @@ internal fun LiftWebScreen(
     var fullscreenView by remember { mutableStateOf<View?>(null) }
     var fullscreenCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
     val selectedTitle = remember(title) { LiftWebSource.safeTitle(title) }
-    val start = remember(title) { LiftWebSource.startUrl(selectedTitle) }
+    val start = remember(title, resumeUrl) {
+        resumeUrl.takeIf(LiftMatchPolicy::safeDetailsUrl) ?: LiftWebSource.startUrl(selectedTitle)
+    }
 
     val browser = remember(ctx, title, browserGeneration) {
         WebView(ctx).apply {
@@ -150,6 +157,7 @@ internal fun LiftWebScreen(
                         // Avoid choosing a partial first render of the result grid.
                         if (exact != null && attempt >= 2) {
                             foundDetails = true
+                            chosenDetailsUrl = exact.url
                             matching = false
                             choices = emptyList()
                             view.loadUrl(exact.url)
@@ -179,6 +187,9 @@ internal fun LiftWebScreen(
 
                 override fun onPageFinished(view: WebView, url: String) {
                     loading = false
+                    if (LiftMatchPolicy.safeDetailsUrl(url) && url == chosenDetailsUrl) {
+                        onFilmPageVisited(url)
+                    }
                     if (selectedTitle.isNotBlank() && !foundDetails &&
                         url.startsWith(LiftWebSource.SEARCH)) {
                         // Inspect only visible first-party results: no streams or credentials.
@@ -209,7 +220,8 @@ internal fun LiftWebScreen(
                     fullscreenView = null
                     fullscreenCallback = null
                     matching = selectedTitle.isNotBlank()
-                    foundDetails = false
+                    foundDetails = LiftMatchPolicy.safeDetailsUrl(resumeUrl)
+                    chosenDetailsUrl = resumeUrl.takeIf(LiftMatchPolicy::safeDetailsUrl).orEmpty()
                     choices = emptyList()
                     browserGeneration++
                     return true
@@ -227,9 +239,10 @@ internal fun LiftWebScreen(
             choices = emptyList()
             lookupMessage = ""
             foundDetails = false
+            chosenDetailsUrl = ""
             // A failed film selection should retry first-party search, not
             // repeatedly reload a dead player or unrelated nested page.
-            if (selectedTitle.isNotBlank()) browser.loadUrl(start)
+            if (selectedTitle.isNotBlank()) browser.loadUrl(LiftWebSource.startUrl(selectedTitle))
             else browser.reload()
         }
     }
@@ -336,6 +349,7 @@ internal fun LiftWebScreen(
                                 TextButton(onClick = {
                                     if (LiftMatchPolicy.safeDetailsUrl(candidate.url)) {
                                         foundDetails = true
+                                        chosenDetailsUrl = candidate.url
                                         choices = emptyList()
                                         lookupMessage = ""
                                         browser.loadUrl(candidate.url)
@@ -361,7 +375,7 @@ internal fun LiftWebScreen(
                     ) {
                         Text(failure)
                         Spacer(Modifier.height(10.dp))
-                        Button(onClick = { refresh++ }) { Text("Повторить") }
+                        Button(onClick = { refresh++ }) { Text(if (resumeUrl.isNotBlank()) "Найти фильм заново" else "Повторить") }
                     }
                 }
             }
