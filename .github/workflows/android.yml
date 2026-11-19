@@ -76,6 +76,9 @@ jobs:
           cat "$RUNNER_TEMP/kino-emulator.log"
           exit 1
       - name: Run WebView and Media3 tests on Android
+        # PRs and main run full instrumented tests; QA branch pushes reuse the
+        # PR validation and run only the signed APK upgrade smoke test below.
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
         shell: bash
         run: |
           if ! command -v ffmpeg >/dev/null; then
