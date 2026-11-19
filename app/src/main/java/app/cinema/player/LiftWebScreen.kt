@@ -149,8 +149,10 @@ internal fun LiftWebScreen(
                         if (result == "true") {
                             // Search tab keeps the complete first-party result grid.
                             // No exact-title selection or 35-result DOM cap applies here.
-                            if (showAllResults) matching = false
-                            else pollMatches(view, 0)
+                            if (showAllResults) {
+                                matching = false
+                                view.evaluateJavascript(LiftMatchPolicy.hideDuplicateNavigationScript, null)
+                            } else pollMatches(view, 0)
                         } else if (attempt >= 8) {
                             matching = false
                             lookupMessage = "Поиск Lift не загрузился. Повторите или введите название вручную."
@@ -224,6 +226,9 @@ internal fun LiftWebScreen(
                 override fun onPageFinished(view: WebView, url: String) {
                     loading = false
                     hasWebHistory = view.canGoBack()
+                    if (showAllResults && url.startsWith(LiftWebSource.SEARCH)) {
+                        view.evaluateJavascript(LiftMatchPolicy.hideDuplicateNavigationScript, null)
+                    }
                     if (failure.isEmpty() && LiftMatchPolicy.safeDetailsUrl(url) && url == chosenDetailsUrl) {
                         onFilmPageVisited(url)
                     }
