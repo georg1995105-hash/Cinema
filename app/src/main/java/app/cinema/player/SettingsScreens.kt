@@ -25,8 +25,9 @@ internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val device = CinemaDevices.detect(context, androidx.compose.ui.platform.LocalConfiguration.current)
     Column(
-        Modifier.fillMaxSize()
-            .then(if (device == CinemaDevice.TV) Modifier.widthIn(max = 780.dp) else Modifier)
+        Modifier.then(if (device == CinemaDevice.TV) Modifier.widthIn(max = 780.dp)
+            else Modifier.fillMaxWidth())
+            .fillMaxHeight()
             .verticalScroll(rememberScrollState())
     ) {
         ScreenHeading("Настройки")
