@@ -37,6 +37,7 @@ jobs:
       - name: Run unit tests and compile
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin
       - name: Install emulator and Android image
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
@@ -46,6 +47,7 @@ jobs:
           test -c /dev/kvm
           sudo chown "$USER" /dev/kvm
       - name: Start Android emulator
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           export ANDROID_AVD_HOME="$RUNNER_TEMP/cinema-avd"
@@ -76,9 +78,9 @@ jobs:
           cat "$RUNNER_TEMP/kino-emulator.log"
           exit 1
       - name: Run WebView and Media3 tests on Android
-        # PRs and main run full instrumented tests; QA branch pushes reuse the
-        # PR validation and run only the signed APK upgrade smoke test below.
-        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+        # Run the full Android suite ONCE, before signing/publishing any APK.
+        # PR checks still compile instrumentation tests but don't run a second emulator.
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           if ! command -v ffmpeg >/dev/null; then
@@ -170,27 +172,45 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
-      - name: Publish signed update after checks
-        if: steps.signing.outputs.available == 'true' && github.ref == 'refs/heads/main'
+      - name: Publish verified OTA update
+        if: >-
+          steps.signing.outputs.available == 'true' &&
+          github.event_name == 'push' &&
+          (github.ref == 'refs/heads/main' ||
+           github.ref == 'refs/heads/feature/lift-inapp-source-20261118')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          BRANCH="${GITHUB_REF#refs/heads/}"
           VERSION="$(grep 'versionName =' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
           test -n "$VERSION"
           TAG="v$VERSION"
-          CURRENT_HEAD="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
-          if [ "$CURRENT_HEAD" != "$GITHUB_SHA" ]; then
-            echo "Skipping outdated build $GITHUB_SHA; main is $CURRENT_HEAD"
+          # Never publish an old superseded run.
+          REMOTE_HEAD="$(git ls-remote origin "refs/heads/$BRANCH" | awk '{print $1}')"
+          test -n "$REMOTE_HEAD"
+          if [ "$REMOTE_HEAD" != "$GITHUB_SHA" ]; then
+            echo "Branch advanced: skip outdated build $GITHUB_SHA"
             exit 0
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists: not overwriting a published APK"
+            echo "Release $TAG already exists; don't overwrite a signed APK."
             exit 0
           fi
-          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Cinema-$VERSION.apk"
-          gh release create "$TAG" "$RUNNER_TEMP/Cinema-$VERSION.apk" \
+          SOURCE_APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$SOURCE_APK"
+          INSTALLER="$RUNNER_TEMP/Cinema-$VERSION.apk"
+          cp "$SOURCE_APK" "$INSTALLER"
+          (cd "$RUNNER_TEMP" && sha256sum "Cinema-$VERSION.apk" > "Cinema-$VERSION.apk.sha256")
+          OPTIONS=()
+          if [[ "$BRANCH" != "main" || "$VERSION" == *-* ]]; then
+            OPTIONS+=(--prerelease)
+          fi
+          gh release create "$TAG" \
+            "$INSTALLER" \
+            "$RUNNER_TEMP/Cinema-$VERSION.apk.sha256" \
             --target "$GITHUB_SHA" \
             --title "Cinema $VERSION" \
-            --notes "Cinema 0.4.32: восстановлено чтение актёров, режиссёров, фотографий и персон из эталонных блоков persons-list-holder как в нативном HTML-парсере, так и в WebView. Гостевой AJAX больше не отвергает тот же фильм только из-за query/hash в адресе. Резервная проверка потоков ставит сохранённые зеркала первыми и проверяет до 12 адресов одновременно по 6 в пределах прежнего лимита времени. Добавлены JVM и Android-тесты. CI проверяет постоянную подпись и обновление поверх 0.4.31. Работа конкретных зеркал требует проверки на устройстве; платные ограничения не обходятся."
+            --notes "Универсальный APK для телефона, планшета и Android TV. Версия подписана постоянным ключом, проверена на Android; установка обновлений требует подтверждения системы." \
+            "${OPTIONS[@]}"
