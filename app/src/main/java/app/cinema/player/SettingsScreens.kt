@@ -237,11 +237,12 @@ internal fun PlayerSettingsScreen(local: LocalStore, back: () -> Unit, openTest:
 @Composable
 internal fun AppearanceScreen(local: LocalStore, back: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val device = CinemaDevices.detect(context, androidx.compose.ui.platform.LocalConfiguration.current)
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val device = CinemaDevices.detect(context, configuration)
     val minCards = CinemaDevices.minColumns(device)
     val maxCards = CinemaDevices.maxColumns(device)
     var count by remember(device) {
-        mutableIntStateOf(local.cardsPerRow().coerceIn(minCards, maxCards))
+        mutableIntStateOf(local.cardsPerRow(device, configuration.screenWidthDp))
     }
     Column {
         ScreenHeading("Внешний вид", back = back)
@@ -250,7 +251,7 @@ internal fun AppearanceScreen(local: LocalStore, back: () -> Unit) {
         Slider(
             value = count.toFloat(), onValueChange = {
                 count = it.toInt().coerceIn(minCards, maxCards)
-                local.saveCardsPerRow(count)
+                local.saveCardsPerRow(count, device)
             },
             valueRange = minCards.toFloat()..maxCards.toFloat(), steps = maxCards - minCards - 1,
             modifier = Modifier.fillMaxWidth()
