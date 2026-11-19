@@ -36,7 +36,7 @@ class NavigationFlowTest {
             compose.onNodeWithText("Плеер").assertDoesNotExist()
             compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
             compose.onNodeWithText("Внешний вид").performClick()
-            compose.onNodeWithText("Тёмная тема").assertIsDisplayed()
+            compose.onNodeWithText("Карточек в ряду", substring = true).assertIsDisplayed()
             compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
             compose.onNodeWithText("Обновления").performClick()
             compose.onNodeWithText("Тестовые обновления").assertIsDisplayed()
