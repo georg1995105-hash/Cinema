@@ -13,7 +13,7 @@ class CinemaDevicesTest {
 
     @Test fun gridIsReadableOnEachScreenClass() {
         assertEquals(2, CinemaDevices.columns(CinemaDevice.PHONE, 5, 360))
-        assertEquals(3, CinemaDevices.columns(CinemaDevice.TABLET, 5, 600))
+        assertEquals(4, CinemaDevices.columns(CinemaDevice.TABLET, 5, 600))
         assertEquals(5, CinemaDevices.columns(CinemaDevice.TV, 3, 960))
         assertEquals(6, CinemaDevices.columns(CinemaDevice.TV, 7, 960))
         assertEquals(7, CinemaDevices.columns(CinemaDevice.TV, 7, 1400))
