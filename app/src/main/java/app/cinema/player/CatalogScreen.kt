@@ -328,8 +328,9 @@ internal fun CatalogGrid(
         return
     }
     val context = LocalContext.current
-    val isTablet = LocalConfiguration.current.screenWidthDp >= 600
-    val columns = if (isTablet) cardsPerRow.coerceIn(2,8) else cardsPerRow.coerceIn(2,3)
+    val configuration = LocalConfiguration.current
+    val device = CinemaDevices.detect(context, configuration)
+    val columns = CinemaDevices.columns(device, cardsPerRow, configuration.screenWidthDp)
     var attempt by remember(source, section, kind, requestOverride) { mutableIntStateOf(0) }
     var useUnfiltered by remember(source, section, kind, requestOverride, attempt) {
         mutableStateOf(false)
