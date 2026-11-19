@@ -34,7 +34,7 @@ internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium
         )
         Spacer(Modifier.height(16.dp))
-        MenuItem("Плеер", "Перемотка и скорость", Icons.Outlined.PlayArrow) {
+        MenuItem("Плеер", "Для прямых видеоссылок", Icons.Outlined.PlayArrow) {
             open(Page.PLAYER)
         }
         MenuItem("Обновления", "Новая версия и ход загрузки", Icons.Outlined.SystemUpdate) {
@@ -247,20 +247,21 @@ internal fun PlayerSettingsScreen(local: LocalStore, back: () -> Unit, openTest:
 
 @Composable
 internal fun AppearanceScreen(local: LocalStore, back: () -> Unit) {
-    var count by remember { mutableIntStateOf(local.cardsPerRow()) }
+    val maxCards = if (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600) 8 else 3
+    var count by remember { mutableIntStateOf(local.cardsPerRow().coerceIn(2, maxCards)) }
     Column {
         ScreenHeading("Внешний вид", "Оформление", back)
         Spacer(Modifier.height(24.dp))
         Text("Карточек в ряду: $count", fontWeight = FontWeight.SemiBold)
         Slider(
             value = count.toFloat(), onValueChange = {
-                count = it.toInt().coerceIn(2, 8)
+                count = it.toInt().coerceIn(2, maxCards)
                 local.saveCardsPerRow(count)
             },
-            valueRange = 2f..8f, steps = 5,
+            valueRange = 2f..maxCards.toFloat(), steps = maxCards - 3,
             modifier = Modifier.fillMaxWidth()
         )
-        Text("Настройка будет применяться к сетке после подключения каталога.",
+        Text("Изменение применяется при возвращении в каталог.",
             color = appMuted, style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(20.dp))
         Surface(color = appPanel, shape = RoundedCornerShape(15.dp)) {
