@@ -1,0 +1,38 @@
+name: Temporary SaveToGallery APK build
+on:
+  push:
+    branches:
+      - build/save-to-gallery-v3-20261119
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct verified source
+        shell: bash
+        run: |
+          mkdir -p /tmp/stg-code
+          cat .build-save-gallery/b64-{1,2,3,4,5,6}.txt | base64 --decode > /tmp/stg-code.tar.xz
+          echo '80219b69dd51ea4410462de6441316afe8a5b9d6586b6a0d34db16dca6a15a4a  /tmp/stg-code.tar.xz' | sha256sum -c -
+          tar -xJf /tmp/stg-code.tar.xz -C /tmp/stg-code
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14'
+      - name: SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build APK
+        working-directory: /tmp/stg-code
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SaveToGallery-v3-apk
+          path: /tmp/stg-code/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
