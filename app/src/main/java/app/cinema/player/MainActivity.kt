@@ -78,6 +78,8 @@ private fun CinemaApp() {
     var playing by remember { mutableStateOf<String?>(null) }
     var playingMovieKey by remember { mutableStateOf<String?>(null) }
     var liftTitle by remember { mutableStateOf("") }
+    var liftMovieKey by remember { mutableStateOf<String?>(null) }
+    var liftResumeUrl by remember { mutableStateOf("") }
     var liftReturn by remember { mutableStateOf(Page.MOVIE) }
     var browsingSource by remember { mutableStateOf<String?>(null) }
     var playbackStorageUrl by remember { mutableStateOf<String?>(null) }
@@ -209,9 +211,16 @@ private fun CinemaApp() {
                         selectedFilm = film
                         movieBack = Page.LIBRARY
                         if (CinemetaCatalog.isMovieUrl(film.url) || ArchivePublicCatalog.isArchiveUrl(film.url)) {
-                            // An IMDb metadata URL is never a playable video URL.
-                            // Recheck the legal source in the details screen before play.
-                            page = Page.MOVIE
+                            val previousLift = local.liftVisitedUrl(film.url)
+                            if (previousLift != null) {
+                                liftTitle = film.title
+                                liftMovieKey = film.url
+                                liftResumeUrl = previousLift
+                                liftReturn = Page.MOVIE
+                                page = Page.LIFT
+                            } else {
+                                page = Page.MOVIE
+                            }
                         } else {
                             playbackStorageUrl = film.url
                             browsingSource = activeSource?.let {
@@ -223,6 +232,7 @@ private fun CinemaApp() {
                     toggle = ::toggleFavourite,
                     remove = { url ->
                         history.removeAll { it.url == url }
+                        local.removeLiftVisit(url)
                         local.saveHistory(history.toList())
                     }
                 )
@@ -254,6 +264,14 @@ private fun CinemaApp() {
                 Page.LIFT -> LiftWebScreen(
                     onClose = { page = liftReturn },
                     title = liftTitle,
+                    resumeUrl = liftResumeUrl,
+                    onFilmPageVisited = { detailUrl ->
+                        val movieUrl = liftMovieKey
+                        if (movieUrl != null) {
+                            local.saveLiftVisit(movieUrl, detailUrl)
+                            saveProgress(movieUrl, 0L)
+                        }
+                    },
                     expectedYear = LiftMatchPolicy.yearFromDetails(
                         selectedFilm?.details.orEmpty()
                     )
@@ -329,8 +347,10 @@ private fun CinemaApp() {
                                 playingMovieKey = movie.url
                                 playing = verifiedStreamUrl
                             },
-                            onLift = {
+                            onLift = { resume ->
                                 liftTitle = movie.title
+                                liftMovieKey = movie.url
+                                liftResumeUrl = if (resume) local.liftVisitedUrl(movie.url).orEmpty() else ""
                                 liftReturn = Page.MOVIE
                                 page = Page.LIFT
                             }
@@ -350,6 +370,8 @@ private fun CinemaApp() {
                         savedSelection = local.playbackSelection(movie.url),
                         onLift = {
                             liftTitle = movie.title
+                            liftMovieKey = movie.url
+                            liftResumeUrl = ""
                             liftReturn = Page.MOVIE
                             page = Page.LIFT
                         },
@@ -683,7 +705,8 @@ private fun LibraryScreen(
                                         val minute = seconds / 60
                                         val second = (seconds % 60).toString().padStart(2,'0')
                                         "$minute:$second"
-                                    } else "Начало",
+                                    } else if (local.liftVisitedUrl(url) != null) "В Lift"
+                                    else "Начало",
                                     color = appMuted,
                                     style = MaterialTheme.typography.labelMedium
                                 )
