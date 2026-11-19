@@ -119,6 +119,7 @@ private fun CinemaApp() {
     var liftMovieKey by remember { mutableStateOf<String?>(null) }
     var liftResumeUrl by remember { mutableStateOf("") }
     var liftReturn by remember { mutableStateOf(Page.MOVIE) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var browsingSource by remember { mutableStateOf<String?>(null) }
     var playbackStorageUrl by remember { mutableStateOf<String?>(null) }
     var selectedFilm by remember { mutableStateOf<CatalogMovie?>(null) }
@@ -249,7 +250,18 @@ private fun CinemaApp() {
                     cardsPerRow = local.cardsPerRow(device, screenConfiguration.screenWidthDp),
                     onOpen = { local.rememberMovie(it); selectedFilm = it; movieBack = Page.SEARCH; page = Page.MOVIE },
                     onAddSource = { page = Page.SOURCES },
-                    onBrowse = { browsingSource = it; browseReturn = Page.SEARCH; page = Page.SITE }
+                    onBrowse = { browsingSource = it; browseReturn = Page.SEARCH; page = Page.SITE },
+                    initialQuery = searchQuery,
+                    onQueryPersist = { searchQuery = it },
+                    onLiftResult = { url ->
+                        if (LiftMatchPolicy.safeDetailsUrl(url)) {
+                            liftTitle = ""
+                            liftMovieKey = null
+                            liftResumeUrl = url
+                            liftReturn = Page.SEARCH
+                            page = Page.LIFT
+                        }
+                    }
                 )
                 Page.LIBRARY -> LibraryScreen(
                     local = local,

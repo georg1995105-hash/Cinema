@@ -72,33 +72,44 @@ internal fun LiftWebScreen(
     title: String = "",
     expectedYear: Int? = null,
     resumeUrl: String = "",
-    onFilmPageVisited: (String) -> Unit = {}
+    onFilmPageVisited: (String) -> Unit = {},
+    showAllResults: Boolean = false,
+    compact: Boolean = false,
+    onResultSelected: ((String) -> Unit)? = null
 ) {
     val ctx = LocalContext.current
     val device = CinemaDevices.detect(ctx, androidx.compose.ui.platform.LocalConfiguration.current)
     val isTv = device == CinemaDevice.TV
-    var loading by remember(title) { mutableStateOf(true) }
-    var failure by remember(title) { mutableStateOf("") }
-    var refresh by remember(title) { mutableIntStateOf(0) }
-    var matching by remember(title, resumeUrl) { mutableStateOf(title.isNotBlank() && !LiftMatchPolicy.safeDetailsUrl(resumeUrl)) }
-    var choices by remember(title) { mutableStateOf<List<LiftFilmMatch>>(emptyList()) }
-    var foundDetails by remember(title, resumeUrl) { mutableStateOf(LiftMatchPolicy.safeDetailsUrl(resumeUrl)) }
-    var chosenDetailsUrl by remember(title, resumeUrl) {
+    // Keep the same live WebView while the query changes. Lift updates results
+    // on input; rebuilding the entire browser for every typed word is slow.
+    val stateKey = if (showAllResults) "all-lift-search" else title
+    var loading by remember(stateKey) { mutableStateOf(true) }
+    var failure by remember(stateKey) { mutableStateOf("") }
+    var refresh by remember(stateKey) { mutableIntStateOf(0) }
+    var matching by remember(stateKey, resumeUrl, showAllResults) {
+        mutableStateOf(!showAllResults && title.isNotBlank() && !LiftMatchPolicy.safeDetailsUrl(resumeUrl))
+    }
+    var resultOpened by remember(stateKey, showAllResults) { mutableStateOf(false) }
+    var hasWebHistory by remember(stateKey) { mutableStateOf(false) }
+    var choices by remember(stateKey) { mutableStateOf<List<LiftFilmMatch>>(emptyList()) }
+    var foundDetails by remember(stateKey, resumeUrl) { mutableStateOf(LiftMatchPolicy.safeDetailsUrl(resumeUrl)) }
+    var chosenDetailsUrl by remember(stateKey, resumeUrl) {
         mutableStateOf(resumeUrl.takeIf(LiftMatchPolicy::safeDetailsUrl).orEmpty())
     }
-    var lookupMessage by remember(title) { mutableStateOf("") }
-    var browserGeneration by remember(title) { mutableIntStateOf(0) }
-    var loadCycle by remember(title) { mutableIntStateOf(0) }
-    val alive = remember(title, browserGeneration) { AtomicBoolean(true) }
-    var expanded by remember(title) { mutableStateOf(false) }
+    var lookupMessage by remember(stateKey) { mutableStateOf("") }
+    var browserGeneration by remember(stateKey) { mutableIntStateOf(0) }
+    var loadCycle by remember(stateKey) { mutableIntStateOf(0) }
+    val alive = remember(stateKey, browserGeneration) { AtomicBoolean(true) }
+    var expanded by remember(stateKey) { mutableStateOf(false) }
     var fullscreenView by remember { mutableStateOf<View?>(null) }
     var fullscreenCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
     val selectedTitle = remember(title) { LiftWebSource.safeTitle(title) }
-    val start = remember(title, resumeUrl) {
+    val currentTitle by rememberUpdatedState(selectedTitle)
+    val start = remember(stateKey, resumeUrl) {
         resumeUrl.takeIf(LiftMatchPolicy::safeDetailsUrl) ?: LiftWebSource.startUrl(selectedTitle)
     }
 
-    val browser = remember(ctx, title, browserGeneration) {
+    val browser = remember(ctx, stateKey, browserGeneration) {
         WebView(ctx).apply {
             // TV remotes send D-pad and OK key events to the focused WebView.
             if (isTv) {
@@ -137,10 +148,17 @@ internal fun LiftWebScreen(
                 private fun startSearch(view: WebView, attempt: Int) {
                     if (!alive.get() || foundDetails ||
                         view.url?.startsWith(LiftWebSource.SEARCH) != true) return
-                    view.evaluateJavascript(LiftMatchPolicy.searchScript(selectedTitle)) { result ->
+                    view.evaluateJavascript(
+                        LiftMatchPolicy.searchScript(currentTitle, liveOnly = showAllResults)
+                    ) { result ->
                         if (!alive.get() || foundDetails) return@evaluateJavascript
                         if (result == "true") {
-                            pollMatches(view, 0)
+                            // Search tab keeps the complete first-party result grid.
+                            // No exact-title selection or 35-result DOM cap applies here.
+                            if (showAllResults) {
+                                matching = false
+                                view.evaluateJavascript(LiftMatchPolicy.hideDuplicateNavigationScript, null)
+                            } else pollMatches(view, 0)
                         } else if (attempt >= 8) {
                             matching = false
                             lookupMessage = "Поиск Lift не загрузился. Повторите или введите название вручную."
@@ -183,10 +201,29 @@ internal fun LiftWebScreen(
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
-                    return !LiftWebSource.allowedMainFrame(request.url.toString())
+                    val url = request.url.toString()
+                    if (!LiftWebSource.allowedMainFrame(url)) return true
+                    if (showAllResults && LiftMatchPolicy.safeDetailsUrl(url) &&
+                        onResultSelected != null) {
+                        if (!resultOpened) {
+                            resultOpened = true
+                            onResultSelected(url)
+                        }
+                        return true
+                    }
+                    return false
                 }
 
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                    if (showAllResults && LiftMatchPolicy.safeDetailsUrl(url) &&
+                        onResultSelected != null) {
+                        if (!resultOpened) {
+                            resultOpened = true
+                            onResultSelected(url)
+                        }
+                        view.stopLoading()
+                        return
+                    }
                     loadCycle++
                     loading = true
                     failure = ""
@@ -194,10 +231,14 @@ internal fun LiftWebScreen(
 
                 override fun onPageFinished(view: WebView, url: String) {
                     loading = false
+                    hasWebHistory = view.canGoBack()
+                    if (showAllResults && url.startsWith(LiftWebSource.SEARCH)) {
+                        view.evaluateJavascript(LiftMatchPolicy.hideDuplicateNavigationScript, null)
+                    }
                     if (failure.isEmpty() && LiftMatchPolicy.safeDetailsUrl(url) && url == chosenDetailsUrl) {
                         onFilmPageVisited(url)
                     }
-                    if (selectedTitle.isNotBlank() && !foundDetails &&
+                    if (currentTitle.isNotBlank() && !foundDetails &&
                         url.startsWith(LiftWebSource.SEARCH)) {
                         // Inspect only visible first-party results: no streams or credentials.
                         view.postDelayed({ startSearch(view, 0) }, 650L)
@@ -238,7 +279,20 @@ internal fun LiftWebScreen(
         }
     }
 
-    LaunchedEffect(refresh, title) {
+    // A new typed query reuses the existing Lift browser and its result DOM.
+    LaunchedEffect(selectedTitle, browser, showAllResults) {
+        if (showAllResults && selectedTitle.isNotBlank()) {
+            if (browser.url.orEmpty().startsWith(LiftWebSource.SEARCH)) {
+                browser.evaluateJavascript(
+                    LiftMatchPolicy.searchScript(selectedTitle, liveOnly = true), null
+                )
+            } else if (browser.url != null) {
+                browser.loadUrl(LiftWebSource.SEARCH)
+            }
+        }
+    }
+
+    LaunchedEffect(refresh, stateKey) {
         if (refresh > 0) {
             failure = ""
             loading = true
@@ -281,7 +335,7 @@ internal fun LiftWebScreen(
         }
     }
 
-    BackHandler {
+    BackHandler(enabled = !compact || fullscreenView != null || expanded || hasWebHistory) {
         if (fullscreenView != null) {
             browser.webChromeClient?.onHideCustomView()
         } else if (expanded) {
@@ -297,7 +351,7 @@ internal fun LiftWebScreen(
 
     Box(Modifier.fillMaxSize().background(appBackground)) {
         Column(Modifier.fillMaxSize()) {
-            if (!expanded && fullscreenView == null) Row(
+            if (!compact && !expanded && fullscreenView == null) Row(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

@@ -24,7 +24,11 @@ class NavigationFlowTest {
             compose.onNode(hasText("Поиск") and hasClickAction()).performClick()
             compose.onNodeWithText("Недавние запросы").assertIsDisplayed()
             compose.onNodeWithText("Бригада").performClick()
+            compose.onNodeWithText("Все результаты").assertIsDisplayed()
+            compose.onNodeWithText("Каталог").performClick()
             compose.onNodeWithText("Фильтры").assertIsDisplayed()
+            compose.onNodeWithText("Все результаты").performClick()
+            compose.onNodeWithText("Фильтры").assertDoesNotExist()
 
             compose.onNode(hasText("Моё") and hasClickAction()).performClick()
             compose.onNodeWithText("Просмотров пока нет").assertIsDisplayed()

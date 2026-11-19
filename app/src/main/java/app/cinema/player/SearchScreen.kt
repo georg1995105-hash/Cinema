@@ -49,19 +49,24 @@ internal fun SearchScreen(
     cardsPerRow: Int,
     onOpen: (CatalogMovie) -> Unit,
     onAddSource: () -> Unit,
-    onBrowse: (String) -> Unit
+    onBrowse: (String) -> Unit,
+    initialQuery: String = "",
+    onQueryPersist: (String) -> Unit = {},
+    onLiftResult: (String) -> Unit = {}
 ) {
-    var query by rememberSaveable { mutableStateOf("") }
-    var submittedQuery by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf(initialQuery) }
+    var submittedQuery by rememberSaveable { mutableStateOf(initialQuery) }
+    var searchSource by rememberSaveable { mutableStateOf("Все результаты") }
     var recent by remember { mutableStateOf(local.searchHistory()) }
     fun submit(value: String) {
         query = value.trim()
         submittedQuery = query
+        onQueryPersist(query)
         recent = local.saveSearch(query)
     }
     var type by rememberSaveable { mutableStateOf("Все") }
     LaunchedEffect(query) {
-        delay(300)
+        delay(450)
         submittedQuery = query.trim()
         if (submittedQuery.isNotBlank()) {
             delay(1200)
@@ -114,7 +119,10 @@ internal fun SearchScreen(
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
-                value = query, onValueChange = { query = it },
+                value = query, onValueChange = {
+                    query = it
+                    onQueryPersist(it)
+                },
                 placeholder = { Text("Фильм или сериал", maxLines = 1) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { submit(query) }),
@@ -144,22 +152,48 @@ internal fun SearchScreen(
             Text(speechError, color = MaterialTheme.colorScheme.error)
         }
         Spacer(Modifier.height(5.dp))
-        OutlinedButton(
-            onClick = { showFilters = !showFilters },
-            shape = RoundedCornerShape(10.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp),
-            modifier = Modifier.height(37.dp)
-        ) {
-            Icon(Icons.Outlined.Tune, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("Фильтры")
-            if (countries.isNotEmpty() || selectedGenres.isNotEmpty() || years.isNotEmpty())
-                Text(" · " + (countries.size + selectedGenres.size + years.size))
-            Icon(if (showFilters) Icons.Outlined.KeyboardArrowUp
-                 else Icons.Outlined.KeyboardArrowDown, contentDescription = null)
+        if (submittedQuery.isNotBlank()) {
+            SimpleTabs(listOf("Все результаты", "Каталог"), searchSource) {
+                searchSource = it
+                showFilters = false
+            }
+            Spacer(Modifier.height(6.dp))
         }
-        Spacer(Modifier.height(5.dp))
-        if (showFilters) {
+        if (submittedQuery.isBlank() || searchSource == "Каталог") {
+            OutlinedButton(
+                onClick = { showFilters = !showFilters },
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp),
+                modifier = Modifier.height(37.dp)
+            ) {
+                Icon(Icons.Outlined.Tune, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Фильтры")
+                if (countries.isNotEmpty() || selectedGenres.isNotEmpty() || years.isNotEmpty())
+                    Text(" · " + (countries.size + selectedGenres.size + years.size))
+                Icon(if (showFilters) Icons.Outlined.KeyboardArrowUp
+                     else Icons.Outlined.KeyboardArrowDown, contentDescription = null)
+            }
+            Spacer(Modifier.height(5.dp))
+        }
+        if (submittedQuery.isNotBlank() && searchSource == "Все результаты") {
+            // Lift is the search index for playable titles; do not truncate its
+            // results to Cinemeta's first 100 cards or apply the narrow metadata
+            // relevance filter to a live first-party search.
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                LiftWebScreen(
+                    title = submittedQuery,
+                    compact = true,
+                    showAllResults = true,
+                    onClose = {
+                        query = ""
+                        submittedQuery = ""
+                        onQueryPersist("")
+                    },
+                    onResultSelected = onLiftResult
+                )
+            }
+        } else if (showFilters) {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 Surface(color = appPanel, shape = RoundedCornerShape(20.dp)) {
                     Column(Modifier.fillMaxWidth().padding(16.dp)) {

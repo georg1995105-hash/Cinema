@@ -83,22 +83,52 @@ internal object LiftMatchPolicy {
     }
 
     /** Never interpolate query text directly in source code. */
-    fun searchScript(title: String): String {
+    fun searchScript(title: String, liveOnly: Boolean = false): String {
         val quoted = org.json.JSONObject.quote(title.trim().take(140))
+        val complete = if (liveOnly) "" else """
+              field.dispatchEvent(new Event('change', {bubbles:true}));
+              field.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter',bubbles:true}));
+        """.trimIndent()
         return """
             (function(){
-              const field = document.querySelector('input#q, input[type="search"]');
+              const field = document.querySelector(
+                'input#q, input[type="search"], input[name="q"], input[placeholder*="Поиск"], input[placeholder*="поиск"]'
+              );
               if (!field) return false;
               const descriptor = Object.getOwnPropertyDescriptor(
                 window.HTMLInputElement.prototype, 'value');
               descriptor.set.call(field, $quoted);
               field.dispatchEvent(new Event('input', {bubbles:true}));
-              field.dispatchEvent(new Event('change', {bubbles:true}));
-              field.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter',bubbles:true}));
+              $complete
               return true;
             })();
         """.trimIndent()
     }
+
+    /** Hide only the Lift site's own bottom navigation when embedded under Cinema tabs. */
+    val hideDuplicateNavigationScript = """
+        (function(){
+          const known = new Set(['/index.html','/reco.html','/mine.html','/search.html','/profile.html']);
+          const navLinks = Array.from(document.querySelectorAll('a[href]')).filter(a => {
+            try {
+              const u = new URL(a.href);
+              return (u.hostname === 'liftw.ws' || u.hostname === 'www.liftw.ws') &&
+                known.has(u.pathname);
+            } catch (_) { return false; }
+          });
+          if (navLinks.length < 4) return false;
+          let candidate = navLinks[0].parentElement;
+          while (candidate && candidate !== document.body) {
+            if (navLinks.filter(a => candidate.contains(a)).length >= 4 &&
+                !candidate.querySelector('a[href*="details.html"]')) {
+              candidate.style.display = 'none';
+              return true;
+            }
+            candidate = candidate.parentElement;
+          }
+          return false;
+        })();
+    """.trimIndent()
 
     /** Public DOM links only; data is returned to app via evaluateJavascript. */
     val inspectResultsScript = """
