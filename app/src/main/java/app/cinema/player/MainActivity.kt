@@ -269,7 +269,9 @@ private fun CinemaApp() {
                         val movieUrl = liftMovieKey
                         if (movieUrl != null) {
                             local.saveLiftVisit(movieUrl, detailUrl)
-                            saveProgress(movieUrl, 0L)
+                            // Visiting Lift must not erase a saved native playback position.
+                            val previousMs = history.firstOrNull { it.url == movieUrl }?.positionMs ?: 0L
+                            saveProgress(movieUrl, previousMs)
                         }
                     },
                     expectedYear = LiftMatchPolicy.yearFromDetails(
