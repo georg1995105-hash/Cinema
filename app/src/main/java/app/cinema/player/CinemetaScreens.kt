@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import coil.compose.AsyncImage
@@ -138,8 +139,9 @@ internal fun CinemetaGrid(
     }
 
     val visible = movies.filter(movieFilter)
-    val columns = if (LocalConfiguration.current.screenWidthDp >= 600)
-        cardsPerRow.coerceIn(2, 8) else cardsPerRow.coerceIn(2, 3)
+    val configuration = LocalConfiguration.current
+    val device = CinemaDevices.detect(context, configuration)
+    val columns = CinemaDevices.columns(device, cardsPerRow, configuration.screenWidthDp)
     PullToRefreshBox(
         isRefreshing = refreshing,
         onRefresh = {
@@ -331,13 +333,12 @@ private fun DetailsBody(
         Button(onClick = { onLift(false) }, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Outlined.PlayArrow, contentDescription = null)
             Spacer(Modifier.width(8.dp))
-            Text("Смотреть в Lift")
+            Text("Смотреть")
         }
         if (resumeAvailable) OutlinedButton(
             onClick = { onLift(true) }, modifier = Modifier.fillMaxWidth()
-        ) { Text("Продолжить в Lift") }
-        Text("Lift открывает выбранную карточку фильма. Доступность видео зависит от сервиса и региона.",
-            color = appMuted, style = MaterialTheme.typography.bodySmall)
+        ) { Text("Продолжить") }
+        // Lift owns its playback UI; no duplicated player controls here.
         // Watch must be directly visible under the film title, not buried
         // below synopsis, credits and a long list of metadata.
 
@@ -481,7 +482,15 @@ private fun PublicMoviePoster(movie: CatalogMovie, modifier: Modifier) {
 
 @Composable
 private fun CinemetaFilmPoster(movie: CatalogMovie, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    var focused by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth()
+            .onFocusChanged { focused = it.isFocused }
+            .border(if (focused) 3.dp else 0.dp, if (focused) appBlue else Color.Transparent,
+                RoundedCornerShape(14.dp))
+            .padding(if (focused) 3.dp else 0.dp)
+            .clickable(onClick = onClick)
+    ) {
         PublicMoviePoster(movie, Modifier.fillMaxWidth().aspectRatio(.70f))
         Spacer(Modifier.height(7.dp))
         Text(movie.title, style = MaterialTheme.typography.bodyMedium,
