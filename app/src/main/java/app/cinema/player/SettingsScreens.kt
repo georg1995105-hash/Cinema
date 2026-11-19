@@ -289,7 +289,7 @@ internal fun AboutScreen(back: () -> Unit) {
             fontWeight = FontWeight.Bold)
         if (version != null) Text("Версия $version", color = appBlue)
         Spacer(Modifier.height(18.dp))
-        Text("Независимое приложение с каталогом выбранного зеркала, локальной историей и необязательным входом в аккаунт источника.",
+        Text("Каталог фильмов и сериалов, поиск, избранное и локальная история. Просмотр зависит от доступности выбранного источника.",
             color = appMuted)
     }
 }
