@@ -4,6 +4,7 @@ import android.content.*
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -26,8 +27,7 @@ import java.security.MessageDigest
 internal data class ReleaseApk(val version: String, val url: String, val bytes: Long, val digest: String?)
 
 internal object AppUpdates {
-    private const val api = "https://api.github.com/repos/georg1995105-hash/Cinema/releases?per_page=20"
-    private const val prefix = "https://github.com/georg1995105-hash/Cinema/releases/download/"
+    private const val api = "https://api.github.com/repos/georg1995105-hash/Cinema/releases?per_page=40"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     var latest by mutableStateOf<ReleaseApk?>(null); private set
     var checking by mutableStateOf(false); private set
@@ -35,56 +35,68 @@ internal object AppUpdates {
     var progress by mutableIntStateOf(-1); private set
     var message by mutableStateOf(""); private set
     var downloadedFile by mutableStateOf<File?>(null); private set
-    private var checked = false
+    private var lastCheckMs = 0L
+    private const val checkIntervalMs = 30L * 60L * 1000L
     private var downloadTask: Job? = null
 
+    fun includeTestBuilds(context: Context): Boolean {
+        val current = context.packageManager.getPackageInfo(context.packageName, 0)
+            .versionName.orEmpty()
+        return context.getSharedPreferences("cinema_local_v1", Context.MODE_PRIVATE)
+            .getBoolean("include_test_updates_v1", UpdateReleaseSelector.isTestBuild(current))
+    }
+
+    fun setIncludeTestBuilds(context: Context, include: Boolean) {
+        context.getSharedPreferences("cinema_local_v1", Context.MODE_PRIVATE)
+            .edit().putBoolean("include_test_updates_v1", include).apply()
+        lastCheckMs = 0L
+        check(context, force = true)
+    }
+
     fun check(context: Context, force: Boolean = false) {
-        if (checking || downloading || (checked && !force)) return
-        checking = true; message = "Проверяем обновления"
+        val now = SystemClock.elapsedRealtime()
+        if (checking || downloading || (!force && lastCheckMs > 0L &&
+                now - lastCheckMs < checkIntervalMs)) return
+        checking = true
+        message = "Проверяем обновления"
         scope.launch {
             try {
-                latest = withContext(Dispatchers.IO) { fetch(context) }
-                checked = true
-                message = if (latest == null) "Установлена последняя доступная версия"
-                    else "Доступна версия " + latest!!.version
+                val release = withContext(Dispatchers.IO) { fetch(context) }
+                lastCheckMs = SystemClock.elapsedRealtime()
+                if (release?.version != latest?.version) {
+                    downloadedFile?.delete()
+                    downloadedFile = null
+                    progress = -1
+                }
+                latest = release
+                message = if (release == null) "Установлена последняя доступная версия"
+                    else "Доступна версия " + release.version
+                // OTA: download in-app once a tested release is available. Installation
+                // always requires explicit user confirmation in the Android installer.
+                if (release != null && downloadedFile == null) download(context)
             } catch (_: Exception) {
                 message = "Не удалось проверить обновления"
-            } finally { checking = false }
+            } finally {
+                checking = false
+            }
         }
     }
 
     private fun fetch(context: Context): ReleaseApk? {
         val current = context.packageManager.getPackageInfo(context.packageName, 0)
             .versionName ?: "0.0.0"
-        val c = URL(api).openConnection() as HttpURLConnection
-        c.connectTimeout = 12000; c.readTimeout = 12000
-        c.setRequestProperty("Accept", "application/vnd.github+json")
-        c.setRequestProperty("User-Agent", "Cinema-Android")
+        val connection = URL(api).openConnection() as HttpURLConnection
+        connection.connectTimeout = 12000
+        connection.readTimeout = 12000
+        connection.setRequestProperty("Accept", "application/vnd.github+json")
+        connection.setRequestProperty("User-Agent", "Cinema-Android")
         try {
-            if (c.responseCode != 200) error("Недоступен список версий")
-            val releases = JSONArray(c.inputStream.bufferedReader().use { it.readText() })
-            val candidates = mutableListOf<ReleaseApk>()
-            for (i in 0 until releases.length()) {
-                val r = releases.getJSONObject(i)
-                // Publish stable, signed releases only; temporary test builds cannot update one another.
-                if (r.optBoolean("draft") || r.optBoolean("prerelease")) continue
-                val v = r.optString("tag_name").removePrefix("v")
-                if (!v.matches(Regex("""\d+\.\d+\.\d+"""))) continue
-                if (!AppVersionComparator.isNewer(v, current)) continue
-                val assets = r.optJSONArray("assets") ?: continue
-                for (j in 0 until assets.length()) {
-                    val a = assets.getJSONObject(j)
-                    val url = a.optString("browser_download_url")
-                    if (!a.optString("name").endsWith(".apk", true) || !url.startsWith(prefix)) continue
-                    val digest = a.optString("digest").removePrefix("sha256:")
-                        .takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) }
-                    candidates.add(ReleaseApk(v, url, a.optLong("size", 0), digest))
-                }
-            }
-            return candidates.maxWithOrNull { a, b ->
-                AppVersionComparator.compare(a.version, b.version) ?: 0
-            }
-        } finally { c.disconnect() }
+            if (connection.responseCode != 200) error("Недоступен список версий")
+            val releases = JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+            return UpdateReleaseSelector.select(releases, current, includeTestBuilds(context))
+        } finally {
+            connection.disconnect()
+        }
     }
 
     fun download(context: Context) {
@@ -193,9 +205,19 @@ internal fun UpdatesScreen() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         ScreenHeading("Обновления", "Проверка новых версий")
         Spacer(Modifier.height(20.dp))
-        Text("Установлена версия " + current, style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(14.dp))
-        Text(AppUpdates.message.ifEmpty { "Нажмите «Проверить»." }, color = appMuted)
+        Text("Версия " + current, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(10.dp))
+        var previewUpdates by remember(context) {
+            mutableStateOf(AppUpdates.includeTestBuilds(context))
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text("Тестовые обновления", modifier = Modifier.weight(1f))
+            Switch(checked = previewUpdates, onCheckedChange = {
+                previewUpdates = it
+                AppUpdates.setIncludeTestBuilds(context, it)
+            })
+        }
+        Text(AppUpdates.message.ifEmpty { "Проверка выполняется автоматически." }, color = appMuted)
         Spacer(Modifier.height(18.dp))
         if (AppUpdates.downloading) {
             if (AppUpdates.progress >= 0) {
@@ -222,17 +244,17 @@ internal fun UpdatesScreen() {
             Text(if (AppUpdates.checking) "Проверка…" else "Проверить обновления")
         }
         Spacer(Modifier.height(22.dp))
-        Text("Установку подтверждает Android. Для обновления поверх старой версии сертификаты подписи должны совпадать.",
+        Text("Загрузка автоматическая. Установку подтверждает Android.",
             color = appMuted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @Composable
-internal fun UpdateNotice() {
+internal fun UpdateNotice(show: Boolean = true) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var ignored by remember { mutableStateOf<String?>(null) }
     val release = AppUpdates.latest
-    if (release != null && release.version != ignored) AlertDialog(
+    if (show && release != null && release.version != ignored) AlertDialog(
         onDismissRequest = { ignored = release.version },
         title = { Text("Доступно обновление") },
         text = {
