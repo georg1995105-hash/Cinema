@@ -8,6 +8,7 @@ import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.FormBody
@@ -63,8 +64,10 @@ internal object MirrorNetworkSource {
         client: OkHttpClient = http
     ): Boolean {
         val challenge = MirrorAnubis.parse(html) ?: return false
-        val solution = runInterruptible(Dispatchers.Default) {
-            MirrorAnubis.solve(challenge)
+        val solution = withTimeoutOrNull(10_000L) {
+            runInterruptible(Dispatchers.Default) {
+                MirrorAnubis.solve(challenge)
+            }
         } ?: return false
         val passUrl = MirrorAnubis.passChallengeUrl(pageUrl, challenge, solution)
             ?: return false

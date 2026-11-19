@@ -22,34 +22,31 @@ import kotlinx.coroutines.sync.withPermit
 
 @Composable
 internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        ScreenHeading("Настройки", "Только нужное")
-        Spacer(Modifier.height(24.dp))
-        MenuItem("Аккаунт", "Вход, гостевой режим и выбранное зеркало",
-            Icons.Outlined.AccountCircle, onAccount)
-        MenuItem("Источники и зеркала", "Добавление и проверка адресов", Icons.Outlined.Link) {
-            open(Page.SOURCES)
-        }
-        MenuItem("Плеер", "Перемотка и проверка воспроизведения", Icons.Outlined.PlayArrow) {
-            open(Page.PLAYER)
-        }
-        MenuItem("Обновления", "Новая версия и ход загрузки", Icons.Outlined.SystemUpdate) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val device = CinemaDevices.detect(context, androidx.compose.ui.platform.LocalConfiguration.current)
+    Column(
+        Modifier.then(if (device == CinemaDevice.TV) Modifier.widthIn(max = 780.dp)
+            else Modifier.fillMaxWidth())
+            .fillMaxHeight()
+            .verticalScroll(rememberScrollState())
+    ) {
+        ScreenHeading("Настройки")
+        Spacer(Modifier.height(16.dp))
+        MenuItem("Обновления", Icons.Outlined.SystemUpdate) {
             open(Page.UPDATES)
         }
-        MenuItem("Внешний вид", "Оформление и число карточек", Icons.Outlined.Palette) {
+        MenuItem("Внешний вид", Icons.Outlined.Palette) {
             open(Page.APPEARANCE)
         }
-        MenuItem("О приложении", "Версия и сведения", Icons.Outlined.Info) {
+        MenuItem("О приложении", Icons.Outlined.Info) {
             open(Page.ABOUT)
         }
-        Spacer(Modifier.height(18.dp))
-        Text("Вход необязателен. Пароль не сохраняется приложением.",
-            color = appMuted, style = MaterialTheme.typography.bodySmall)
+
     }
 }
 
 @Composable
-private fun MenuItem(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
+private fun MenuItem(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
     click: () -> Unit) {
     Surface(onClick = click, color = appPanel, shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
@@ -57,11 +54,7 @@ private fun MenuItem(title: String, subtitle: String, icon: androidx.compose.ui.
             verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, tint = appBlue)
             Spacer(Modifier.width(17.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(4.dp))
-                Text(subtitle, color = appMuted, style = MaterialTheme.typography.bodySmall)
-            }
+            Text(title, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
             Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = appMuted)
         }
     }
@@ -236,39 +229,35 @@ internal fun PlayerSettingsScreen(local: LocalStore, back: () -> Unit, openTest:
         Text("Плеер сохраняет место остановки и воспроизводит доступные видеоссылки.",
             color = appMuted)
         Spacer(Modifier.height(22.dp))
-        MenuItem("Проверка плеера", "Открыть видео по прямой ссылке",
-            Icons.Outlined.PlayArrow, openTest)
+        // Direct-link developer test is intentionally absent from the
+        // consumer UI. Real films launch from their own film cards.
     }
 }
 
 @Composable
 internal fun AppearanceScreen(local: LocalStore, back: () -> Unit) {
-    var count by remember { mutableIntStateOf(local.cardsPerRow()) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val device = CinemaDevices.detect(context, configuration)
+    val minCards = CinemaDevices.minColumns(device)
+    val maxCards = CinemaDevices.maxColumns(device)
+    var count by remember(device) {
+        mutableIntStateOf(local.cardsPerRow(device, configuration.screenWidthDp))
+    }
     Column {
-        ScreenHeading("Внешний вид", "Оформление", back)
+        ScreenHeading("Внешний вид", back = back)
         Spacer(Modifier.height(24.dp))
         Text("Карточек в ряду: $count", fontWeight = FontWeight.SemiBold)
         Slider(
             value = count.toFloat(), onValueChange = {
-                count = it.toInt().coerceIn(2, 8)
-                local.saveCardsPerRow(count)
+                count = it.toInt().coerceIn(minCards, maxCards)
+                local.saveCardsPerRow(count, device)
             },
-            valueRange = 2f..8f, steps = 5,
+            valueRange = minCards.toFloat()..maxCards.toFloat(), steps = maxCards - minCards - 1,
             modifier = Modifier.fillMaxWidth()
         )
-        Text("Настройка будет применяться к сетке после подключения каталога.",
-            color = appMuted, style = MaterialTheme.typography.bodySmall)
-        Spacer(Modifier.height(20.dp))
-        Surface(color = appPanel, shape = RoundedCornerShape(15.dp)) {
-            Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Palette, contentDescription = null, tint = appBlue)
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text("Тёмная тема", fontWeight = FontWeight.Medium)
-                    Text("Используется во всех разделах", color = appMuted)
-                }
-            }
-        }
+
+
     }
 }
 
@@ -285,7 +274,7 @@ internal fun AboutScreen(back: () -> Unit) {
             fontWeight = FontWeight.Bold)
         if (version != null) Text("Версия $version", color = appBlue)
         Spacer(Modifier.height(18.dp))
-        Text("Независимое приложение с каталогом выбранного зеркала, локальной историей и необязательным входом в аккаунт источника.",
+        Text("Каталог фильмов и сериалов, поиск, избранное и локальная история. Просмотр зависит от доступности выбранного источника.",
             color = appMuted)
     }
 }

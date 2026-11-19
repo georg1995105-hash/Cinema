@@ -77,18 +77,35 @@ internal object MirrorHtmlMetadata {
             val idFromPage = entry.attr("data-pid").ifBlank {
                 entry.closest("[data-pid]")?.attr("data-pid").orEmpty()
             }.takeIf { it.matches(Regex("[0-9]{1,12}")) }.orEmpty()
-            val value = FilmPerson(name, poster(entry), url, idFromPage)
+            val rawPortrait = listOf("data-photo", "data-image", "data-src")
+                .firstNotNullOfOrNull { key ->
+                    entry.attr(key).takeIf(String::isNotBlank)
+                        ?: entry.selectFirst("[$key]")?.attr(key)?.takeIf(String::isNotBlank)
+                }.orEmpty()
+            val picture = absolute(rawPortrait).takeIf(MirrorPoster::isPhoto)
+                .orEmpty().ifBlank { poster(entry) }
+            val value = FilmPerson(name, picture, url, idFromPage)
             if (role == "director") directors.putIfAbsent(name.lowercase(), value)
             else actors.putIfAbsent(name.lowercase(), value)
         }
-        for (row in document.select(".b-post__infotable tr, .b-post__info tr")) {
-            val cells = row.children().filter { it.tagName() in listOf("th", "td") }
+        val factRows = document.select(
+            ".b-post__infotable tr, .b-post__info tr, " +
+            ".b-post__infotable_left > div, .b-post__infotable_right_inner > div"
+        )
+        for (row in factRows) {
+            val tableCells = row.children().filter { it.tagName() in listOf("th", "td") }
+            val cells: List<Element> = if (tableCells.size >= 2) tableCells else {
+                val nested = row.children()
+                if (nested.size >= 2)
+                    listOfNotNull(nested.firstOrNull(), nested.lastOrNull())
+                else emptyList()
+            }
             if (cells.size < 2) continue
             val label = cells[0].text().trim().trimEnd(':')
             val body = cells[1]
             val value = body.text().trim()
             if (label.isNotBlank() && value.isNotBlank() && value.length < 165 &&
-                listOf("дата выхода","страна","режисс","жанр","время","возраст","в качестве","оригинальное")
+                listOf("год","дата выхода","премьера","страна","режисс","жанр","время","возраст","в качестве","оригинальное")
                     .any { label.lowercase().contains(it) }) facts.add(label to value)
             val role = when {
                 label.startsWith("режисс", true) -> "director"
@@ -143,9 +160,10 @@ internal object MirrorHtmlMetadata {
                 val url = absolute(link).takeIf {
                     SourceRules.sameOrigin(filmUrl, it)
                 }.orEmpty()
-                val pid = entry.attr("data-pid").takeIf {
-                    it.matches(Regex("[0-9]{1,12}"))
-                }.orEmpty()
+                val pid = entry.attr("data-pid")
+                    .ifBlank { label.attr("data-pid") }
+                    .ifBlank { entry.selectFirst("[data-pid]")?.attr("data-pid").orEmpty() }
+                    .takeIf { it.matches(Regex("[0-9]{1,12}")) }.orEmpty()
                 val value = FilmPerson(name, photo, url, pid)
                 if (role == "director") directors.putIfAbsent(name.lowercase(), value)
                 else actors.putIfAbsent(name.lowercase(), value)

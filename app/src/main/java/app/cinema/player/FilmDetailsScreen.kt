@@ -34,6 +34,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import org.json.JSONObject
 import java.net.URI
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal data class FilmPerson(
     val name: String, val photo: String, val url: String = "", val pid: String = ""
@@ -94,8 +95,8 @@ internal object FilmPageParser {
          function txt(s) {var e=document.querySelector(s);return e?norm(e.textContent):'';}
          function absolute(s) {try {return new URL(s,document.baseURI).href;} catch(e) {return '';}}
          var facts=[];
-         document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(tr) {
-           var cells=tr.cells;
+         document.querySelectorAll('.b-post__infotable tr, .b-post__info tr, .b-post__infotable_left > div, .b-post__infotable_right_inner > div').forEach(function(tr) {
+           var cells=(tr.cells && tr.cells.length>=2) ? tr.cells : (tr.children.length>=2 ? [tr.children[0],tr.children[tr.children.length-1]] : null);
            if (!cells || cells.length<2) return;
            var label=norm(cells[0].textContent).replace(/:$/,'');
            var value=norm(cells[1].textContent);
@@ -165,12 +166,16 @@ internal object FilmPageParser {
            var label = entry.querySelector('[itemprop~="name"], .person-name') ||
              anchor?.querySelector('[itemprop~="name"]') || anchor || entry;
            var name = label.getAttribute('content') || label.textContent || entry.querySelector('img')?.getAttribute('alt');
-           var photo = kinoPosters(entry,document.baseURI)[0] || '';
+           var portrait = entry.getAttribute('data-photo') || node.getAttribute('data-photo') ||
+             entry.querySelector('[data-photo]')?.getAttribute('data-photo') || '';
+           if (/nopersonphoto|^(?:null|undefined)$/i.test(portrait)) portrait = '';
+           var photo = (portrait ? absolute(portrait) : '') ||
+             kinoPosters(entry,document.baseURI)[0] || '';
            var pid = entry.getAttribute('data-pid') || entry.closest('[data-pid]')?.getAttribute('data-pid') || '';
            addPerson(role, name, anchor?.getAttribute('href'), photo, pid);
          }
-         document.querySelectorAll('.b-post__infotable tr, .b-post__info tr').forEach(function(row) {
-           var cells = row.cells;
+         document.querySelectorAll('.b-post__infotable tr, .b-post__info tr, .b-post__infotable_left > div, .b-post__infotable_right_inner > div').forEach(function(row) {
+           var cells = (row.cells && row.cells.length>=2) ? row.cells : (row.children.length>=2 ? [row.children[0],row.children[row.children.length-1]] : null);
            if (!cells || cells.length < 2) return;
            var label = norm(cells[0].textContent);
            var role = /^(?:в ролях|в главных ролях|акт[её]р)/i.test(label) ? 'actor' : /^режисс/i.test(label) ? 'director' : '';
@@ -448,6 +453,7 @@ internal fun FilmDetails(
     onBrowse: (String) -> Unit,
     savedSelection: PlaybackSelection?,
     onWatch: (WatchRequest) -> Unit,
+    onLift: () -> Unit = {},
     onRelated: (CatalogMovie) -> Unit,
     onMetadata: (CatalogMovie) -> Unit,
     onPerson: (FilmPerson) -> Unit,
@@ -455,10 +461,16 @@ internal fun FilmDetails(
     verifiedPlayer: MirrorMoviePage? = null
 ) {
     val context = LocalContext.current
-    // Reopen the same post on the mirror explicitly selected in Settings.
-    // Old history entries may still contain the host used at the time of saving.
+    // A film obtained from a verified fallback catalogue must open on THAT
+    // working host. Rewriting it to the blocked Settings mirror discarded the
+    // successful catalogue result and broke details/player.
+    // Older history entries keep the original selected source when applicable.
     val preferredFilmUrl = remember(movie.url, source) {
-        MirrorFilmUrl.changeOrigin(movie.url, source) ?: movie.url
+        when {
+            SourceRules.sameOrigin(movie.url, source) -> movie.url
+            MirrorSitePolicy.isRecognizedMirror(movie.url) -> movie.url
+            else -> MirrorFilmUrl.changeOrigin(movie.url, source) ?: movie.url
+        }
     }
     var info by remember(movie.url, preferredFilmUrl) {
         mutableStateOf(FilmInfoMemory.get(preferredFilmUrl))
@@ -476,8 +488,12 @@ internal fun FilmDetails(
     // It is independent of the WebView parser, but shares Android's mirror cookies.
     LaunchedEffect(movie.url, preferredFilmUrl, sources) {
         networkFinished = false
-        val result = MirrorNetworkSource.resolveFilm(
-            preferredFilmUrl, sources, WebSettings.getDefaultUserAgent(context))
+        val result = withTimeoutOrNull(50_000L) {
+            MirrorNetworkSource.resolveFilm(
+                preferredFilmUrl, sources, WebSettings.getDefaultUserAgent(context))
+        } ?: MirrorNetworkSource.FilmResult(
+            preferredFilmUrl, reason = "Зеркала не завершили загрузку фильма вовремя."
+        )
         if (MirrorFilmUrl.isAllowedResolved(preferredFilmUrl, result.finalUrl, sources)) {
             resolvedFilmUrl = result.finalUrl
             if (result.finalUrl != preferredFilmUrl) networkResolvedUrl = result.finalUrl
@@ -838,28 +854,11 @@ internal fun FilmDetails(
                             style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = {
-                            chosenSeason = savedSelection?.season.orEmpty()
-                            chosenEpisode = savedSelection?.episode.orEmpty()
-                            chosenProvider = when {
-                                savedSelection?.provider == "collapse" && collapseAvailable -> "collapse"
-                                savedSelection?.provider == "rezka" && rezkaAvailable -> "rezka"
-                                rezkaAvailable -> "rezka"
-                                collapseAvailable -> "collapse"
-                                else -> "rezka"
-                            }
-                            val providerVoices = if (chosenProvider == "collapse")
-                                collapseMedia?.voices(chosenSeason, chosenEpisode).orEmpty()
-                            else effectiveVoices
-                            chosenVoice = savedSelection?.voice?.takeIf { id ->
-                                providerVoices.any { it.id == id }
-                            } ?: providerVoices.firstOrNull()?.id.orEmpty()
-                            showWatchMenu = true
-                        },
+                        Button(onClick = onLift,
                             modifier = Modifier.weight(1f), shape = RoundedCornerShape(13.dp)) {
                             Icon(Icons.Outlined.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(7.dp))
-                            Text("Смотреть")
+                            Text("Смотреть в Lift")
                         }
                         OutlinedIconButton(onClick = onToggleFavourite) {
                             Icon(if (isFavourite) Icons.Outlined.BookmarkAdded

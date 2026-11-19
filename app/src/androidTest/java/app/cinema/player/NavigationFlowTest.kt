@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Rule
@@ -16,12 +17,14 @@ class NavigationFlowTest {
         val store = LocalStore(compose.activity)
         store.saveSearch("Бригада")
         try {
-            compose.onNodeWithText("Добавьте зеркало").assertIsDisplayed()
+            // Home is native: it must never embed the Lift website by default.
+            compose.onNodeWithText("Популярное").assertIsDisplayed()
+            compose.onNodeWithText("Обновить").assertDoesNotExist()
+            compose.onNodeWithText("Lift · Смотреть").assertDoesNotExist()
             compose.onNode(hasText("Поиск") and hasClickAction()).performClick()
             compose.onNodeWithText("Недавние запросы").assertIsDisplayed()
             compose.onNodeWithText("Бригада").performClick()
-            compose.onNodeWithText("Добавьте зеркало").assertIsDisplayed()
-            compose.onNodeWithText("Обновить").assertDoesNotExist()
+            compose.onNodeWithText("Фильтры").assertIsDisplayed()
 
             compose.onNode(hasText("Моё") and hasClickAction()).performClick()
             compose.onNodeWithText("Просмотров пока нет").assertIsDisplayed()
@@ -29,16 +32,18 @@ class NavigationFlowTest {
             compose.onNodeWithText("Избранное пока пусто").assertIsDisplayed()
 
             compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
-            compose.onNodeWithText("Источники и зеркала").performClick()
-            compose.onNodeWithText("Адрес сайта").assertIsDisplayed()
+            compose.onNodeWithText("Обновления").assertIsDisplayed()
+            compose.onNodeWithText("Плеер").assertDoesNotExist()
             compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
             compose.onNodeWithText("Внешний вид").performClick()
-            compose.onNodeWithText("Тёмная тема").assertIsDisplayed()
+            compose.onNodeWithText("Карточек в ряду", substring = true).assertIsDisplayed()
             compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
-            compose.onNodeWithText("Плеер").performClick()
-            compose.onNodeWithText("Шаг перемотки").assertIsDisplayed()
+            compose.onNodeWithText("Обновления").performClick()
+            compose.onNodeWithText("Тестовые обновления").assertIsDisplayed()
             compose.onNode(hasText("Главная") and hasClickAction()).performClick()
-            compose.onNodeWithText("Добавьте зеркало").assertIsDisplayed()
+            // Returning from settings must show the native catalog.
+            compose.onNodeWithText("Популярное").assertIsDisplayed()
+            compose.onNodeWithText("Lift · Смотреть").assertDoesNotExist()
         } finally {
             store.clearSearchHistory()
         }

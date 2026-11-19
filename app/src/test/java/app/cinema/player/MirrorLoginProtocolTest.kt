@@ -38,4 +38,12 @@ class MirrorLoginProtocolTest {
             MirrorAccountGateway.origin("https://mirror.example/films/a"))
         assertNull(MirrorAccountGateway.origin("http://mirror.example"))
     }
+
+    @Test fun browserOpaqueRedirectMustNotBeReportedAsServerHttpZero() {
+        val result = MirrorLoginProtocol.decode(0, "")
+        assertFalse(result.success)
+        assertFalse(result.message.contains("Сервер ответил с ошибкой 0"))
+        assertFalse(result.retryInBrowser)
+    }
+
 }

@@ -22,6 +22,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -41,7 +43,7 @@ internal val appBlue = Color(0xFF80C5E7)
 internal val appMuted = Color(0xFFADB8C0)
 private val appWhite = Color(0xFFF4F7F8)
 
-internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE, MOVIE, FILM_PLAYER, PERSON, ACCOUNT }
+internal enum class Page { HOME, SEARCH, LIBRARY, SETTINGS, SOURCES, PLAYER, APPEARANCE, ABOUT, TEST, UPDATES, SITE, MOVIE, FILM_PLAYER, PERSON, ACCOUNT, LIFT }
 private data class Destination(val page: Page, val label: String, val icon: ImageVector)
 private val destinations = listOf(
     Destination(Page.HOME, "Главная", Icons.Outlined.Home),
@@ -50,7 +52,43 @@ private val destinations = listOf(
     Destination(Page.SETTINGS, "Настройки", Icons.Outlined.Settings)
 )
 
+/** Large, remote-focusable navigation replaces the phone bottom bar on Android TV. */
+@Composable
+private fun TvNavigation(current: Page, open: (Page) -> Unit) {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) { first.requestFocus() }
+    Row(
+        modifier = Modifier.fillMaxWidth().background(appPanel)
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 36.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(18.dp)
+    ) {
+        destinations.forEachIndexed { index, destination ->
+            val active = current == destination.page ||
+                (destination.page == Page.SETTINGS && current in listOf(
+                    Page.APPEARANCE, Page.ABOUT, Page.UPDATES
+                ))
+            FilterChip(
+                modifier = if (index == 0) Modifier.focusRequester(first) else Modifier,
+                selected = active,
+                onClick = { open(destination.page) },
+                label = {
+                    Text(destination.label, style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+                },
+                leadingIcon = { Icon(destination.icon, contentDescription = null) }
+            )
+        }
+    }
+}
+
 class MainActivity : ComponentActivity() {
+    override fun onResume() {
+        super.onResume()
+        AppUpdates.check(this)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = android.graphics.Color.rgb(19, 24, 28)
@@ -76,6 +114,11 @@ private fun CinemaApp() {
     var activeSource by remember { mutableStateOf(local.activeSource()) }
     var page by remember { mutableStateOf(Page.HOME) }
     var playing by remember { mutableStateOf<String?>(null) }
+    var playingMovieKey by remember { mutableStateOf<String?>(null) }
+    var liftTitle by remember { mutableStateOf("") }
+    var liftMovieKey by remember { mutableStateOf<String?>(null) }
+    var liftResumeUrl by remember { mutableStateOf("") }
+    var liftReturn by remember { mutableStateOf(Page.MOVIE) }
     var browsingSource by remember { mutableStateOf<String?>(null) }
     var playbackStorageUrl by remember { mutableStateOf<String?>(null) }
     var selectedFilm by remember { mutableStateOf<CatalogMovie?>(null) }
@@ -83,7 +126,15 @@ private fun CinemaApp() {
     var selectedPerson by remember { mutableStateOf<FilmPerson?>(null) }
     var previousFilm by remember { mutableStateOf<CatalogMovie?>(null) }
     var browseReturn by remember { mutableStateOf(Page.HOME) }
-    val tablet = LocalConfiguration.current.screenWidthDp >= 600
+    val screenConfiguration = LocalConfiguration.current
+    val device = remember(context, screenConfiguration.smallestScreenWidthDp, screenConfiguration.uiMode) {
+        CinemaDevices.detect(context, screenConfiguration)
+    }
+    val isTv = CinemaDevices.isTv(device)
+    val tablet = device != CinemaDevice.PHONE
+    val showNavigation = page !in listOf(
+        Page.SITE, Page.MOVIE, Page.FILM_PLAYER, Page.PERSON, Page.LIFT
+    )
 
     fun saveProgress(url: String, position: Long) {
         history.removeAll { it.url == url }
@@ -105,6 +156,7 @@ private fun CinemaApp() {
     }
     fun back() {
         if (page == Page.SITE) { page = browseReturn; return }
+        if (page == Page.LIFT) { page = liftReturn; return }
         if (page == Page.MOVIE) { page = movieBack; return }
         if (page == Page.PERSON) { selectedFilm = previousFilm; page = Page.MOVIE; return }
         if (page == Page.FILM_PLAYER) {
@@ -118,21 +170,30 @@ private fun CinemaApp() {
     playing?.let { url ->
         PlayerPane(
             url = url,
-            startPositionMs = history.firstOrNull { it.url == url }?.positionMs ?: 0,
+            startPositionMs = history.firstOrNull { it.url == (playingMovieKey ?: url) }?.positionMs ?: 0,
             seekSeconds = local.seekSeconds(),
-            onClose = { playing = null },
+            onClose = { playing = null; playingMovieKey = null },
             holdSpeed = local.holdSpeed(),
-            onSave = { saveProgress(url, it) }
+            onSave = { saveProgress(playingMovieKey ?: url, it) }
         )
         return
     }
     BackHandler(enabled = page != Page.HOME) { back() }
-    LaunchedEffect(Unit) { AppUpdates.check(context) }
+    // Check on launch and periodically while Cinema stays in the foreground.
+    LaunchedEffect(context) {
+        while (true) {
+            AppUpdates.check(context)
+            kotlinx.coroutines.delay(60L * 60L * 1000L)
+        }
+    }
 
     Scaffold(
         containerColor = appBackground,
+        topBar = {
+            if (isTv && showNavigation) TvNavigation(page) { page = it }
+        },
         bottomBar = {
-            if (page != Page.SITE && page != Page.MOVIE && page != Page.FILM_PLAYER && page != Page.PERSON) BoxWithConstraints(
+            if (!isTv && showNavigation) BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -169,14 +230,15 @@ private fun CinemaApp() {
         }
     ) { insets ->
         Box(
-            if (page == Page.FILM_PLAYER) Modifier.fillMaxSize()
+            if (page == Page.FILM_PLAYER || page == Page.LIFT) Modifier.fillMaxSize()
             else Modifier.fillMaxSize().padding(insets)
-                .padding(horizontal = if (tablet) 30.dp else 16.dp, vertical = 12.dp)
+                .padding(horizontal = if (isTv) 40.dp else if (tablet) 26.dp else 16.dp,
+                    vertical = if (isTv) 18.dp else 12.dp)
         ) {
             when (page) {
                 Page.HOME -> HomeScreen(
                     activeSource = activeSource,
-                    cardsPerRow = local.cardsPerRow(),
+                    cardsPerRow = local.cardsPerRow(device, screenConfiguration.screenWidthDp),
                     onOpenFilm = { local.rememberMovie(it); selectedFilm = it; movieBack = Page.HOME; page = Page.MOVIE },
                     onBrowse = { browsingSource = it; browseReturn = Page.HOME; page = Page.SITE },
                     onAddSource = { page = Page.SOURCES }
@@ -184,7 +246,7 @@ private fun CinemaApp() {
                 Page.SEARCH -> SearchScreen(
                     local = local,
                     source = activeSource,
-                    cardsPerRow = local.cardsPerRow(),
+                    cardsPerRow = local.cardsPerRow(device, screenConfiguration.screenWidthDp),
                     onOpen = { local.rememberMovie(it); selectedFilm = it; movieBack = Page.SEARCH; page = Page.MOVIE },
                     onAddSource = { page = Page.SOURCES },
                     onBrowse = { browsingSource = it; browseReturn = Page.SEARCH; page = Page.SITE }
@@ -193,7 +255,7 @@ private fun CinemaApp() {
                     local = local,
                     history = history,
                     favourites = favourites,
-                    cardsPerRow = local.cardsPerRow(),
+                    cardsPerRow = local.cardsPerRow(device, screenConfiguration.screenWidthDp),
                     onOpen = { film ->
                         local.rememberMovie(film)
                         selectedFilm = film
@@ -203,15 +265,30 @@ private fun CinemaApp() {
                     onResume = { film ->
                         local.rememberMovie(film)
                         selectedFilm = film
-                        playbackStorageUrl = film.url
-                        browsingSource = activeSource?.let { MirrorFilmUrl.changeOrigin(film.url, it) }
-                            ?: film.url
                         movieBack = Page.LIBRARY
-                        page = Page.FILM_PLAYER
+                        if (CinemetaCatalog.isMovieUrl(film.url) || ArchivePublicCatalog.isArchiveUrl(film.url)) {
+                            val previousLift = local.liftVisitedUrl(film.url)
+                            if (previousLift != null) {
+                                liftTitle = film.title
+                                liftMovieKey = film.url
+                                liftResumeUrl = previousLift
+                                liftReturn = Page.MOVIE
+                                page = Page.LIFT
+                            } else {
+                                page = Page.MOVIE
+                            }
+                        } else {
+                            playbackStorageUrl = film.url
+                            browsingSource = activeSource?.let {
+                                MirrorFilmUrl.changeOrigin(film.url, it)
+                            } ?: film.url
+                            page = Page.FILM_PLAYER
+                        }
                     },
                     toggle = ::toggleFavourite,
                     remove = { url ->
                         history.removeAll { it.url == url }
+                        local.removeLiftVisit(url)
                         local.saveHistory(history.toList())
                     }
                 )
@@ -240,6 +317,23 @@ private fun CinemaApp() {
                 Page.PLAYER -> PlayerSettingsScreen(local, ::back) { page = Page.TEST }
                 Page.APPEARANCE -> AppearanceScreen(local, ::back)
                 Page.UPDATES -> UpdatesScreen()
+                Page.LIFT -> LiftWebScreen(
+                    onClose = { page = liftReturn },
+                    title = liftTitle,
+                    resumeUrl = liftResumeUrl,
+                    onFilmPageVisited = { detailUrl ->
+                        val movieUrl = liftMovieKey
+                        if (movieUrl != null) {
+                            local.saveLiftVisit(movieUrl, detailUrl)
+                            // Visiting Lift must not erase a saved native playback position.
+                            val previousMs = history.firstOrNull { it.url == movieUrl }?.positionMs ?: 0L
+                            saveProgress(movieUrl, previousMs)
+                        }
+                    },
+                    expectedYear = LiftMatchPolicy.yearFromDetails(
+                        selectedFilm?.details.orEmpty()
+                    )
+                )
                 Page.SITE -> BrowserScreen(
                     browsingSource ?: activeSource.orEmpty(),
                     onBack = { page = browseReturn },
@@ -301,7 +395,25 @@ private fun CinemaApp() {
                     }
                 }
                 Page.MOVIE -> selectedFilm?.let { movie ->
-                    FilmDetails(
+                    if (CinemetaCatalog.isMovieUrl(movie.url) || ArchivePublicCatalog.isArchiveUrl(movie.url)) {
+                        CinemetaFilmDetails(
+                            movie = movie,
+                            isFavourite = movie.url in favourites,
+                            onToggleFavourite = { toggleFavourite(movie.url) },
+                            onBack = { page = movieBack },
+                            onPlay = { verifiedStreamUrl ->
+                                playingMovieKey = movie.url
+                                playing = verifiedStreamUrl
+                            },
+                            onLift = { resume ->
+                                liftTitle = movie.title
+                                liftMovieKey = movie.url
+                                liftResumeUrl = if (resume) local.liftVisitedUrl(movie.url).orEmpty() else ""
+                                liftReturn = Page.MOVIE
+                                page = Page.LIFT
+                            }
+                        )
+                    } else FilmDetails(
                         movie = movie,
                         source = activeSource ?: MirrorAccountGateway.origin(movie.url).orEmpty(),
                         sources = sources.toList(),
@@ -314,6 +426,13 @@ private fun CinemaApp() {
                             page = Page.SITE
                         },
                         savedSelection = local.playbackSelection(movie.url),
+                        onLift = {
+                            liftTitle = movie.title
+                            liftMovieKey = movie.url
+                            liftResumeUrl = ""
+                            liftReturn = Page.MOVIE
+                            page = Page.LIFT
+                        },
                         onWatch = { request ->
                             if (request.voice.isNotBlank()) {
                                 val storageUrl = movie.url
@@ -356,7 +475,7 @@ private fun CinemaApp() {
                     PersonScreen(
                         person = person,
                         source = activeSource,
-                        cardsPerRow = local.cardsPerRow(),
+                        cardsPerRow = local.cardsPerRow(device, screenConfiguration.screenWidthDp),
                         onBack = { selectedFilm = previousFilm; page = Page.MOVIE },
                         onOpen = { film ->
                             local.rememberMovie(film)
@@ -369,11 +488,11 @@ private fun CinemaApp() {
                     )
                 }
                 Page.ABOUT -> AboutScreen(::back)
-                Page.TEST -> VideoTestScreen(::back) { playing = it }
+                Page.TEST -> VideoTestScreen(::back) { playingMovieKey = null; playing = it }
             }
         }
     }
-    UpdateNotice()
+    UpdateNotice(show = page != Page.LIFT && page != Page.FILM_PLAYER && playing == null)
 }
 
 @Composable
@@ -396,11 +515,8 @@ internal fun ScreenHeading(title: String, subtitle: String? = null, back: (() ->
     }
 }
 
-private val feeds = listOf(
-    "Смотрят сейчас", "Горячие", "Новинки", "Последние поступления",
-    "Популярное", "В ожидании"
-)
-private val contentKinds = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы", "Аниме")
+private val feeds = listOf("Популярное", "Новинки", "Высокий рейтинг")
+private val contentKinds = listOf("Все", "Фильмы", "Сериалы", "Мультфильмы")
 
 @Composable
 internal fun SimpleTabs(items: List<String>, selected: String, onSelected: (String) -> Unit) {
@@ -549,14 +665,11 @@ private fun HomeScreen(
             modifier = Modifier.fillMaxWidth().weight(1f),
             key = { index -> feeds[index] }
         ) { index ->
-            CatalogGrid(
-                source = activeSource,
-                section = feeds[index],
+            CinemetaGrid(
+                tab = feeds[index],
                 kind = kind,
                 cardsPerRow = cardsPerRow,
                 onOpen = onOpenFilm,
-                onBrowse = onBrowse,
-                onAddSource = onAddSource,
                 loadContent = pager.currentPage == index
             )
         }
@@ -594,9 +707,9 @@ private fun LibraryScreen(
     remove: (String) -> Unit
 ) {
     var selected by remember { mutableStateOf("История") }
-    val isTablet = LocalConfiguration.current.screenWidthDp >= 600
-    val columns = if (isTablet) cardsPerRow.coerceIn(3,8)
-        else cardsPerRow.coerceIn(2,3)
+    val configuration = LocalConfiguration.current
+    val device = CinemaDevices.detect(androidx.compose.ui.platform.LocalContext.current, configuration)
+    val columns = CinemaDevices.columns(device, cardsPerRow, configuration.screenWidthDp)
     var metadataRevision by remember { mutableIntStateOf(0) }
     val list = if (selected == "История") history.map { it.url } else favourites
     val missing = (history.map { it.url } + favourites).distinct()
@@ -650,7 +763,8 @@ private fun LibraryScreen(
                                         val minute = seconds / 60
                                         val second = (seconds % 60).toString().padStart(2,'0')
                                         "$minute:$second"
-                                    } else "Начало",
+                                    } else if (local.liftVisitedUrl(url) != null) "В Lift"
+                                    else "Начало",
                                     color = appMuted,
                                     style = MaterialTheme.typography.labelMedium
                                 )

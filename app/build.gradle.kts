@@ -12,8 +12,8 @@ android {
         applicationId = "app.cinema.player"
         minSdk = 26
         targetSdk = 35
-        versionCode = 42
-        versionName = "0.4.36"
+        versionCode = 58
+        versionName = "0.4.46"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -51,6 +51,8 @@ dependencies {
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("org.jsoup:jsoup:1.21.2")
+    // On-device EN -> RU synopsis translation. Download model over Wi-Fi only.
+    implementation("com.google.mlkit:translate:17.0.3")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.core:core:1.17.0")
     implementation("androidx.compose.ui:ui")

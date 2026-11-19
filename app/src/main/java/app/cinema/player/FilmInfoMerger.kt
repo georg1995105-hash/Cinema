@@ -7,7 +7,8 @@ internal object FilmInfoMerger {
         fun people(old: List<FilmPerson>, incoming: List<FilmPerson>): List<FilmPerson> {
             val merged = linkedMapOf<String, FilmPerson>()
             for (entry in old + incoming) {
-                val key = entry.name.trim().lowercase()
+                val key = entry.name.trim().lowercase().replace('ё', 'е')
+                    .replace(Regex("\\s+"), " ")
                 val existing = merged[key]
                 merged[key] = entry.copy(
                     photo = entry.photo.ifBlank { existing?.photo.orEmpty() },
@@ -31,6 +32,9 @@ internal object FilmInfoMerger {
             related = (latest.related + previous.related).distinctBy { it.url }.take(15),
             franchise = (latest.franchise + previous.franchise).distinctBy { it.url }.take(50),
             franchiseResolved = previous.franchiseResolved || latest.franchiseResolved,
+            // A resolved older/native snapshot must not cancel portrait requests
+            // started for newly discovered people in the latest WebView snapshot.
+            portraitsResolved = previous.portraitsResolved && latest.portraitsResolved,
             voices = (latest.voices + previous.voices).distinctBy { it.id }.take(45),
             defaultVoice = latest.defaultVoice.ifBlank { previous.defaultVoice },
             episodes = (latest.episodes + previous.episodes)

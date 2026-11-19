@@ -203,7 +203,9 @@ class SourceFlowTest {
         window.fetch = async function(url, request) {
           const body = new URLSearchParams(request.body);
           const correct = url.startsWith('/ajax/get_cdn_series/') && request.method === 'POST' &&
-            request.credentials === 'same-origin' && body.get('id') === '12' && body.get('translator_id') === '7' &&
+            request.credentials === 'same-origin' && request.headers['X-Hdrezka-Android-App'] === '1' &&
+            request.headers['X-Hdrezka-Android-App-Version'] === '2.2.5' &&
+            body.get('id') === '12' && body.get('translator_id') === '7' &&
             body.get('is_camrip') === '0' && body.get('is_ads') === '1' &&
             body.get('is_director') === '0' && body.get('favs') === 'voice-fixture-token';
           if (correct && body.get('action') === 'get_episodes') {
@@ -267,6 +269,7 @@ class SourceFlowTest {
             val challengeData = "fixture-seed"
             val passValid = java.util.concurrent.atomic.AtomicBoolean(false)
             val sentReferenceCookie = java.util.concurrent.atomic.AtomicBoolean(false)
+            val passSentVerificationCookie = java.util.concurrent.atomic.AtomicBoolean(false)
             val retriedWithCookie = java.util.concurrent.atomic.AtomicBoolean(false)
             val filmRequests = java.util.concurrent.atomic.AtomicInteger(0)
             val passRequests = java.util.concurrent.atomic.AtomicInteger(0)
@@ -321,11 +324,19 @@ class SourceFlowTest {
                             } else {
                                 MockResponse().setResponseCode(200)
                                     .addHeader("Content-Type", "text/html; charset=UTF-8")
+                                    .addHeader("Set-Cookie",
+                                        "techaro.lol-anubis-cookie-verification=fixture-id; Path=/; Secure; Max-Age=120")
                                     .setBody(challengeHtml)
                             }
                         }
                         "/.within.website/x/cmd/anubis/api/pass-challenge" -> {
                             passRequests.incrementAndGet()
+                            val validationCookie = request.getHeader("Cookie").orEmpty()
+                                .split(';').map(String::trim)
+                                .contains("techaro.lol-anubis-cookie-verification=fixture-id")
+                            passSentVerificationCookie.set(validationCookie)
+                            if (!validationCookie) return MockResponse()
+                                .setResponseCode(500).setBody("Anubis: verification cookie missing")
                             val nonce = address.queryParameter("nonce")?.toLongOrNull()
                             val response = address.queryParameter("response").orEmpty()
                             val valid = nonce != null &&
@@ -384,14 +395,75 @@ class SourceFlowTest {
                 assertEquals(1, passRequests.get())
                 assertTrue("reference hdmbbs cookie is sent", sentReferenceCookie.get())
                 assertTrue("PoW query is valid", passValid.get())
+                assertTrue("Anubis server received its verification cookie", passSentVerificationCookie.get())
                 assertTrue("film is retried with Anubis cookie", retriedWithCookie.get())
                 assertTrue(MirrorHttp.hasAnubisCookie(filmPage))
             } finally {
                 MirrorHttp.clearStaleAnubisCookies(filmPage)
                 android.webkit.CookieManager.getInstance().apply {
                     setCookie(filmPage, "hdmbbs=; Path=/; Secure; Max-Age=0")
+                    setCookie(filmPage,
+                        "techaro.lol-anubis-cookie-verification=; Path=/; Secure; Max-Age=0")
                     flush()
                 }
+            }
+        }
+    }
+
+    @Test fun blockedCatalogMirrorReturnsActualCardsFromTheSameSiteMirror() {
+        val cert = HeldCertificate.Builder().commonName("hdrezka.mn")
+            .addSubjectAlternativeName("hdrezka.mn")
+            .addSubjectAlternativeName("rezka-ua.pub").build()
+        val tls = HandshakeCertificates.Builder().heldCertificate(cert).build()
+        val trust = HandshakeCertificates.Builder()
+            .addTrustedCertificate(cert.certificate).build()
+        MockWebServer().use { blocked ->
+            MockWebServer().use { reachable ->
+                blocked.useHttps(tls.sslSocketFactory(), false)
+                reachable.useHttps(tls.sslSocketFactory(), false)
+                blocked.start()
+                reachable.start()
+                blocked.enqueue(MockResponse().setResponseCode(403)
+                    .setBody("Access denied"))
+                reachable.enqueue(MockResponse().setResponseCode(200)
+                    .addHeader("Content-Type", "text/html; charset=UTF-8")
+                    .setBody("""
+                        <div class="b-content__inline_item">
+                          <div class="b-content__inline_item-cover">
+                            <a href="/series/drama/8155-brigada-2002.html">
+                              <img src="/posters/8155.jpg" alt="Бригада">
+                            </a>
+                          </div>
+                          <div class="b-content__inline_item-link">
+                            <a href="/series/drama/8155-brigada-2002.html">Бригада</a>
+                            <div>2002, Россия, Драмы</div>
+                          </div>
+                        </div>
+                    """.trimIndent()))
+                val selected = blocked.url("/series/").newBuilder()
+                    .host("hdrezka.mn").build().toString()
+                val backup = reachable.url("/").newBuilder()
+                    .host("rezka-ua.pub").build().toString()
+                val client = MirrorHttp.client.newBuilder()
+                    .sslSocketFactory(trust.sslSocketFactory(), trust.trustManager)
+                    .dns(object : okhttp3.Dns {
+                        override fun lookup(hostname: String) =
+                            listOf(java.net.InetAddress.getByName("127.0.0.1"))
+                    })
+                    .followRedirects(false).followSslRedirects(false).build()
+                val cards = runBlocking {
+                    MirrorCatalog.readWithFallback(selected,
+                        "Cinema-Android-Test", listOf(backup), client)
+                }
+                assertEquals(1, cards.size)
+                assertEquals("Бригада", cards.single().title)
+                assertEquals("2002, Россия, Драмы", cards.single().details)
+                assertTrue(cards.single().url.startsWith("https://rezka-ua.pub:"))
+                assertEquals("8155", MirrorPostId.fromUrl(cards.single().url))
+                assertEquals("/series/", requireNotNull(reachable.takeRequest(
+                    5, TimeUnit.SECONDS)).path)
+                assertEquals("/series/", requireNotNull(blocked.takeRequest(
+                    5, TimeUnit.SECONDS)).path)
             }
         }
     }
@@ -484,11 +556,13 @@ class SourceFlowTest {
         assertEquals("Заполнить", LocalStore(context).pictureMode())
     }
 
-    @Test fun media3PlaysTheParsedHttpsStreamWithoutForwardingSessionToCdn() {
+    @Test fun media3PlaysStreamAndForwardsOnlyDestinationCookiesToCdn() {
         val context = instrumentation.targetContext
         val clip = instrumentation.context.assets.open("kino-test-video.mp4").use { it.readBytes() }
         val certificate = HeldCertificate.Builder()
-            .commonName("localhost").addSubjectAlternativeName("localhost").build()
+            .commonName("localhost").addSubjectAlternativeName("localhost")
+            .addSubjectAlternativeName("mirror.example")
+            .addSubjectAlternativeName("cdn.example").build()
         val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()
         val fixtureTrust = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
         MockWebServer().use { mirror ->
@@ -497,15 +571,21 @@ class SourceFlowTest {
                     it.useHttps(serverTls.sslSocketFactory(), false)
                     it.start()
                 }
-                fun localUrl(server: MockWebServer, path: String) =
-                    server.url(path).newBuilder().host("localhost").build()
-                val filmPage = localUrl(mirror, "/films/drama/12-brigada.html").toString()
+                fun localUrl(server: MockWebServer, path: String, host: String) =
+                    server.url(path).newBuilder().host(host).build()
+                // Cookies are host-scoped, not port-scoped. Distinct hosts are
+                // required to prove that mirror credentials never reach a CDN.
+                val filmPage = localUrl(
+                    mirror, "/films/drama/12-brigada.html", "mirror.example").toString()
+                val cdnOrigin = localUrl(cdn, "/", "cdn.example").toString()
                 val cookies = android.webkit.CookieManager.getInstance()
                 cookies.setCookie(filmPage, "cinema_fixture=active; Path=/; Secure; Max-Age=120")
+                cookies.setCookie(cdnOrigin, "cdn_session=active; Path=/; Secure; Max-Age=120")
+                cookies.flush()
                 mirror.dispatcher = object : Dispatcher() {
                     override fun dispatch(request: RecordedRequest) =
                         MockResponse().setResponseCode(302)
-                            .addHeader("Location", localUrl(cdn, "/clip.mp4").toString())
+                            .addHeader("Location", localUrl(cdn, "/clip.mp4", "cdn.example").toString())
                 }
                 cdn.dispatcher = object : Dispatcher() {
                     override fun dispatch(request: RecordedRequest): MockResponse {
@@ -523,9 +603,17 @@ class SourceFlowTest {
                             .setBody(Buffer().write(clip, start, end - start + 1))
                     }
                 }
-                val stream = MirrorMediaParser.parseQualityList("[720p]" + localUrl(mirror, "/stream.mp4")).single()
+                val stream = MirrorMediaParser.parseQualityList(
+                    "[720p]" + localUrl(mirror, "/stream.mp4", "mirror.example")
+                ).single()
                 val client = MirrorHttp.client.newBuilder()
-                    .sslSocketFactory(fixtureTrust.sslSocketFactory(), fixtureTrust.trustManager).build()
+                    .sslSocketFactory(fixtureTrust.sslSocketFactory(), fixtureTrust.trustManager)
+                    .dns(object : okhttp3.Dns {
+                        override fun lookup(hostname: String): List<java.net.InetAddress> =
+                            if (hostname in setOf("mirror.example", "cdn.example")) {
+                                listOf(java.net.InetAddress.getByName("127.0.0.1"))
+                            } else okhttp3.Dns.SYSTEM.lookup(hostname)
+                    }).build()
                 val data = OkHttpDataSource.Factory(client)
                     .setDefaultRequestProperties(mapOf("Referer" to filmPage))
                 val playing = CountDownLatch(1)
@@ -577,12 +665,17 @@ class SourceFlowTest {
                     assertTrue(originRequest.getHeader("Cookie").orEmpty().contains("hdmbbs=1"))
                     assertFalse(originRequest.getHeader("Cookie").orEmpty().contains("cinema_fixture="))
                     val redirected = requireNotNull(cdn.takeRequest(5, TimeUnit.SECONDS))
-                    assertNull(redirected.getHeader("Cookie"))
+                    val cdnCookie = redirected.getHeader("Cookie").orEmpty()
+                    assertTrue(cdnCookie.contains("cdn_session=active"))
+                    assertFalse(cdnCookie.contains("cinema_fixture="))
+                    assertFalse(cdnCookie.contains("hdmbbs="))
                 } finally {
                     instrumentation.runOnMainSync { player?.release() }
                     surface.release()
                     texture.release()
                     cookies.setCookie(filmPage, "cinema_fixture=; Path=/; Secure; Max-Age=0")
+                    cookies.setCookie(cdnOrigin, "cdn_session=; Path=/; Secure; Max-Age=0")
+                    cookies.flush()
                 }
             }
         }

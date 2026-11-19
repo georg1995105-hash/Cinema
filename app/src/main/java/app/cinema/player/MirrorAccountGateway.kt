@@ -5,9 +5,10 @@ import android.webkit.CookieManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
+import okhttp3.FormBody
+import okhttp3.Request
 
 internal data class MirrorLoginResult(
     val success: Boolean,
@@ -17,6 +18,8 @@ internal data class MirrorLoginResult(
 
 internal object MirrorLoginProtocol {
     fun decode(status: Int, body: String): MirrorLoginResult {
+        if (status == 0) return MirrorLoginResult(false,
+            "Встроенный браузер не получил ответ входа: сбой сети, блокировка или перенаправление.")
         if (status != 200) return MirrorLoginResult(false,
             if (status in 300..399) "Зеркало перенаправило запрос."
             else if (status == 403 || status == 429 || status == 503)
@@ -43,6 +46,12 @@ internal object MirrorLoginProtocol {
  */
 internal class MirrorAccountGateway(private val context: Context) {
     private val cookieManager: CookieManager get() = CookieManager.getInstance()
+    private val http = MirrorHttp.client.newBuilder()
+        .followRedirects(false).followSslRedirects(false)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.SECONDS)
+        .build()
 
     fun hasSession(source: String): Boolean {
         val origin = origin(source) ?: return false
@@ -50,7 +59,7 @@ internal class MirrorAccountGateway(private val context: Context) {
             MirrorSitePolicy.sessionScopes(origin)
                 .mapNotNull { cookieManager.getCookie(it)?.takeIf(String::isNotBlank) }
         )
-        return listOf("dle_user_id=", "dle_password=").all { c.contains(it) }
+        return MirrorGuestCookies.hasAccountSession(listOf(c))
     }
 
     suspend fun signIn(source: String, username: String, password: String,
@@ -62,57 +71,38 @@ internal class MirrorAccountGateway(private val context: Context) {
                 return@withContext MirrorLoginResult(false, "Введите логин и пароль.")
             if (username.length > 128 || password.length > 256)
                 return@withContext MirrorLoginResult(false, "Слишком длинный логин или пароль.")
+
             try {
-                val connection = URI("$origin/ajax/login/").toURL().openConnection() as HttpURLConnection
-                try {
-                    connection.requestMethod = "POST"
-                    connection.instanceFollowRedirects = false
-                    connection.connectTimeout = 12000
-                    connection.readTimeout = 12000
-                    connection.doOutput = true
-                    connection.useCaches = false
-                    connection.setRequestProperty("Accept", "application/json")
-                    connection.setRequestProperty("X-Requested-With", "XMLHttpRequest")
-                    connection.setRequestProperty("Origin", origin)
-                    connection.setRequestProperty("Referer", "$origin/")
-                    connection.setRequestProperty("User-Agent", userAgent)
-                    connection.setRequestProperty("Content-Type",
-                        "application/x-www-form-urlencoded; charset=UTF-8")
-                    cookieManager.getCookie(origin)?.let {
-                        connection.setRequestProperty("Cookie", it)
-                    }
-                    val form = listOf(
-                        "login_name" to username.trim(),
-                        "login_password" to password,
-                        "login_not_save" to "0",
-                        "login" to "submit"
-                    ).joinToString("&") { (k, v) ->
-                        k + "=" + URLEncoder.encode(v, "UTF-8")
-                    }
-                    connection.outputStream.use { it.write(form.toByteArray(Charsets.UTF_8)) }
-                    val status = connection.responseCode
-                    val body = if (status == 200)
-                        connection.inputStream.bufferedReader().use { reader ->
-                            val buffer=CharArray(12000)
-                            val size=reader.read(buffer)
-                            if(size>0) String(buffer,0,size) else ""
-                        }
-                    else ""
-                    // Session cookies can arrive on a 302/303 response as well as 200.
-                    // Never replay the credential-bearing POST to a redirect destination.
-                    connection.headerFields.orEmpty().forEach { (key, values) ->
-                        if (key?.equals("Set-Cookie", ignoreCase = true) == true) {
-                            values.forEach { raw ->
-                                if (raw.isNotBlank()) cookieManager.setCookie(origin, raw)
-                            }
-                        }
-                    }
+                val address = "$origin/ajax/login/"
+                val form = FormBody.Builder()
+                    .add("login_name", username.trim())
+                    .add("login_password", password)
+                    .add("login_not_save", "0")
+                    .add("login", "submit")
+                    .build()
+                val builder = Request.Builder().url(address).post(form)
+                    .header("Accept", "application/json")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .header("Origin", origin)
+                    .header("Referer", "$origin/")
+                MirrorSitePolicy.requestHeaders(address, userAgent).forEach { (name, value) ->
+                    builder.header(name, value)
+                }
+                http.newCall(builder.build()).execute().use { response ->
+                    val status = response.code
+                    val body = if (status == 200) {
+                        response.body?.charStream()?.use { reader ->
+                            val buffer = CharArray(12_000)
+                            val size = reader.read(buffer)
+                            if (size > 0) String(buffer, 0, size) else ""
+                        }.orEmpty()
+                    } else ""
+                    // MirrorHttp synchronizes response cookies for this origin.
                     cookieManager.flush()
                     if (status in 300..399) {
-                        val location = connection.getHeaderField("Location")
-                        if (!isSafeRedirect(origin, location)) {
+                        if (!isSafeRedirect(origin, response.header("Location"))) {
                             return@withContext MirrorLoginResult(false,
-                                "Сайт переадресует на другой домен. Выберите его отдельным зеркалом — пароль туда не отправлялся.")
+                                "Сайт перенаправляет на другой домен. Пароль туда не отправлялся.")
                         }
                         if (hasSession(origin))
                             return@withContext MirrorLoginResult(true, "Сеанс сохранён")
@@ -122,8 +112,6 @@ internal class MirrorAccountGateway(private val context: Context) {
                     if (hasSession(origin)) outcome else MirrorLoginResult(false,
                         "Сайт принял запрос, но не предоставил сессионные cookie.",
                         retryInBrowser = true)
-                } finally {
-                    connection.disconnect()
                 }
             } catch (_: Exception) {
                 MirrorLoginResult(false, "Прямое подключение недоступно.", retryInBrowser = true)

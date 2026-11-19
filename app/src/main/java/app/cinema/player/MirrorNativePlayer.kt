@@ -143,7 +143,8 @@ internal suspend fun mirrorAjax(web: WebView, pageUrl: String, payload: Map<Stri
                fetch('/ajax/get_cdn_series/?t='+Date.now(), {
                  method:'POST', credentials:'same-origin', redirect:'manual', signal:controller.signal,
                  headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
-                   'X-Requested-With':'XMLHttpRequest','Accept':'application/json, text/plain, */*'},
+                   'X-Requested-With':'XMLHttpRequest','Accept':'application/json, text/plain, */*',
+                   'X-Hdrezka-Android-App':'1','X-Hdrezka-Android-App-Version':'2.2.5'},
                  body:new URLSearchParams($body).toString()
                }).then(async function(response) {
                  if (response.type === 'opaqueredirect') return {__kinoFailure:'redirect'};
@@ -476,11 +477,15 @@ internal fun MirrorNativePlayer(
     }
     LaunchedEffect(filmUrl, mirrors) {
         networkFinished = false
-        val fetched = MirrorNetworkSource.resolveFilm(
-            filmUrl,
-            mirrors,
-            WebSettings.getDefaultUserAgent(context),
-            requiredVoice = savedSelection?.voice.orEmpty()
+        val fetched = withTimeoutOrNull(50_000L) {
+            MirrorNetworkSource.resolveFilm(
+                filmUrl,
+                mirrors,
+                WebSettings.getDefaultUserAgent(context),
+                requiredVoice = savedSelection?.voice.orEmpty()
+            )
+        } ?: MirrorNetworkSource.FilmResult(
+            filmUrl, reason = "Зеркала не завершили загрузку фильма вовремя."
         )
         val acceptedUrl = fetched.finalUrl.takeIf {
             MirrorFilmUrl.isAllowedResolved(filmUrl, it, mirrors)
@@ -535,7 +540,9 @@ internal fun MirrorNativePlayer(
         mutableStateMapOf<Triple<String, String, String>, VoiceAvailability>()
     }
     fun voiceKey(id: String) = Triple(season, episode, id)
-    LaunchedEffect(movie, voice) {
+    // A mirror failover replaces the player object for the same logical film.
+    // Key by post ID so that this metadata update does not restart episode loading.
+    LaunchedEffect(movie?.id, voice) {
         val item = movie ?: return@LaunchedEffect
         if (!item.isSeries || voice.isBlank()) return@LaunchedEffect
         options = emptyList()
@@ -553,10 +560,12 @@ internal fun MirrorNativePlayer(
             val alternate = mirrorAjax(web, pageUrl, payload)
             val decoded = alternate?.let(MirrorMediaParser::objectFromWebView)
             val parsed = MirrorMediaParser.parseEpisodes(decoded?.optJSONArray("__kinoEpisodes"))
-            if (parsed.isNotEmpty()) {
+            val browserFailure = decoded?.let(MirrorMediaParser::responseFailure)
+            if (MirrorStreamFallback.useBrowserEpisodes(
+                    entries.size, failure, parsed.size, browserFailure)) {
                 raw = alternate
                 response = decoded
-                failure = decoded?.let(MirrorMediaParser::responseFailure)
+                failure = browserFailure
                 entries = parsed
             }
         }
@@ -586,7 +595,9 @@ internal fun MirrorNativePlayer(
         episode = chosen.id
         readyVoice = voice
     }
-    LaunchedEffect(movie, voice, readyVoice, season, episode) {
+    // Do not discard a stream just found on failover by resolving it again merely
+    // because the player metadata object now belongs to the alternative mirror.
+    LaunchedEffect(movie?.id, voice, readyVoice, season, episode) {
         val item = movie ?: return@LaunchedEffect
         if (voice.isBlank() || (item.isSeries && (readyVoice != voice || season.isBlank() || episode.isBlank()))) {
             return@LaunchedEffect
@@ -629,6 +640,12 @@ internal fun MirrorNativePlayer(
             if (alternative != null) {
                 pageUrl = alternative.pageUrl
                 transportUrl = alternative.pageUrl
+                // Keep metadata, translator flags/favs and the browser session
+                // on the same mirror which actually issued this stream.
+                movie = alternative.player
+                // Keep get_episodes results for the active translator. The new
+                // film page may expose only its own default translator's list.
+                MirrorGuestSession.loadFilm(web, alternative.pageUrl)
                 streams = alternative.stream
             }
         }

@@ -51,17 +51,14 @@ internal object MirrorHttp {
             val referer = request.header("Referer")
             val manager = CookieManager.getInstance()
             val scoped = request.newBuilder().removeHeader("Cookie")
-            if (referer != null && SourceRules.sameOrigin(referer, address)) {
-                val cookies = MirrorSitePolicy.cookieScopes(address)
-                    .mapNotNull { manager.getCookie(it)?.takeIf(String::isNotBlank) }
-                val header = if (MirrorGuestCookies.isGuestFilmRequest(address, referer)) {
-                    // Actual reference guest CookieJar: use the public app profile
-                    // and Anubis, not the user's unrelated account credentials.
-                    MirrorGuestCookies.fromStoredCookies(cookies)
-                } else MirrorSitePolicy.mergeCookieHeaders(cookies)
-                header.takeIf(String::isNotBlank)
-                    ?.let { scoped.header("Cookie", it) }
-            }
+            val cookies = MirrorSitePolicy.cookieScopes(address)
+                .mapNotNull { manager.getCookie(it)?.takeIf(String::isNotBlank) }
+            // Source AJAX and WebView share their login; remote CDNs get their own cookies only.
+            val header = if (referer != null && SourceRules.sameOrigin(referer, address))
+                MirrorGuestCookies.cookieHeaderFor(address, referer, cookies)
+            else MirrorSitePolicy.mergeCookieHeaders(cookies)
+            header.takeIf(String::isNotBlank)
+                ?.let { scoped.header("Cookie", it) }
             val response = try {
                 chain.proceed(scoped.build())
             } catch (issue: java.io.IOException) {

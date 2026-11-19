@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.ImageLoader
 import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -51,21 +52,25 @@ internal object ActorPhotoLibrary {
         name.lowercase().replace('ё', 'е').replace(Regex("\\s+"), " ").trim()
 
     private fun lookup(name: String, normalized: String): OpenPortrait? {
-        val query = buildString {
-            append("https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json")
-            append("&language=ru&limit=8&search=")
-            append(URLEncoder.encode(name, "UTF-8"))
-        }
-        val list = fetchJson(query)?.optJSONArray("search") ?: return null
-        val suitable = (0 until list.length()).mapNotNull { list.optJSONObject(it) }.filter { result ->
-            val label = clean(result.optString("label"))
-            val description = result.optString("description").lowercase()
-            label == normalized && listOf(
-                "актёр", "актер", "актриса", "режисс", "кинематограф", "сценарист",
-                "actor", "actress", "director", "film maker", "filmmaker"
-            ).any { description.contains(it) } &&
-                result.optString("id").matches(Regex("Q[0-9]{1,15}"))
-        }.singleOrNull() ?: return null
+        // The open catalog lists English actor names; the older mirror provides
+        // Russian ones. Look up an *exact* label, never a loosely matched face.
+        val suitable = sequenceOf("ru", "en").mapNotNull { language ->
+            val query = buildString {
+                append("https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json")
+                append("&language=").append(language).append("&limit=8&search=")
+                append(URLEncoder.encode(name, "UTF-8"))
+            }
+            val list = fetchJson(query)?.optJSONArray("search") ?: return@mapNotNull null
+            (0 until list.length()).mapNotNull { list.optJSONObject(it) }.filter { result ->
+                val label = clean(result.optString("label"))
+                val description = result.optString("description").lowercase()
+                label == normalized && listOf(
+                    "актёр", "актер", "актриса", "режисс", "кинематограф", "сценарист",
+                    "actor", "actress", "director", "film maker", "filmmaker"
+                ).any { description.contains(it) } &&
+                    result.optString("id").matches(Regex("Q[0-9]{1,15}"))
+            }.singleOrNull()
+        }.firstOrNull() ?: return null
 
         val id = suitable.optString("id")
         val entityUrl = "https://www.wikidata.org/w/api.php?action=wbgetentities" +
@@ -119,6 +124,7 @@ internal fun ActorPortrait(
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val imageLoader = remember(context) { posterImageLoader(context) }
+    val publicImageLoader = remember(context) { ImageLoader.Builder(context.applicationContext).build() }
     var mirrorFailed by remember(person.photo) { mutableStateOf(false) }
     var sourceFailed by remember(person.pid, filmUrl) { mutableStateOf(false) }
     var externalFailed by remember(person.name) { mutableStateOf(false) }
@@ -167,7 +173,7 @@ internal fun ActorPortrait(
             }
             AsyncImage(
                 model = request,
-                imageLoader = imageLoader,
+                imageLoader = if (actual == null && site == null) publicImageLoader else imageLoader,
                 contentDescription = person.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

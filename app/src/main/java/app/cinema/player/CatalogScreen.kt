@@ -11,6 +11,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -26,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -37,16 +39,26 @@ import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import org.json.JSONObject
+import org.jsoup.Jsoup
 import java.net.URI
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 internal data class CatalogMovie(
     val url: String,
     val title: String,
     val poster: String,
     val details: String,
-    val posterAlternatives: List<String> = emptyList()
+    val posterAlternatives: List<String> = emptyList(),
+    val aliases: List<String> = emptyList()
 )
 
 /** A bounded in-memory catalogue cache; no user credentials or cookies are persisted. */
@@ -85,6 +97,111 @@ internal object MirrorCatalog {
         "Популярное" to "popular",
         "В ожидании" to "soon"
     )
+    private const val maxBytes = 2L * 1024L * 1024L
+    private val client = MirrorHttp.client.newBuilder()
+        .followRedirects(false).followSslRedirects(false)
+        .callTimeout(10, TimeUnit.SECONDS)
+        .build()
+
+    /** Native first: a WebView challenge or lifecycle failure must not hide an accessible catalog. */
+    suspend fun read(pageUrl: String, userAgent: String, transport: OkHttpClient = client): List<CatalogMovie> =
+        withContext(Dispatchers.IO) {
+            if (!SourceRules.isValidHttpsUrl(pageUrl)) return@withContext emptyList()
+            runCatching {
+                val origin = MirrorAccountGateway.origin(pageUrl) ?: return@runCatching emptyList()
+                val request = Request.Builder().url(pageUrl).get()
+                    .header("Referer", "$origin/")
+                    .header("Accept", "text/html,application/xhtml+xml")
+                    .apply {
+                        MirrorSitePolicy.requestHeaders(pageUrl, userAgent)
+                            .forEach { (key, value) -> header(key, value) }
+                    }.build()
+                transport.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use emptyList()
+                    response.peekBody(maxBytes + 1).use { body ->
+                        if (body.contentLength() > maxBytes) return@use emptyList()
+                        parseHtml(body.string(), pageUrl)
+                    }
+                }
+            }.getOrDefault(emptyList())
+        }
+
+    /**
+     * The reference client treats alternate hostnames as the same catalogue.
+     * Race only a small, known mirror set after a brief head start for the
+     * selected mirror. Return only genuinely parsed cards, not HTTP 200.
+     */
+    suspend fun readWithFallback(
+        pageUrl: String,
+        userAgent: String,
+        alternatives: List<String> = MirrorCatalogMirrors.provenCatalogueHosts,
+        transport: OkHttpClient = client
+    ): List<CatalogMovie> =
+        supervisorScope {
+            val urls = MirrorCatalogMirrors.candidates(pageUrl, alternatives)
+            if (urls.isEmpty()) return@supervisorScope emptyList()
+            val responses = Channel<List<CatalogMovie>>(Channel.UNLIMITED)
+            val workers = urls.mapIndexed { index, candidate ->
+                launch {
+                    if (index > 0) delay(index * 800L)
+                    responses.send(read(candidate, userAgent, transport))
+                }
+            }
+            try {
+                repeat(urls.size) {
+                    val realCards = responses.receive()
+                    if (realCards.isNotEmpty()) return@supervisorScope realCards
+                }
+                emptyList()
+            } finally {
+                workers.forEach { it.cancel() }
+                responses.close()
+            }
+        }
+
+    internal fun parseHtml(html: String, pageUrl: String): List<CatalogMovie> {
+        val doc = Jsoup.parse(html, pageUrl)
+        return doc.select(".b-content__inline_item, .b-content__list_item, .b-content__item")
+            .take(96).mapNotNull { item ->
+                val link = item.selectFirst(".b-content__inline_item-link")
+                val anchor = if (link?.tagName() == "a") link else link?.selectFirst("a[href]")
+                val cover = item.selectFirst(".b-content__inline_item-cover")
+                val address = anchor?.attr("href").orEmpty().ifBlank {
+                    item.attr("data-url")
+                }.ifBlank {
+                    cover?.selectFirst("a[href]")?.attr("href").orEmpty()
+                }
+                if (address.isBlank()) return@mapNotNull null
+                val url = runCatching { URI(pageUrl).resolve(address).toString() }.getOrNull()
+                    ?: return@mapNotNull null
+                if (!SourceRules.sameOrigin(pageUrl, url) || MirrorPostId.fromUrl(url) == null) {
+                    return@mapNotNull null
+                }
+                val details = link?.children()
+                    ?.firstOrNull { it.tagName() == "div" }?.text().orEmpty()
+                val title = CatalogTitleCleaner.clean(
+                    anchor?.text().orEmpty().ifBlank {
+                        cover?.selectFirst("img[alt]")?.attr("alt").orEmpty()
+                    }, details
+                ).take(130)
+                if (title.isBlank()) return@mapNotNull null
+                val images = (cover ?: item).select("img").flatMap { image ->
+                    listOf("data-src", "data-original", "data-lazy-src", "src").map { attribute ->
+                        image.attr(attribute).takeIf(String::isNotBlank)?.let { value ->
+                            runCatching { URI(pageUrl).resolve(value).toString() }.getOrNull()
+                        }.orEmpty()
+                    }
+                }.filter(MirrorPoster::isPhoto).distinct().take(8)
+                CatalogMovie(url, title, images.firstOrNull().orEmpty(),
+                    details.replace(Regex("""\s+"""), " ").trim().take(110), images.drop(1))
+            }.distinctBy { MirrorPostId.fromUrl(it.url) ?: it.url }
+    }
+
+    fun filterRootFallback(
+        cards: List<CatalogMovie>, kind: String, rootFallback: Boolean, searching: Boolean
+    ): List<CatalogMovie> = if (rootFallback && !searching) {
+        cards.filter { matchesKind(it.url, kind) }
+    } else cards
 
     fun requestUrl(source: String, section: String, kind: String): String {
         val base = source.trimEnd('/') + "/"
@@ -211,8 +328,9 @@ internal fun CatalogGrid(
         return
     }
     val context = LocalContext.current
-    val isTablet = LocalConfiguration.current.screenWidthDp >= 600
-    val columns = if (isTablet) cardsPerRow.coerceIn(2,8) else cardsPerRow.coerceIn(2,3)
+    val configuration = LocalConfiguration.current
+    val device = CinemaDevices.detect(context, configuration)
+    val columns = CinemaDevices.columns(device, cardsPerRow, configuration.screenWidthDp)
     var attempt by remember(source, section, kind, requestOverride) { mutableIntStateOf(0) }
     var useUnfiltered by remember(source, section, kind, requestOverride, attempt) {
         mutableStateOf(false)
@@ -231,22 +349,38 @@ internal fun CatalogGrid(
         mutableStateOf(if (attempt == 0) CatalogMemory.get(cacheKey).orEmpty() else emptyList())
     }
     var nativeSearchChecked by remember(requestUrl, attempt) {
-        mutableStateOf(searchText.isBlank() || movies.isNotEmpty())
+        mutableStateOf(movies.isNotEmpty())
     }
+    var pending by remember(requestUrl, attempt) { mutableStateOf(movies.isEmpty()) }
     LaunchedEffect(requestUrl, attempt, loadContent) {
-        if (loadContent && !nativeSearchChecked) {
-            val cards = PublicSearch.read(source, searchText, WebSettings.getDefaultUserAgent(context))
-            if (cards.isNotEmpty()) {
-                movies = cards
-                CatalogMemory.put(cacheKey, cards)
+        if (loadContent && !nativeSearchChecked && pending) {
+            val agent = WebSettings.getDefaultUserAgent(context)
+            val cards = if (searchText.isBlank()) {
+                MirrorCatalog.readWithFallback(requestUrl, agent)
+            } else {
+                PublicSearch.readWithFallback(source, searchText, agent)
+            }
+            val verified = MirrorCatalog.filterRootFallback(
+                cards, kind, useRootFallback, searchText.isNotBlank())
+            if (verified.isNotEmpty()) {
+                movies = verified
+                pending = false
+                CatalogMemory.put(cacheKey, verified)
             }
             nativeSearchChecked = true
         }
     }
-    var pending by remember(requestUrl, attempt, nativeSearchChecked) { mutableStateOf(movies.isEmpty()) }
     var problem by remember(requestUrl, attempt) { mutableStateOf("") }
     var challengeActive by remember(requestUrl, attempt) { mutableStateOf(false) }
     fun recoverEmptyCatalog(reason: String) {
+        if (!pending || movies.isNotEmpty()) return
+        // The selected WebView may fail with HTTP403 before the parallel native
+        // fallback has checked an actually usable mirror. Do not tear down that
+        // attempt or navigate through unrelated categories prematurely.
+        if (!nativeSearchChecked) {
+            problem = reason
+            return
+        }
         if (!useUnfiltered && requestOverride == null && section != "Новинки") {
             useUnfiltered = true
         } else if (!useRootFallback && requestOverride == null) {
@@ -261,15 +395,17 @@ internal fun CatalogGrid(
     // Page callbacks are not guaranteed after a network stall or blocked navigation.
     // Bound each load, then try only the standard category once before showing an error.
     LaunchedEffect(requestUrl, attempt, loadContent, nativeSearchChecked, challengeActive) {
-        if (loadContent && nativeSearchChecked && pending) {
-            delay(if (challengeActive) 28_000L else 12_500L)
+        if (loadContent && pending) {
+            delay(if (challengeActive) 28_000L else if (nativeSearchChecked) 8_000L else 18_000L)
             if (pending) recoverEmptyCatalog(
                 if (challengeActive) "Зеркало не завершило проверку браузера."
                 else "Источник не завершил загрузку каталога. Проверьте доступность зеркала."
             )
         }
     }
-    val browser = if (loadContent && nativeSearchChecked && pending && movies.isEmpty()) remember(context, requestUrl, attempt) {
+    // Start WebView immediately, concurrently with HTTP. Waiting for a native timeout
+    // before starting the browser prevented Anubis from completing in time.
+    val browser = if (loadContent && pending && movies.isEmpty()) remember(context, requestUrl, attempt) {
         WebView(context).apply {
             setBackgroundColor(AndroidColor.TRANSPARENT)
             settings.javaScriptEnabled = true
@@ -356,9 +492,8 @@ internal fun CatalogGrid(
 
                     fun finish(cards: List<CatalogMovie>, failure: String = "") {
                         if (!active()) return
-                        val verified = if (useRootFallback && searchText.isBlank())
-                            cards.filter { MirrorCatalog.matchesKind(it.url, kind) }
-                            else cards
+                        val verified = MirrorCatalog.filterRootFallback(
+                            cards, kind, useRootFallback, searchText.isNotBlank())
                         if (verified.isEmpty()) {
                             recoverEmptyCatalog(failure.ifBlank {
                                 "На доступной странице зеркала нет карточек этой категории."
@@ -486,9 +621,14 @@ internal fun CatalogGrid(
                     Icon(Icons.Outlined.CloudOff, contentDescription = null, tint = appMuted,
                         modifier = Modifier.size(39.dp))
                     Spacer(Modifier.height(14.dp))
-                    Text(if (searchText.isNotBlank()) "Совпадений не найдено"
-                        else "Не удалось получить карточки",
-                        style = MaterialTheme.typography.titleMedium)
+                    // A server denial is NOT an empty search result.
+                    Text(when {
+                        problem.isNotBlank() && searchText.isNotBlank() ->
+                            "Не удалось выполнить поиск"
+                        problem.isNotBlank() -> "Каталог недоступен"
+                        searchText.isNotBlank() -> "Совпадений не найдено"
+                        else -> "Не удалось получить карточки"
+                    }, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(7.dp))
                     Text(problem.ifBlank {
                         if (searchText.isNotBlank()) "Зеркало не нашло фильм с таким названием."
@@ -512,7 +652,15 @@ internal fun CatalogGrid(
 
 @Composable
 internal fun FilmPoster(movie: CatalogMovie, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    var focused by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }
+            .border(if (focused) 3.dp else 0.dp,
+                if (focused) appBlue else androidx.compose.ui.graphics.Color.Transparent,
+                RoundedCornerShape(14.dp))
+            .padding(if (focused) 3.dp else 0.dp)
+            .clickable(onClick = onClick)
+    ) {
         MoviePosterImage(
             movie = movie,
             modifier = Modifier.fillMaxWidth().aspectRatio(.70f).clip(RoundedCornerShape(14.dp)),

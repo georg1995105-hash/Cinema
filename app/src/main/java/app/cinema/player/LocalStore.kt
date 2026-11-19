@@ -86,6 +86,24 @@ class LocalStore(context: Context) {
 
     fun cardsPerRow(): Int = prefs.getInt("cards_per_row", 5).coerceIn(2, 8)
     fun saveCardsPerRow(value: Int) { prefs.edit().putInt("cards_per_row", value.coerceIn(2, 8)).apply() }
+
+    /**
+     * A tablet gets its own density preference so an old phone-style grid
+     * cannot silently limit the number of posters on a larger screen.
+     */
+    internal fun cardsPerRow(device: CinemaDevice, screenWidthDp: Int): Int {
+        val wanted = if (device == CinemaDevice.TABLET) {
+            prefs.getInt("tablet_cards_per_row_v2",
+                CinemaDevices.defaultColumns(device, screenWidthDp))
+        } else cardsPerRow()
+        return wanted.coerceIn(CinemaDevices.minColumns(device), CinemaDevices.maxColumns(device))
+    }
+
+    internal fun saveCardsPerRow(value: Int, device: CinemaDevice) {
+        val key = if (device == CinemaDevice.TABLET) "tablet_cards_per_row_v2" else "cards_per_row"
+        val count = value.coerceIn(CinemaDevices.minColumns(device), CinemaDevices.maxColumns(device))
+        prefs.edit().putInt(key, count).apply()
+    }
     fun holdSpeed(): Int = prefs.getInt("hold_speed", 2).takeIf { it in 2..4 } ?: 2
     fun saveHoldSpeed(value: Int) { if (value in 2..4) prefs.edit().putInt("hold_speed", value).apply() }
 
@@ -107,6 +125,36 @@ class LocalStore(context: Context) {
     fun seekSeconds(): Int = prefs.getInt("seek_seconds", 10).takeIf { it in listOf(10, 15, 30) } ?: 10
     fun saveSeekSeconds(value: Int) {
         if (value in listOf(10, 15, 30)) prefs.edit().putInt("seek_seconds", value).apply()
+    }
+
+    /** Last explicitly selected first-party Lift film page; not a video timestamp. */
+    internal fun liftVisitedUrl(movieUrl: String): String? = runCatching {
+        if (!SourceRules.isValidHttpsUrl(movieUrl)) return@runCatching null
+        val saved = JSONObject(prefs.getString("lift_pages_v1", "{}") ?: "{}")
+            .optString(movieUrl)
+        saved.takeIf(LiftMatchPolicy::safeDetailsUrl)
+    }.getOrNull()
+
+    internal fun saveLiftVisit(movieUrl: String, detailsUrl: String) {
+        if (!SourceRules.isValidHttpsUrl(movieUrl) ||
+            !LiftMatchPolicy.safeDetailsUrl(detailsUrl)) return
+        val data = runCatching {
+            JSONObject(prefs.getString("lift_pages_v1", "{}") ?: "{}")
+        }.getOrDefault(JSONObject())
+        // Remove existing key first so new entries remain at the end of the bounded map.
+        data.remove(movieUrl)
+        data.put(movieUrl, detailsUrl)
+        val keys = data.keys().asSequence().toList()
+        keys.take((keys.size - 80).coerceAtLeast(0)).forEach(data::remove)
+        prefs.edit().putString("lift_pages_v1", data.toString()).apply()
+    }
+
+    internal fun removeLiftVisit(movieUrl: String) {
+        val data = runCatching {
+            JSONObject(prefs.getString("lift_pages_v1", "{}") ?: "{}")
+        }.getOrDefault(JSONObject())
+        if (data.remove(movieUrl) != null)
+            prefs.edit().putString("lift_pages_v1", data.toString()).apply()
     }
 
     fun history(): List<WatchedVideo> = runCatching {

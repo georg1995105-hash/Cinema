@@ -82,8 +82,19 @@ object SourceProbe {
                                 val checkedMs = ((System.nanoTime() - started) / 1_000_000L)
                                     .coerceAtLeast(0L)
                                 when (catalogResponse.code) {
-                                    in 200..299 -> MirrorProbeResult(true, checkedMs,
-                                        "Главная и раздел сериалов отвечают по HTTPS (видео не проверено)")
+                                    in 200..299 -> {
+                                        val cards = catalogResponse.peekBody(
+                                            2L * 1024L * 1024L + 1
+                                        ).use { body ->
+                                            if (body.contentLength() <= 2L * 1024L * 1024L) {
+                                                MirrorCatalog.parseHtml(body.string(), catalog)
+                                            } else emptyList()
+                                        }
+                                        if (cards.isNotEmpty()) MirrorProbeResult(true, checkedMs,
+                                            "Каталог содержит карточки (видео не проверено)")
+                                        else MirrorProbeResult(false, checkedMs,
+                                            "HTTP 200, но каталог не содержит карточки или открыта проверка доступа")
+                                    }
                                     403, 429, 503 -> MirrorProbeResult(false, checkedMs,
                                         "Главная отвечает, каталог ограничен (HTTP ${catalogResponse.code})")
                                     else -> MirrorProbeResult(false, checkedMs,
