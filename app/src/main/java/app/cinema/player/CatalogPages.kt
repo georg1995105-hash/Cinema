@@ -16,10 +16,10 @@ internal object CatalogPages {
             else -> "top"
         }
         val extras = buildList {
-            if (catalog == "year") add("genre=$"+"year")
-            if (page > 0) add("skip=$"+"{page * size}")
+            if (catalog == "year") add("genre=" + year)
+            if (page > 0) add("skip=" + (page * size))
         }
-        return "/catalog/$"+"type/$"+"catalog" +
+        return "/catalog/" + type + "/" + catalog +
             (if (extras.isEmpty()) "" else "/" + extras.joinToString("&")) + ".json"
     }
 }
