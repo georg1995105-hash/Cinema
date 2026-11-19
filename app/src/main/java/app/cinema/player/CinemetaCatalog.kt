@@ -56,7 +56,8 @@ internal object CinemetaCatalog {
                     val title = item.optString("title").trim().take(180)
                     if ((!isMovieUrl(url) && !ArchivePublicCatalog.isArchiveUrl(url)) || title.isBlank()) continue
                     val poster = trustedPoster(url, item.optString("poster"))
-                    add(CatalogMovie(url, title, poster, item.optString("details").take(180)))
+                    add(CatalogMovie(url, title, poster, item.optString("details").take(180),
+                        aliases = names(item.optJSONArray("aliases"))))
                 }
             }
         }.getOrDefault(emptyList())
@@ -73,7 +74,8 @@ internal object CinemetaCatalog {
             val json = JSONArray()
             movies.take(100).forEach { item ->
                 json.put(JSONObject().put("url", item.url).put("title", item.title)
-                    .put("poster", item.poster).put("details", item.details))
+                    .put("poster", item.poster).put("details", item.details)
+                    .put("aliases", JSONArray(item.aliases.take(8))))
             }
             val text = json.toString()
             if (text.length > 250_000) return@runCatching
@@ -194,7 +196,10 @@ internal object CinemetaCatalog {
         if (title.isBlank()) return null
         val url = movieUrl(type, id)
         val poster = trustedPoster(url, text(data, "poster"))
-        return CatalogMovie(url, title, poster, detailsText(data))
+        val aliases = (listOf(text(data, "originalName"), text(data, "originalTitle")) +
+            names(data.optJSONArray("aliases"))).filter { it.isNotBlank() && !it.equals(title, true) }
+            .distinct().take(8)
+        return CatalogMovie(url, title, poster, detailsText(data), aliases = aliases)
     }
 
     private fun read(context: Context, path: String, forceRefresh: Boolean = false): JSONObject {
@@ -234,7 +239,7 @@ internal object CinemetaCatalog {
         val array = json.optJSONArray("metas") ?: throw IOException("Отсутствует список фильмов")
         return buildList {
             val seen = HashSet<String>()
-            for (index in 0 until minOf(array.length(), 75)) {
+            for (index in 0 until minOf(array.length(), 100)) {
                 val item = array.optJSONObject(index)?.let(::parseMovie) ?: continue
                 if (seen.add(item.url)) add(item)
             }
@@ -242,7 +247,7 @@ internal object CinemetaCatalog {
     }
 
     suspend fun home(context: Context, tab: String, kind: String,
-        forceRefresh: Boolean = false): List<CatalogMovie> = coroutineScope {
+        forceRefresh: Boolean = false, page: Int = 0): List<CatalogMovie> = coroutineScope {
         val types = if (kind == "Фильмы") listOf("movie")
                     else if (kind == "Сериалы") listOf("series")
                     else listOf("movie", "series")
@@ -250,11 +255,7 @@ internal object CinemetaCatalog {
         // make the user wait for 28s. One failing category does not hide another.
         val responses = types.map { type ->
             async(Dispatchers.IO) {
-                val catalogPath = when (tab) {
-                    "Новинки" -> "/catalog/$type/year/genre=2026.json"
-                    "Высокий рейтинг" -> "/catalog/$type/imdbRating.json"
-                    else -> "/catalog/$type/top.json"
-                }
+                val catalogPath = CatalogPages.path(tab, type, page)
                 try {
                     Pair(parseList(read(context, catalogPath, forceRefresh)), null as Exception?)
                 } catch (e: CancellationException) {
@@ -281,7 +282,7 @@ internal object CinemetaCatalog {
      */
     suspend fun search(context: Context, query: String, kind: String,
         forceRefresh: Boolean = false): List<CatalogMovie> = withContext(Dispatchers.IO) {
-        val q = query.trim().take(110)
+        val q = SearchRelevance.queryWithoutYear(query).trim().take(110)
         if (q.isBlank()) return@withContext emptyList()
         val encoded = URLEncoder.encode(q, "UTF-8").replace("+", "%20")
         val types = when (kind) {
