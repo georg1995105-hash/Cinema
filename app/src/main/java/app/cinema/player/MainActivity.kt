@@ -702,9 +702,9 @@ private fun LibraryScreen(
     remove: (String) -> Unit
 ) {
     var selected by remember { mutableStateOf("История") }
-    val isTablet = LocalConfiguration.current.screenWidthDp >= 600
-    val columns = if (isTablet) cardsPerRow.coerceIn(3,8)
-        else cardsPerRow.coerceIn(2,3)
+    val configuration = LocalConfiguration.current
+    val device = CinemaDevices.detect(androidx.compose.ui.platform.LocalContext.current, configuration)
+    val columns = CinemaDevices.columns(device, cardsPerRow, configuration.screenWidthDp)
     var metadataRevision by remember { mutableIntStateOf(0) }
     val list = if (selected == "История") history.map { it.url } else favourites
     val missing = (history.map { it.url } + favourites).distinct()
