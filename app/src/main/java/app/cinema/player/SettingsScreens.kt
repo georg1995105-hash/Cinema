@@ -22,21 +22,15 @@ import kotlinx.coroutines.sync.withPermit
 
 @Composable
 internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        ScreenHeading("Настройки", "Только нужное")
-        Spacer(Modifier.height(24.dp))
-        // The independent catalogue needs neither a mirror nor a Rezka account.
-        // Legacy source data remains intact on disk for backward compatibility,
-        // but it must not be presented as a requirement for watching content.
-        Text(
-            "Каталог работает без зеркал и авторизации. Просмотр открывается в Lift; наличие карточки не гарантирует доступность видео в вашем регионе.",
-            color = appMuted,
-            style = MaterialTheme.typography.bodyMedium
-        )
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val device = CinemaDevices.detect(context, androidx.compose.ui.platform.LocalConfiguration.current)
+    Column(
+        Modifier.fillMaxSize()
+            .then(if (device == CinemaDevice.TV) Modifier.widthIn(max = 780.dp) else Modifier)
+            .verticalScroll(rememberScrollState())
+    ) {
+        ScreenHeading("Настройки")
         Spacer(Modifier.height(16.dp))
-        MenuItem("Плеер", "Для прямых видеоссылок", Icons.Outlined.PlayArrow) {
-            open(Page.PLAYER)
-        }
         MenuItem("Обновления", "Новая версия и ход загрузки", Icons.Outlined.SystemUpdate) {
             open(Page.UPDATES)
         }
@@ -46,9 +40,7 @@ internal fun SettingsScreen(open: (Page) -> Unit, onAccount: () -> Unit) {
         MenuItem("О приложении", "Версия и сведения", Icons.Outlined.Info) {
             open(Page.ABOUT)
         }
-        Spacer(Modifier.height(18.dp))
-        Text("История, избранное и прежние настройки сохранены на устройстве.",
-            color = appMuted, style = MaterialTheme.typography.bodySmall)
+
     }
 }
 
@@ -247,22 +239,26 @@ internal fun PlayerSettingsScreen(local: LocalStore, back: () -> Unit, openTest:
 
 @Composable
 internal fun AppearanceScreen(local: LocalStore, back: () -> Unit) {
-    val maxCards = if (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600) 8 else 3
-    var count by remember { mutableIntStateOf(local.cardsPerRow().coerceIn(2, maxCards)) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val device = CinemaDevices.detect(context, androidx.compose.ui.platform.LocalConfiguration.current)
+    val minCards = CinemaDevices.minColumns(device)
+    val maxCards = CinemaDevices.maxColumns(device)
+    var count by remember(device) {
+        mutableIntStateOf(local.cardsPerRow().coerceIn(minCards, maxCards))
+    }
     Column {
         ScreenHeading("Внешний вид", "Оформление", back)
         Spacer(Modifier.height(24.dp))
         Text("Карточек в ряду: $count", fontWeight = FontWeight.SemiBold)
         Slider(
             value = count.toFloat(), onValueChange = {
-                count = it.toInt().coerceIn(2, maxCards)
+                count = it.toInt().coerceIn(minCards, maxCards)
                 local.saveCardsPerRow(count)
             },
-            valueRange = 2f..maxCards.toFloat(), steps = maxCards - 3,
+            valueRange = minCards.toFloat()..maxCards.toFloat(), steps = maxCards - minCards - 1,
             modifier = Modifier.fillMaxWidth()
         )
-        Text("Изменение применяется при возвращении в каталог.",
-            color = appMuted, style = MaterialTheme.typography.bodySmall)
+
         Spacer(Modifier.height(20.dp))
         Surface(color = appPanel, shape = RoundedCornerShape(15.dp)) {
             Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -270,7 +266,7 @@ internal fun AppearanceScreen(local: LocalStore, back: () -> Unit) {
                 Spacer(Modifier.width(16.dp))
                 Column {
                     Text("Тёмная тема", fontWeight = FontWeight.Medium)
-                    Text("Используется во всех разделах", color = appMuted)
+
                 }
             }
         }
