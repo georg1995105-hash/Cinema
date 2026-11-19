@@ -32,14 +32,14 @@ class NavigationFlowTest {
             compose.onNodeWithText("Избранное пока пусто").assertIsDisplayed()
 
             compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
-            compose.onNodeWithText("Каталог работает без зеркал и авторизации.", substring = true)
-                .assertIsDisplayed()
+            compose.onNodeWithText("Обновления").assertIsDisplayed()
+            compose.onNodeWithText("Плеер").assertDoesNotExist()
             compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
             compose.onNodeWithText("Внешний вид").performClick()
             compose.onNodeWithText("Тёмная тема").assertIsDisplayed()
             compose.onNode(hasText("Настройки") and hasClickAction()).performClick()
-            compose.onNodeWithText("Плеер").performClick()
-            compose.onNodeWithText("Шаг перемотки").assertIsDisplayed()
+            compose.onNodeWithText("Обновления").performClick()
+            compose.onNodeWithText("Тестовые обновления").assertIsDisplayed()
             compose.onNode(hasText("Главная") and hasClickAction()).performClick()
             // Returning from settings must show the native catalog.
             compose.onNodeWithText("Популярное").assertIsDisplayed()
