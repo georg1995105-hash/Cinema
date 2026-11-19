@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.core.content.pm.PackageInfoCompat
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import java.io.File
@@ -52,16 +53,6 @@ internal object AppUpdates {
         }
     }
 
-    private fun versionCompare(a: String, b: String): Int {
-        val x = a.removePrefix("v").split('.').map { it.toIntOrNull() ?: 0 }
-        val y = b.removePrefix("v").split('.').map { it.toIntOrNull() ?: 0 }
-        for (i in 0..2) {
-            val result = x.getOrElse(i) { 0 }.compareTo(y.getOrElse(i) { 0 })
-            if (result != 0) return result
-        }
-        return 0
-    }
-
     private fun fetch(context: Context): ReleaseApk? {
         val current = context.packageManager.getPackageInfo(context.packageName, 0)
             .versionName ?: "0.0.0"
@@ -79,7 +70,7 @@ internal object AppUpdates {
                 if (r.optBoolean("draft") || r.optBoolean("prerelease")) continue
                 val v = r.optString("tag_name").removePrefix("v")
                 if (!v.matches(Regex("""\d+\.\d+\.\d+"""))) continue
-                if (versionCompare(v, current) <= 0) continue
+                if (!AppVersionComparator.isNewer(v, current)) continue
                 val assets = r.optJSONArray("assets") ?: continue
                 for (j in 0 until assets.length()) {
                     val a = assets.getJSONObject(j)
@@ -90,7 +81,9 @@ internal object AppUpdates {
                     candidates.add(ReleaseApk(v, url, a.optLong("size", 0), digest))
                 }
             }
-            return candidates.maxWithOrNull { a, b -> versionCompare(a.version, b.version) }
+            return candidates.maxWithOrNull { a, b ->
+                AppVersionComparator.compare(a.version, b.version) ?: 0
+            }
         } finally { c.disconnect() }
     }
 
@@ -130,8 +123,8 @@ internal object AppUpdates {
                         if (release.digest != null && !hash.equals(release.digest, true)) error("Проверка суммы не пройдена")
                     } finally { c.disconnect() }
                 }
-                if (!checkPackage(context, destination)) {
-                    message = "Пакет не соответствует приложению"
+                if (!checkPackage(context, destination, release.version)) {
+                    message = "Пакет или версия обновления не соответствуют приложению"
                     destination.delete()
                 } else if (!checkSignature(context, destination)) {
                     message = "Подписи различаются. Старые испытательные версии нельзя обновить поверх установки."
@@ -151,8 +144,14 @@ internal object AppUpdates {
 
     fun cancel() { downloadTask?.cancel() }
 
-    private fun checkPackage(context: Context, file: File): Boolean = runCatching {
-        context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)?.packageName == context.packageName
+    private fun checkPackage(context: Context, file: File, expectedVersion: String): Boolean = runCatching {
+        val archive = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+            ?: return@runCatching false
+        val installed = context.packageManager.getPackageInfo(context.packageName, 0)
+        archive.packageName == context.packageName &&
+            archive.versionName == expectedVersion &&
+            AppVersionComparator.isNewer(archive.versionName.orEmpty(), installed.versionName.orEmpty()) &&
+            PackageInfoCompat.getLongVersionCode(archive) > PackageInfoCompat.getLongVersionCode(installed)
     }.getOrDefault(false)
 
     @Suppress("DEPRECATION")
@@ -240,7 +239,11 @@ internal fun UpdateNotice() {
             Column {
                 Text("Новая версия " + release.version)
                 Spacer(Modifier.height(8.dp))
-                Text(AppUpdates.message, color = appMuted)
+                if (AppUpdates.message.isNotBlank() &&
+                    !AppUpdates.message.startsWith("Доступна версия ")) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(AppUpdates.message, color = appMuted)
+                }
                 if (AppUpdates.downloading) {
                     Spacer(Modifier.height(12.dp))
                     if (AppUpdates.progress >= 0) {
