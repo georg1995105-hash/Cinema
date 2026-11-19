@@ -80,32 +80,36 @@ internal fun LiftWebScreen(
     val ctx = LocalContext.current
     val device = CinemaDevices.detect(ctx, androidx.compose.ui.platform.LocalConfiguration.current)
     val isTv = device == CinemaDevice.TV
-    var loading by remember(title) { mutableStateOf(true) }
-    var failure by remember(title) { mutableStateOf("") }
-    var refresh by remember(title) { mutableIntStateOf(0) }
-    var matching by remember(title, resumeUrl, showAllResults) {
+    // Keep the same live WebView while the query changes. Lift updates results
+    // on input; rebuilding the entire browser for every typed word is slow.
+    val stateKey = if (showAllResults) "all-lift-search" else title
+    var loading by remember(stateKey) { mutableStateOf(true) }
+    var failure by remember(stateKey) { mutableStateOf("") }
+    var refresh by remember(stateKey) { mutableIntStateOf(0) }
+    var matching by remember(stateKey, resumeUrl, showAllResults) {
         mutableStateOf(!showAllResults && title.isNotBlank() && !LiftMatchPolicy.safeDetailsUrl(resumeUrl))
     }
-    var resultOpened by remember(title, showAllResults) { mutableStateOf(false) }
-    var hasWebHistory by remember(title) { mutableStateOf(false) }
-    var choices by remember(title) { mutableStateOf<List<LiftFilmMatch>>(emptyList()) }
-    var foundDetails by remember(title, resumeUrl) { mutableStateOf(LiftMatchPolicy.safeDetailsUrl(resumeUrl)) }
-    var chosenDetailsUrl by remember(title, resumeUrl) {
+    var resultOpened by remember(stateKey, showAllResults) { mutableStateOf(false) }
+    var hasWebHistory by remember(stateKey) { mutableStateOf(false) }
+    var choices by remember(stateKey) { mutableStateOf<List<LiftFilmMatch>>(emptyList()) }
+    var foundDetails by remember(stateKey, resumeUrl) { mutableStateOf(LiftMatchPolicy.safeDetailsUrl(resumeUrl)) }
+    var chosenDetailsUrl by remember(stateKey, resumeUrl) {
         mutableStateOf(resumeUrl.takeIf(LiftMatchPolicy::safeDetailsUrl).orEmpty())
     }
-    var lookupMessage by remember(title) { mutableStateOf("") }
-    var browserGeneration by remember(title) { mutableIntStateOf(0) }
-    var loadCycle by remember(title) { mutableIntStateOf(0) }
-    val alive = remember(title, browserGeneration) { AtomicBoolean(true) }
-    var expanded by remember(title) { mutableStateOf(false) }
+    var lookupMessage by remember(stateKey) { mutableStateOf("") }
+    var browserGeneration by remember(stateKey) { mutableIntStateOf(0) }
+    var loadCycle by remember(stateKey) { mutableIntStateOf(0) }
+    val alive = remember(stateKey, browserGeneration) { AtomicBoolean(true) }
+    var expanded by remember(stateKey) { mutableStateOf(false) }
     var fullscreenView by remember { mutableStateOf<View?>(null) }
     var fullscreenCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
     val selectedTitle = remember(title) { LiftWebSource.safeTitle(title) }
-    val start = remember(title, resumeUrl) {
+    val currentTitle by rememberUpdatedState(selectedTitle)
+    val start = remember(stateKey, resumeUrl) {
         resumeUrl.takeIf(LiftMatchPolicy::safeDetailsUrl) ?: LiftWebSource.startUrl(selectedTitle)
     }
 
-    val browser = remember(ctx, title, browserGeneration) {
+    val browser = remember(ctx, stateKey, browserGeneration) {
         WebView(ctx).apply {
             // TV remotes send D-pad and OK key events to the focused WebView.
             if (isTv) {
@@ -145,7 +149,7 @@ internal fun LiftWebScreen(
                     if (!alive.get() || foundDetails ||
                         view.url?.startsWith(LiftWebSource.SEARCH) != true) return
                     view.evaluateJavascript(
-                        LiftMatchPolicy.searchScript(selectedTitle, liveOnly = showAllResults)
+                        LiftMatchPolicy.searchScript(currentTitle, liveOnly = showAllResults)
                     ) { result ->
                         if (!alive.get() || foundDetails) return@evaluateJavascript
                         if (result == "true") {
@@ -234,7 +238,7 @@ internal fun LiftWebScreen(
                     if (failure.isEmpty() && LiftMatchPolicy.safeDetailsUrl(url) && url == chosenDetailsUrl) {
                         onFilmPageVisited(url)
                     }
-                    if (selectedTitle.isNotBlank() && !foundDetails &&
+                    if (currentTitle.isNotBlank() && !foundDetails &&
                         url.startsWith(LiftWebSource.SEARCH)) {
                         // Inspect only visible first-party results: no streams or credentials.
                         view.postDelayed({ startSearch(view, 0) }, 650L)
@@ -275,7 +279,20 @@ internal fun LiftWebScreen(
         }
     }
 
-    LaunchedEffect(refresh, title) {
+    // A new typed query reuses the existing Lift browser and its result DOM.
+    LaunchedEffect(selectedTitle, browser, showAllResults) {
+        if (showAllResults && selectedTitle.isNotBlank()) {
+            if (browser.url.orEmpty().startsWith(LiftWebSource.SEARCH)) {
+                browser.evaluateJavascript(
+                    LiftMatchPolicy.searchScript(selectedTitle, liveOnly = true), null
+                )
+            } else if (browser.url != null) {
+                browser.loadUrl(LiftWebSource.SEARCH)
+            }
+        }
+    }
+
+    LaunchedEffect(refresh, stateKey) {
         if (refresh > 0) {
             failure = ""
             loading = true
