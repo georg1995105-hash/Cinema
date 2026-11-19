@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -649,7 +650,15 @@ internal fun CatalogGrid(
 
 @Composable
 internal fun FilmPoster(movie: CatalogMovie, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    var focused by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }
+            .border(if (focused) 3.dp else 0.dp,
+                if (focused) appBlue else androidx.compose.ui.graphics.Color.Transparent,
+                RoundedCornerShape(14.dp))
+            .padding(if (focused) 3.dp else 0.dp)
+            .clickable(onClick = onClick)
+    ) {
         MoviePosterImage(
             movie = movie,
             modifier = Modifier.fillMaxWidth().aspectRatio(.70f).clip(RoundedCornerShape(14.dp)),
