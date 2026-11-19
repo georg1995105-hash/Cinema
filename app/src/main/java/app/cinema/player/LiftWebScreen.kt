@@ -144,7 +144,9 @@ internal fun LiftWebScreen(
                 private fun startSearch(view: WebView, attempt: Int) {
                     if (!alive.get() || foundDetails ||
                         view.url?.startsWith(LiftWebSource.SEARCH) != true) return
-                    view.evaluateJavascript(LiftMatchPolicy.searchScript(selectedTitle)) { result ->
+                    view.evaluateJavascript(
+                        LiftMatchPolicy.searchScript(selectedTitle, liveOnly = showAllResults)
+                    ) { result ->
                         if (!alive.get() || foundDetails) return@evaluateJavascript
                         if (result == "true") {
                             // Search tab keeps the complete first-party result grid.
