@@ -187,6 +187,11 @@ jobs:
           VERSION="$(grep 'versionName =' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
           test -n "$VERSION"
           TAG="v$VERSION"
+          # Stable releases must originate from main, never from the QA branch.
+          if [[ "$BRANCH" != "main" && "$VERSION" != *-* ]]; then
+            echo "Stable $TAG awaits merged and validated main; skip QA publication."
+            exit 0
+          fi
           # Never publish an old superseded run.
           REMOTE_HEAD="$(git ls-remote origin "refs/heads/$BRANCH" | awk '{print $1}')"
           test -n "$REMOTE_HEAD"
