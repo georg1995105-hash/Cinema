@@ -56,8 +56,14 @@ internal object LiftMatchPolicy {
                     }?.substringAfter("year=")?.toIntOrNull()
                 add(LiftFilmMatch(url, title, year?.takeIf { it in 1800..2100 }))
             }
-        }.distinctBy { it.url }
+        }.distinctBy { filmIdentity(it.url) }
     }.getOrDefault(emptyList())
+
+    private fun filmIdentity(url: String): String =
+        runCatching {
+            val uri = URI(url)
+            detailId.find(uri.rawQuery.orEmpty())?.groupValues?.get(1)
+        }.getOrNull().orEmpty().ifBlank { url }
 
     fun normalize(title: String): String =
         punctuation.replace(title.trim().lowercase(Locale.ROOT).replace('ё', 'е'), " ")
@@ -73,7 +79,7 @@ internal object LiftMatchPolicy {
         val exact = results.filter {
             normalize(it.title) == normalized && (year == null || it.year == year)
         }
-        return exact.singleOrNull()
+        return exact.distinctBy { filmIdentity(it.url) }.singleOrNull()
     }
 
     /** Never interpolate query text directly in source code. */
