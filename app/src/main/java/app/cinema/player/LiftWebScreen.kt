@@ -75,6 +75,8 @@ internal fun LiftWebScreen(
     onFilmPageVisited: (String) -> Unit = {}
 ) {
     val ctx = LocalContext.current
+    val device = CinemaDevices.detect(ctx, androidx.compose.ui.platform.LocalConfiguration.current)
+    val isTv = device == CinemaDevice.TV
     var loading by remember(title) { mutableStateOf(true) }
     var failure by remember(title) { mutableStateOf("") }
     var refresh by remember(title) { mutableIntStateOf(0) }
@@ -98,6 +100,11 @@ internal fun LiftWebScreen(
 
     val browser = remember(ctx, title, browserGeneration) {
         WebView(ctx).apply {
+            // TV remotes send D-pad and OK key events to the focused WebView.
+            if (isTv) {
+                isFocusable = true
+                isFocusableInTouchMode = true
+            }
             setBackgroundColor(AndroidColor.rgb(19, 24, 28))
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -256,6 +263,10 @@ internal fun LiftWebScreen(
             loading = false
             failure = "Страница не ответила за 22 секунды. Повторите загрузку."
         }
+    }
+
+    LaunchedEffect(browser, isTv) {
+        if (isTv) browser.post { browser.requestFocus() }
     }
 
     DisposableEffect(browser) {
