@@ -54,4 +54,17 @@ class UpdateReleaseSelectorTest {
         val draft = release("0.4.90", true).put("draft", true)
         assertNull(UpdateReleaseSelector.select(JSONArray().put(draft), "0.4.44-rc1", true))
     }
+    @Test fun stableUpdateIsVisibleToExistingRcAndStableInstalls() {
+        val releases = JSONArray()
+            .put(release("0.4.46"))
+            .put(release("0.4.45-rc1", true))
+        for (current in listOf("0.4.36", "0.4.44-rc1", "0.4.45-rc1", "0.4.46-rc1")) {
+            assertEquals("0.4.46",
+                UpdateReleaseSelector.select(releases, current, true)?.version)
+        }
+        assertEquals("0.4.46",
+            UpdateReleaseSelector.select(releases, "0.4.36", false)?.version)
+        assertNull(UpdateReleaseSelector.select(releases, "0.4.46", true))
+    }
+
 }
