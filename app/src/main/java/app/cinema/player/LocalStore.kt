@@ -159,17 +159,22 @@ class LocalStore(context: Context) {
 
     fun history(): List<WatchedVideo> = runCatching {
         val data = JSONArray(prefs.getString("watch_history", "[]") ?: "[]")
-        (0 until data.length()).map {
-            val obj = data.getJSONObject(it)
-            WatchedVideo(obj.getString("url"), obj.optLong("positionMs", 0))
-        }.filter { SourceRules.isValidHttpsUrl(it.url) }
+        // A single corrupt legacy entry must not hide the rest of the history.
+        (0 until data.length()).mapNotNull { index ->
+            val item = data.optJSONObject(index) ?: return@mapNotNull null
+            val url = item.optString("url")
+            if (!SourceRules.isValidHttpsUrl(url)) return@mapNotNull null
+            WatchedVideo(url, item.optLong("positionMs", 0L).coerceAtLeast(0L))
+        }.distinctBy { it.url }.take(50)
     }.getOrDefault(emptyList())
 
     fun saveHistory(entries: List<WatchedVideo>) {
         val array = JSONArray()
-        entries.take(50).forEach {
-            array.put(JSONObject().put("url", it.url).put("positionMs", it.positionMs.coerceAtLeast(0)))
-        }
+        entries.filter { SourceRules.isValidHttpsUrl(it.url) }
+            .distinctBy { it.url }.take(50).forEach {
+                array.put(JSONObject().put("url", it.url)
+                    .put("positionMs", it.positionMs.coerceAtLeast(0L)))
+            }
         prefs.edit().putString("watch_history", array.toString()).apply()
     }
     /** Bounded device-only poster/title index for history and bookmarks. */
