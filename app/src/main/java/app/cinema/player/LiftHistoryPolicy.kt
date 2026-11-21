@@ -21,9 +21,28 @@ internal object LiftHistoryPolicy {
         val pageName = pageMetadata?.takeIf { it.url == url }?.title.orEmpty()
             .replace(Regex("""\s+"""), " ").trim().take(130)
         val title = name.ifBlank { pageName }.ifBlank { "Фильм Lift №$id" }
-        val poster = pageMetadata?.takeIf { it.url == url }?.poster
-            ?.takeIf(MirrorPoster::isPhoto).orEmpty()
-        return CatalogMovie(url = url, title = title, poster = poster, details = "")
+        val metadata = pageMetadata?.takeIf { it.url == url }
+        // Lift itself includes the verified poster CDN link in some film
+        // detail URLs. This also restores older cards without another request.
+        val linkedPhoto = query.split('&').firstOrNull { it.startsWith("poster=") }
+            ?.substringAfter("poster=").orEmpty()
+            .let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrDefault("") }
+            .takeIf { photo ->
+                runCatching {
+                    val uri = URI(photo)
+                    uri.scheme.equals("https", true) &&
+                        uri.host.equals("img.liftw.ws", true) &&
+                        uri.userInfo == null && uri.port == -1 &&
+                        MirrorPoster.isPhoto(photo)
+                }.getOrDefault(false)
+            }.orEmpty()
+        val photos = (listOf(metadata?.poster.orEmpty(), linkedPhoto) +
+            metadata?.posterAlternatives.orEmpty())
+            .filter(MirrorPoster::isPhoto).distinct()
+        return CatalogMovie(
+            url = url, title = title, poster = photos.firstOrNull().orEmpty(),
+            details = "", posterAlternatives = photos.drop(1)
+        )
     }
 
     /**

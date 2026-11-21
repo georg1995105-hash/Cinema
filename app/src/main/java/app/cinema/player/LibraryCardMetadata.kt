@@ -45,10 +45,23 @@ internal object LibraryCardMetadata {
         val data = JSONTokener(raw).nextValue() as? String ?: return@runCatching null
         val values = JSONObject(data)
         val title = values.optString("title").replace(Regex("\\s+"), " ").trim().take(130)
-        if (!SourceRules.isValidHttpsUrl(filmUrl) || title.isBlank()) return@runCatching null
-        val image = values.optString("poster")
-            .takeIf(SourceRules::isValidHttpsUrl).orEmpty()
-        CatalogMovie(url = filmUrl, title = title, poster = image, details = "")
+        if (!SourceRules.isValidHttpsUrl(filmUrl)) return@runCatching null
+        val found = buildList {
+            add(values.optString("poster"))
+            val list = values.optJSONArray("posters")
+            if (list != null) for (i in 0 until minOf(list.length(), 8)) {
+                add(list.optString(i))
+            }
+        }.filter(MirrorPoster::isPhoto).distinct()
+        // Lift details may lack an HTML title even when its URL contains the
+        // exact film name. Retain the image and resolve that name separately.
+        if (title.isBlank() && (found.isEmpty() || !LiftMatchPolicy.safeDetailsUrl(filmUrl))) {
+            return@runCatching null
+        }
+        CatalogMovie(
+            url = filmUrl, title = title, poster = found.firstOrNull().orEmpty(),
+            details = "", posterAlternatives = found.drop(1)
+        )
     }.getOrNull()
 }
 
@@ -95,18 +108,30 @@ internal fun RecoverLibraryCards(
                 val expected = currentUrl ?: return
                 if (runCatching { URI(url).host != URI(expected).host }.getOrDefault(true))
                     return
-                handler.postDelayed({
-                    if (currentUrl != expected) return@postDelayed
-                    view.evaluateJavascript(LibraryCardMetadata.script) { json ->
-                        if (currentUrl != expected) return@evaluateJavascript
-                        val film = LibraryCardMetadata.parse(json, expected)
-                        if (film != null) {
+                val isLift = LiftMatchPolicy.safeDetailsUrl(expected)
+                fun inspect(remaining: Int) {
+                    if (currentUrl != expected || view.url != expected) return
+                    view.evaluateJavascript(
+                        if (isLift) LiftPosterMetadata.script else LibraryCardMetadata.script
+                    ) { json ->
+                        if (currentUrl != expected || view.url != expected) return@evaluateJavascript
+                        val parsed = LibraryCardMetadata.parse(json, expected)
+                        val film = if (isLift) LiftHistoryPolicy.cardFromVisit(expected, parsed) else parsed
+                        if (film != null && (!isLift || film.poster.isNotBlank())) {
                             local.rememberMovie(film)
                             latestOnRecovered()
+                            position++
+                        } else if (remaining > 0) {
+                            // The saved Lift entry already has its title, but its
+                            // real image may be inserted by delayed JavaScript.
+                            handler.postDelayed({ inspect(remaining - 1) }, 1_500)
+                        } else {
+                            position++
                         }
-                        position++
                     }
-                }, 750)
+                }
+                handler.postDelayed({ inspect(if (isLift) 2 else 0) },
+                    if (isLift) 1_000L else 750L)
             }
         }
         onDispose {

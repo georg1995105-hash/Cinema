@@ -757,7 +757,11 @@ private fun LibraryScreen(
     var metadataRevision by remember { mutableIntStateOf(0) }
     val list = if (selected == "История") history.map { it.url } else favourites
     val missing = (history.map { it.url } + favourites).distinct()
-        .filter { local.savedMovie(it) == null }.take(16)
+        .filter { url ->
+            val saved = local.savedMovie(url)
+            saved == null || (LiftMatchPolicy.safeDetailsUrl(url) &&
+                saved.poster.isBlank() && saved.posterAlternatives.isEmpty())
+        }.take(16)
     val visible = list
 
     Column(Modifier.fillMaxSize()) {
@@ -794,7 +798,26 @@ private fun LibraryScreen(
                         uri.scheme + "://" + uri.authority
                     }.getOrDefault(url)
                     Column(Modifier.fillMaxWidth()) {
-                        FilmPoster(film) { onOpen(film) }
+                        Box(Modifier.fillMaxWidth()) {
+                            FilmPoster(film) { onOpen(film) }
+                            if (selected == "История") {
+                                // The old X was outside narrow poster cards: time label
+                                // plus two icons could not fit on phone/tablet grids.
+                                IconButton(
+                                    onClick = { remove(url) },
+                                    modifier = Modifier.align(Alignment.TopEnd)
+                                        .padding(4.dp).size(44.dp)
+                                        .background(
+                                            appPanel.copy(alpha = .88f),
+                                            RoundedCornerShape(22.dp)
+                                        )
+                                ) {
+                                    Icon(Icons.Outlined.Close,
+                                        contentDescription = "Удалить из истории: ${film.title}",
+                                        tint = appWhite)
+                                }
+                            }
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -811,19 +834,14 @@ private fun LibraryScreen(
                                         local.liftVisitedUrl(url) != null) "Открыто в Lift"
                                     else "Начало",
                                     color = appMuted,
-                                    style = MaterialTheme.typography.labelMedium
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
                                 )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(onClick = { onResume(film) },
-                                        modifier = Modifier.size(33.dp)) {
-                                        Icon(Icons.Outlined.PlayArrow,
-                                            contentDescription = "Продолжить", tint = appBlue)
-                                    }
-                                    IconButton(onClick = { remove(url) },
-                                        modifier = Modifier.size(33.dp)) {
-                                        Icon(Icons.Outlined.Close,
-                                            contentDescription = "Удалить из истории", tint = appMuted)
-                                    }
+                                IconButton(onClick = { onResume(film) },
+                                    modifier = Modifier.size(40.dp)) {
+                                    Icon(Icons.Outlined.PlayArrow,
+                                        contentDescription = "Продолжить", tint = appBlue)
                                 }
                             } else {
                                 Text("Избранное", color = appMuted,

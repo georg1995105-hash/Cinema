@@ -240,11 +240,21 @@ internal fun LiftWebScreen(
                         // inside Lift. A site visit is not a verified video position.
                         foundDetails = true
                         chosenDetailsUrl = url
-                        view.evaluateJavascript(LibraryCardMetadata.script) { raw ->
-                            if (!alive.get() || view.url != url) return@evaluateJavascript
-                            val metadata = LibraryCardMetadata.parse(raw, url)
-                            LiftHistoryPolicy.cardFromVisit(url, metadata)
-                                ?.let(onFilmPageVisited)
+                        fun captureFilmCard() {
+                            if (!alive.get() || view.url != url) return
+                            view.evaluateJavascript(LiftPosterMetadata.script) { raw ->
+                                if (!alive.get() || view.url != url) return@evaluateJavascript
+                                val metadata = LibraryCardMetadata.parse(raw, url)
+                                LiftHistoryPolicy.cardFromVisit(url, metadata)
+                                    ?.let(onFilmPageVisited)
+                            }
+                        }
+                        captureFilmCard()
+                        // Lift loads posters asynchronously after the document
+                        // finishes. Refresh the same entry only while its page
+                        // is still open. LocalStore retains any earlier photo.
+                        listOf(1_000L, 2_800L, 5_500L).forEach { delayMs ->
+                            view.postDelayed({ captureFilmCard() }, delayMs)
                         }
                     }
                     if (currentTitle.isNotBlank() && !foundDetails &&

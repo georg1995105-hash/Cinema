@@ -183,13 +183,32 @@ class LocalStore(context: Context) {
         val all = runCatching {
             JSONArray(prefs.getString("movie_index_v1", "[]") ?: "[]")
         }.getOrDefault(JSONArray())
+        val previous = (0 until all.length()).asSequence()
+            .mapNotNull(all::optJSONObject)
+            .firstOrNull { it.optString("url") == movie.url }
+        val oldPoster = previous?.optString("poster").orEmpty()
+            .takeIf(MirrorPoster::isPhoto).orEmpty()
+        val linkedPoster = LiftHistoryPolicy.cardFromVisit(movie.url)?.poster.orEmpty()
+        val photos = (listOf(movie.poster) + movie.posterAlternatives +
+            linkedPoster + oldPoster + (previous?.let(MirrorCatalog::readPosters) ?: emptyList()))
+            .filter(MirrorPoster::isPhoto).distinct()
+        val candidateTitle = CatalogTitleCleaner.clean(movie.title, movie.details).take(130)
+        val oldTitle = previous?.optString("title").orEmpty()
+        // Reopening a Lift card before its lazy image loads must not erase the
+        // photo we already saved (or replace a good name with an ID fallback).
+        val safeTitle = if (candidateTitle.isBlank() ||
+            (candidateTitle.startsWith("Фильм Lift №") && oldTitle.isNotBlank())) {
+            oldTitle.ifBlank { candidateTitle }
+        } else candidateTitle
         val items = JSONArray()
         items.put(JSONObject()
-            .put("url",movie.url)
-            .put("title",CatalogTitleCleaner.clean(movie.title, movie.details).take(130))
-            .put("poster",movie.poster.takeIf(MirrorPoster::isPhoto).orEmpty())
-            .put("posters", JSONArray(movie.posterAlternatives.filter(MirrorPoster::isPhoto).take(7)))
-            .put("details",movie.details.take(110)))
+            .put("url", movie.url)
+            .put("title", safeTitle)
+            .put("poster", photos.firstOrNull().orEmpty())
+            .put("posters", JSONArray(photos.drop(1).take(7)))
+            .put("details", movie.details.ifBlank {
+                previous?.optString("details").orEmpty()
+            }.take(110)))
         for (i in 0 until all.length()) {
             if (items.length() >= 160) break
             val item = all.optJSONObject(i) ?: continue
@@ -205,11 +224,14 @@ class LocalStore(context: Context) {
             .firstOrNull { it.optString("url") == url } ?: return@runCatching null
         val title = CatalogTitleCleaner.clean(item.optString("title"), item.optString("details"))
         if (title.isBlank()) return@runCatching null
+        val storedPhoto = item.optString("poster").takeIf(MirrorPoster::isPhoto).orEmpty()
+        val photo = storedPhoto.ifBlank {
+            LiftHistoryPolicy.cardFromVisit(url)?.poster.orEmpty()
+        }
         CatalogMovie(
-            url = url, title = title,
-            poster = item.optString("poster").takeIf(MirrorPoster::isPhoto).orEmpty(),
+            url = url, title = title, poster = photo,
             details = item.optString("details"),
-            posterAlternatives = MirrorCatalog.readPosters(item).filter { it != item.optString("poster") }
+            posterAlternatives = MirrorCatalog.readPosters(item).filter { it != photo }
         )
     }.getOrNull()
 
