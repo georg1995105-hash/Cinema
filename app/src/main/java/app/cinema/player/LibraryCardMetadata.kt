@@ -108,24 +108,30 @@ internal fun RecoverLibraryCards(
                 val expected = currentUrl ?: return
                 if (runCatching { URI(url).host != URI(expected).host }.getOrDefault(true))
                     return
-                handler.postDelayed({
-                    if (currentUrl != expected) return@postDelayed
+                val isLift = LiftMatchPolicy.safeDetailsUrl(expected)
+                fun inspect(remaining: Int) {
+                    if (currentUrl != expected || view.url != expected) return
                     view.evaluateJavascript(
-                        if (LiftMatchPolicy.safeDetailsUrl(expected)) LiftPosterMetadata.script
-                        else LibraryCardMetadata.script
+                        if (isLift) LiftPosterMetadata.script else LibraryCardMetadata.script
                     ) { json ->
-                        if (currentUrl != expected) return@evaluateJavascript
+                        if (currentUrl != expected || view.url != expected) return@evaluateJavascript
                         val parsed = LibraryCardMetadata.parse(json, expected)
-                        val film = if (LiftMatchPolicy.safeDetailsUrl(expected)) {
-                            LiftHistoryPolicy.cardFromVisit(expected, parsed)
-                        } else parsed
-                        if (film != null) {
+                        val film = if (isLift) LiftHistoryPolicy.cardFromVisit(expected, parsed) else parsed
+                        if (film != null && (!isLift || film.poster.isNotBlank())) {
                             local.rememberMovie(film)
                             latestOnRecovered()
+                            position++
+                        } else if (remaining > 0) {
+                            // The saved Lift entry already has its title, but its
+                            // real image may be inserted by delayed JavaScript.
+                            handler.postDelayed({ inspect(remaining - 1) }, 1_500)
+                        } else {
+                            position++
                         }
-                        position++
                     }
-                }, 750)
+                }
+                handler.postDelayed({ inspect(if (isLift) 2 else 0) },
+                    if (isLift) 1_000L else 750L)
             }
         }
         onDispose {
