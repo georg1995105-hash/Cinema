@@ -46,12 +46,13 @@ internal object LiftPosterMetadata {
             }
           }
           const selectors = [
-            'meta[property="og:image"]', 'meta[name="twitter:image"]',
+            'meta[property="og:image"]', 'meta[name="og:image"]',
+            'meta[property="twitter:image"]', 'meta[name="twitter:image"]',
             'meta[itemprop="image"]', 'link[itemprop="image"]',
             'img[itemprop="image"]', 'img.poster', 'img.cover',
             '.movie-poster img', '.film-poster img', '.detail-poster img',
             '.poster img', '.cover img', '.details img', '.movie-details img',
-            'img[data-poster]', 'img[data-original]', 'img[data-lazy-src]'
+            'img[data-poster]', 'img[data-src]', 'img[data-original]', 'img[data-lazy-src]'
           ];
           for (const selector of selectors) {
             for (const node of document.querySelectorAll(selector)) image(node);
