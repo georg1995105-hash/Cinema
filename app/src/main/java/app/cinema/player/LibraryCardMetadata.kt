@@ -45,10 +45,23 @@ internal object LibraryCardMetadata {
         val data = JSONTokener(raw).nextValue() as? String ?: return@runCatching null
         val values = JSONObject(data)
         val title = values.optString("title").replace(Regex("\\s+"), " ").trim().take(130)
-        if (!SourceRules.isValidHttpsUrl(filmUrl) || title.isBlank()) return@runCatching null
-        val image = values.optString("poster")
-            .takeIf(SourceRules::isValidHttpsUrl).orEmpty()
-        CatalogMovie(url = filmUrl, title = title, poster = image, details = "")
+        if (!SourceRules.isValidHttpsUrl(filmUrl)) return@runCatching null
+        val found = buildList {
+            add(values.optString("poster"))
+            val list = values.optJSONArray("posters")
+            if (list != null) for (i in 0 until minOf(list.length(), 8)) {
+                add(list.optString(i))
+            }
+        }.filter(MirrorPoster::isPhoto).distinct()
+        // Lift details may lack an HTML title even when its URL contains the
+        // exact film name. Retain the image and resolve that name separately.
+        if (title.isBlank() && (found.isEmpty() || !LiftMatchPolicy.safeDetailsUrl(filmUrl))) {
+            return@runCatching null
+        }
+        CatalogMovie(
+            url = filmUrl, title = title, poster = found.firstOrNull().orEmpty(),
+            details = "", posterAlternatives = found.drop(1)
+        )
     }.getOrNull()
 }
 
@@ -97,9 +110,15 @@ internal fun RecoverLibraryCards(
                     return
                 handler.postDelayed({
                     if (currentUrl != expected) return@postDelayed
-                    view.evaluateJavascript(LibraryCardMetadata.script) { json ->
+                    view.evaluateJavascript(
+                        if (LiftMatchPolicy.safeDetailsUrl(expected)) LiftPosterMetadata.script
+                        else LibraryCardMetadata.script
+                    ) { json ->
                         if (currentUrl != expected) return@evaluateJavascript
-                        val film = LibraryCardMetadata.parse(json, expected)
+                        val parsed = LibraryCardMetadata.parse(json, expected)
+                        val film = if (LiftMatchPolicy.safeDetailsUrl(expected)) {
+                            LiftHistoryPolicy.cardFromVisit(expected, parsed)
+                        } else parsed
                         if (film != null) {
                             local.rememberMovie(film)
                             latestOnRecovered()
