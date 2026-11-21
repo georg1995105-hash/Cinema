@@ -2,7 +2,7 @@ name: Android checks and signed APK
 
 on:
   push:
-    branches: [main, fix/cinema-session-and-source-details-20261118, feature/lift-inapp-source-20261118, fix/lift-posters-and-history-delete-20261121]
+    branches: [main, fix/cinema-session-and-source-details-20261118, feature/lift-inapp-source-20261118]
   pull_request:
   workflow_dispatch:
 
