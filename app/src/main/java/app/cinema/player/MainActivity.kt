@@ -757,7 +757,11 @@ private fun LibraryScreen(
     var metadataRevision by remember { mutableIntStateOf(0) }
     val list = if (selected == "История") history.map { it.url } else favourites
     val missing = (history.map { it.url } + favourites).distinct()
-        .filter { local.savedMovie(it) == null }.take(16)
+        .filter { url ->
+            val saved = local.savedMovie(url)
+            saved == null || (LiftMatchPolicy.safeDetailsUrl(url) &&
+                saved.poster.isBlank() && saved.posterAlternatives.isEmpty())
+        }.take(16)
     val visible = list
 
     Column(Modifier.fillMaxSize()) {
