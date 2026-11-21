@@ -188,8 +188,9 @@ class LocalStore(context: Context) {
             .firstOrNull { it.optString("url") == movie.url }
         val oldPoster = previous?.optString("poster").orEmpty()
             .takeIf(MirrorPoster::isPhoto).orEmpty()
+        val linkedPoster = LiftHistoryPolicy.cardFromVisit(movie.url)?.poster.orEmpty()
         val photos = (listOf(movie.poster) + movie.posterAlternatives +
-            oldPoster + (previous?.let(MirrorCatalog::readPosters) ?: emptyList()))
+            linkedPoster + oldPoster + (previous?.let(MirrorCatalog::readPosters) ?: emptyList()))
             .filter(MirrorPoster::isPhoto).distinct()
         val candidateTitle = CatalogTitleCleaner.clean(movie.title, movie.details).take(130)
         val oldTitle = previous?.optString("title").orEmpty()
@@ -223,11 +224,14 @@ class LocalStore(context: Context) {
             .firstOrNull { it.optString("url") == url } ?: return@runCatching null
         val title = CatalogTitleCleaner.clean(item.optString("title"), item.optString("details"))
         if (title.isBlank()) return@runCatching null
+        val storedPhoto = item.optString("poster").takeIf(MirrorPoster::isPhoto).orEmpty()
+        val photo = storedPhoto.ifBlank {
+            LiftHistoryPolicy.cardFromVisit(url)?.poster.orEmpty()
+        }
         CatalogMovie(
-            url = url, title = title,
-            poster = item.optString("poster").takeIf(MirrorPoster::isPhoto).orEmpty(),
+            url = url, title = title, poster = photo,
             details = item.optString("details"),
-            posterAlternatives = MirrorCatalog.readPosters(item).filter { it != item.optString("poster") }
+            posterAlternatives = MirrorCatalog.readPosters(item).filter { it != photo }
         )
     }.getOrNull()
 
