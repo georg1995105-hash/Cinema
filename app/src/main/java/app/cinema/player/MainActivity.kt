@@ -119,6 +119,7 @@ private fun CinemaApp() {
     var liftMovieKey by remember { mutableStateOf<String?>(null) }
     var liftResumeUrl by remember { mutableStateOf("") }
     var liftReturn by remember { mutableStateOf(Page.MOVIE) }
+    var liftFirstDetailsUrl by remember { mutableStateOf("") }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var browsingSource by remember { mutableStateOf<String?>(null) }
     var playbackStorageUrl by remember { mutableStateOf<String?>(null) }
@@ -257,6 +258,7 @@ private fun CinemaApp() {
                         if (LiftMatchPolicy.safeDetailsUrl(url)) {
                             liftTitle = ""
                             liftMovieKey = null
+                            liftFirstDetailsUrl = ""
                             liftResumeUrl = url
                             liftReturn = Page.SEARCH
                             page = Page.LIFT
@@ -270,21 +272,38 @@ private fun CinemaApp() {
                     cardsPerRow = local.cardsPerRow(device, screenConfiguration.screenWidthDp),
                     onOpen = { film ->
                         local.rememberMovie(film)
-                        selectedFilm = film
-                        movieBack = Page.LIBRARY
-                        page = Page.MOVIE
+                        if (LiftMatchPolicy.safeDetailsUrl(film.url)) {
+                            liftTitle = film.title
+                            liftMovieKey = null
+                            liftFirstDetailsUrl = ""
+                            liftResumeUrl = film.url
+                            liftReturn = Page.LIBRARY
+                            page = Page.LIFT
+                        } else {
+                            selectedFilm = film
+                            movieBack = Page.LIBRARY
+                            page = Page.MOVIE
+                        }
                     },
                     onResume = { film ->
                         local.rememberMovie(film)
                         selectedFilm = film
                         movieBack = Page.LIBRARY
-                        if (CinemetaCatalog.isMovieUrl(film.url) || ArchivePublicCatalog.isArchiveUrl(film.url)) {
+                        if (LiftMatchPolicy.safeDetailsUrl(film.url)) {
+                            liftTitle = film.title
+                            liftMovieKey = null
+                            liftFirstDetailsUrl = ""
+                            liftResumeUrl = film.url
+                            liftReturn = Page.LIBRARY
+                            page = Page.LIFT
+                        } else if (CinemetaCatalog.isMovieUrl(film.url) || ArchivePublicCatalog.isArchiveUrl(film.url)) {
                             val previousLift = local.liftVisitedUrl(film.url)
                             if (previousLift != null) {
                                 liftTitle = film.title
                                 liftMovieKey = film.url
                                 liftResumeUrl = previousLift
-                                liftReturn = Page.MOVIE
+                                liftFirstDetailsUrl = previousLift
+                                liftReturn = Page.LIBRARY
                                 page = Page.LIFT
                             } else {
                                 page = Page.MOVIE
@@ -333,13 +352,24 @@ private fun CinemaApp() {
                     onClose = { page = liftReturn },
                     title = liftTitle,
                     resumeUrl = liftResumeUrl,
-                    onFilmPageVisited = { detailUrl ->
-                        val movieUrl = liftMovieKey
-                        if (movieUrl != null) {
-                            local.saveLiftVisit(movieUrl, detailUrl)
-                            // Visiting Lift must not erase a saved native playback position.
-                            val previousMs = history.firstOrNull { it.url == movieUrl }?.positionMs ?: 0L
-                            saveProgress(movieUrl, previousMs)
+                    onFilmPageVisited = { visited ->
+                        val key = LiftHistoryPolicy.historyKey(
+                            liftMovieKey, liftFirstDetailsUrl, visited.url
+                        )
+                        if (key != null) {
+                            if (key == liftMovieKey) {
+                                liftFirstDetailsUrl = visited.url
+                                local.saveLiftVisit(key, visited.url)
+                                // A Lift page visit must not erase native playback progress.
+                                val previousMs = history.firstOrNull { it.url == key }?.positionMs ?: 0L
+                                saveProgress(key, previousMs)
+                            } else {
+                                // Direct search results and further Lift navigation
+                                // were previously invisible in Cinema's history.
+                                local.rememberMovie(visited)
+                                val previousMs = history.firstOrNull { it.url == key }?.positionMs ?: 0L
+                                saveProgress(key, previousMs)
+                            }
                         }
                     },
                     expectedYear = LiftMatchPolicy.yearFromDetails(
@@ -421,6 +451,7 @@ private fun CinemaApp() {
                                 liftTitle = movie.title
                                 liftMovieKey = movie.url
                                 liftResumeUrl = if (resume) local.liftVisitedUrl(movie.url).orEmpty() else ""
+                                liftFirstDetailsUrl = liftResumeUrl
                                 liftReturn = Page.MOVIE
                                 page = Page.LIFT
                             }
@@ -442,6 +473,7 @@ private fun CinemaApp() {
                             liftTitle = movie.title
                             liftMovieKey = movie.url
                             liftResumeUrl = ""
+                            liftFirstDetailsUrl = ""
                             liftReturn = Page.MOVIE
                             page = Page.LIFT
                         },
@@ -738,8 +770,8 @@ private fun LibraryScreen(
         Spacer(Modifier.height(10.dp))
         if (visible.isEmpty()) {
             EmptyPanel(
-                if (selected == "История") "Просмотров пока нет" else "Избранное пока пусто",
-                if (selected == "История") "Продолжение просмотра появится здесь."
+                if (selected == "История") "История пока пуста" else "Избранное пока пусто",
+                if (selected == "История") "Открытые фильмы Lift и просмотренные в плеере появятся здесь."
                 else "Добавьте фильм в избранное из его карточки.",
                 if (selected == "История") Icons.Outlined.History else Icons.Outlined.Bookmarks
             )
@@ -775,7 +807,8 @@ private fun LibraryScreen(
                                         val minute = seconds / 60
                                         val second = (seconds % 60).toString().padStart(2,'0')
                                         "$minute:$second"
-                                    } else if (local.liftVisitedUrl(url) != null) "В Lift"
+                                    } else if (LiftMatchPolicy.safeDetailsUrl(url) ||
+                                        local.liftVisitedUrl(url) != null) "Открыто в Lift"
                                     else "Начало",
                                     color = appMuted,
                                     style = MaterialTheme.typography.labelMedium
