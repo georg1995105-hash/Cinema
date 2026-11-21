@@ -72,7 +72,7 @@ internal fun LiftWebScreen(
     title: String = "",
     expectedYear: Int? = null,
     resumeUrl: String = "",
-    onFilmPageVisited: (String) -> Unit = {},
+    onFilmPageVisited: (CatalogMovie) -> Unit = {},
     showAllResults: Boolean = false,
     compact: Boolean = false,
     onResultSelected: ((String) -> Unit)? = null
@@ -235,8 +235,17 @@ internal fun LiftWebScreen(
                     if (showAllResults && url.startsWith(LiftWebSource.SEARCH)) {
                         view.evaluateJavascript(LiftMatchPolicy.hideDuplicateNavigationScript, null)
                     }
-                    if (failure.isEmpty() && LiftMatchPolicy.safeDetailsUrl(url) && url == chosenDetailsUrl) {
-                        onFilmPageVisited(url)
+                    if (failure.isEmpty() && !showAllResults && LiftMatchPolicy.safeDetailsUrl(url)) {
+                        // Record actual first-party film pages, including links opened
+                        // inside Lift. A site visit is not a verified video position.
+                        foundDetails = true
+                        chosenDetailsUrl = url
+                        view.evaluateJavascript(LibraryCardMetadata.script) { raw ->
+                            if (!alive.get() || view.url != url) return@evaluateJavascript
+                            val metadata = LibraryCardMetadata.parse(raw, url)
+                            LiftHistoryPolicy.cardFromVisit(url, metadata)
+                                ?.let(onFilmPageVisited)
+                        }
                     }
                     if (currentTitle.isNotBlank() && !foundDetails &&
                         url.startsWith(LiftWebSource.SEARCH)) {
