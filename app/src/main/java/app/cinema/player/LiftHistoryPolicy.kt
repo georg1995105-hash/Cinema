@@ -21,9 +21,14 @@ internal object LiftHistoryPolicy {
         val pageName = pageMetadata?.takeIf { it.url == url }?.title.orEmpty()
             .replace(Regex("""\s+"""), " ").trim().take(130)
         val title = name.ifBlank { pageName }.ifBlank { "Фильм Lift №$id" }
-        val poster = pageMetadata?.takeIf { it.url == url }?.poster
-            ?.takeIf(MirrorPoster::isPhoto).orEmpty()
-        return CatalogMovie(url = url, title = title, poster = poster, details = "")
+        val metadata = pageMetadata?.takeIf { it.url == url }
+        val photos = (listOf(metadata?.poster.orEmpty()) +
+            metadata?.posterAlternatives.orEmpty())
+            .filter(MirrorPoster::isPhoto).distinct()
+        return CatalogMovie(
+            url = url, title = title, poster = photos.firstOrNull().orEmpty(),
+            details = "", posterAlternatives = photos.drop(1)
+        )
     }
 
     /**
