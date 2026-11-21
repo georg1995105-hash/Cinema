@@ -36,6 +36,18 @@ class LiftHistoryPolicyTest {
             address, CatalogMovie(address, "Фильм с сайта", "", ""))?.title)
     }
 
+    @Test fun usesOnlyVerifiedLiftCdnPosterFromFilmLink() {
+        val url = "https://liftw.ws/details.html?id=383&name=Film&poster=https%3A%2F%2Fimg.liftw.ws%2Freal-token"
+        assertEquals("https://img.liftw.ws/real-token",
+            LiftHistoryPolicy.cardFromVisit(url)?.poster)
+
+        val spoofed = "https://liftw.ws/details.html?id=383&poster=https%3A%2F%2Fimg.liftw.ws.evil.test%2Fsteal"
+        assertEquals("", LiftHistoryPolicy.cardFromVisit(spoofed)?.poster)
+
+        val placeholder = "https://liftw.ws/details.html?id=383&poster=https%3A%2F%2Fimg.liftw.ws%2Fno-poster.svg"
+        assertEquals("", LiftHistoryPolicy.cardFromVisit(placeholder)?.poster)
+    }
+
     @Test fun spoofedLinksCannotEnterHistory() {
         assertNull(LiftHistoryPolicy.cardFromVisit("https://liftw.ws.evil.org/details.html?id=1"))
         assertNull(LiftHistoryPolicy.historyKey(null, null, "http://liftw.ws/details.html?id=1"))
