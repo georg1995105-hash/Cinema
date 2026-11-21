@@ -31,7 +31,7 @@ class NavigationFlowTest {
             compose.onNodeWithText("Фильтры").assertDoesNotExist()
 
             compose.onNode(hasText("Моё") and hasClickAction()).performClick()
-            compose.onNodeWithText("Просмотров пока нет").assertIsDisplayed()
+            compose.onNodeWithText("История пока пуста").assertIsDisplayed()
             compose.onNodeWithText("Избранное").performClick()
             compose.onNodeWithText("Избранное пока пусто").assertIsDisplayed()
 
